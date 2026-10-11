@@ -47,6 +47,23 @@ server:
     trust-store-type: PKCS12
 
 auth:
+  password-flow:
+    command-key-id: ${AUTH_PASSWORD_HMAC_KEY_ID}
+    command-hmac-base64: ${AUTH_PASSWORD_HMAC_BASE64}
+    customer-policy-version: ${AUTH_CUSTOMER_POLICY_VERSION}
+    customer-status-max-age-ms: ${AUTH_CUSTOMER_STATUS_MAX_AGE_MS}
+    credential-deadline-ms: ${AUTH_PASSWORD_CREDENTIAL_DEADLINE_MS}
+    journey-deadline-ms: ${AUTH_PASSWORD_JOURNEY_DEADLINE_MS}
+  native-session:
+    lookup-key-version: ${AUTH_TOKEN_LOOKUP_KEY_VERSION}
+    lookup-hmac-base64: ${AUTH_TOKEN_LOOKUP_HMAC_BASE64}
+    customer-feed-source: ${AUTH_CUSTOMER_FEED_SOURCE}
+    nonce-validity-ms: ${AUTH_DPOP_NONCE_VALIDITY_MS}
+    nonce-overlap-ms: ${AUTH_DPOP_NONCE_OVERLAP_MS}
+    integration-activation-enabled: ${AUTH_INTEGRATION_ACTIVE_ENABLED:false}
+  customer-context-signing:
+    issuer: ${AUTH_CONTEXT_ISSUER}
+    private-jwk: ${AUTH_CONTEXT_PRIVATE_JWK}
   authority:
     scope: ${AUTH_BANK_SCOPE}
   token-delivery:

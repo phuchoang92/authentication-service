@@ -1,6 +1,9 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.error;
 
 import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.InvalidForwardPasswordRequestException;
+import com.vpbank.dcp.infrastructure.adapter.in.web.session.InvalidForwardAdmissionException;
+import com.vpbank.dcp.core.port.out.session.SessionAuthorityUnavailableException;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +23,22 @@ public class ApiErrorHandler {
     @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentNotValidException.class})
     public ResponseEntity<ApiError> malformedRequest(Exception ignored) {
         return safe(HttpStatus.BAD_REQUEST, "REQUEST_REJECTED", "The request was rejected", ignored);
+    }
+
+    @ExceptionHandler(InvalidForwardPasswordRequestException.class)
+    public ResponseEntity<ApiError> invalidPasswordRequest(InvalidForwardPasswordRequestException ignored) {
+        return safe(HttpStatus.BAD_REQUEST, "REQUEST_REJECTED", "The request was rejected", ignored);
+    }
+
+    @ExceptionHandler(InvalidForwardAdmissionException.class)
+    public ResponseEntity<ApiError> invalidAdmission(InvalidForwardAdmissionException ignored) {
+        return safe(HttpStatus.BAD_REQUEST, "REQUEST_REJECTED", "The request was rejected", ignored);
+    }
+
+    @ExceptionHandler(SessionAuthorityUnavailableException.class)
+    public ResponseEntity<ApiError> sessionUnavailable(SessionAuthorityUnavailableException ignored) {
+        return safe(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE",
+                "Please try again later", ignored);
     }
 
     @ExceptionHandler(ReplayAuthorityUnavailableException.class)

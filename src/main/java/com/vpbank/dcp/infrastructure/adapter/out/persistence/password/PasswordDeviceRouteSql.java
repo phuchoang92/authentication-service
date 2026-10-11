@@ -20,7 +20,7 @@ final class PasswordDeviceRouteSql {
              WHERE o.id = UUID_TO_BIN(:operationId)
                AND o.subject_id = UUID_TO_BIN(:subjectId)
                AND o.app_id = :appId
-               AND o.kind = 'PASSWORD_LOGIN' AND o.state = 'CONFIRMED'
+               AND o.kind = 'PASSWORD_LOGIN' AND o.state IN ('CONFIRMED','COMPLETED')
                AND j.subject_id = o.subject_id AND j.app_id = o.app_id
                AND a.status = 'ACTIVE'
             """;

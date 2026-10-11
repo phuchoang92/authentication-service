@@ -122,7 +122,8 @@ public final class PasswordCredentialCheckService {
                     .<PasswordCredentialCheckResult>map(identity -> acceptCustomer(command, identity))
                     .orElseGet(PasswordCredentialCheckResult.NotClaimable::new);
         }
-        if (progress == PasswordOperationProgress.CONFIRMED) {
+        if (progress == PasswordOperationProgress.CONFIRMED
+                || progress == PasswordOperationProgress.COMPLETED) {
             return operations.confirmedOwner(operationId)
                     .<PasswordCredentialCheckResult>map(owner ->
                             new PasswordCredentialCheckResult.Verified(
