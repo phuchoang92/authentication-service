@@ -1,0 +1,80 @@
+spring:
+  application:
+    name: authentication-service
+  mvc:
+    log-request-details: false
+  datasource:
+    url: ${AUTH_DB_URL}
+    username: ${AUTH_DB_USER}
+    password: ${AUTH_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${AUTH_DB_POOL_SIZE}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        cache:
+          use_second_level_cache: false
+          use_query_cache: false
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${AUTH_REDIS_HOST}
+      port: ${AUTH_REDIS_PORT}
+      username: ${AUTH_REDIS_USER}
+      password: ${AUTH_REDIS_PASSWORD}
+      ssl:
+        enabled: true
+
+server:
+  port: ${AUTH_SERVER_PORT:8443}
+  tomcat:
+    accesslog:
+      enabled: false
+  ssl:
+    enabled: true
+    key-store: ${AUTH_SERVER_KEYSTORE}
+    key-store-password: ${AUTH_SERVER_KEYSTORE_PASSWORD}
+    key-store-type: PKCS12
+    client-auth: need
+    trust-store: ${AUTH_SERVER_TRUSTSTORE}
+    trust-store-password: ${AUTH_SERVER_TRUSTSTORE_PASSWORD}
+    trust-store-type: PKCS12
+
+auth:
+  authority:
+    scope: ${AUTH_BANK_SCOPE}
+  token-delivery:
+    issuer: ${AUTH_TOKEN_DELIVERY_ISSUER}
+    receipt-private-jwk: ${AUTH_TOKEN_RECEIPT_PRIVATE_JWK}
+  ingress:
+    external-origin: ${AUTH_EXTERNAL_ORIGIN}
+    allowed-workload-uris: ${AUTH_ALLOWED_WORKLOAD_URIS}
+  workload:
+    tls:
+      key-store: ${AUTH_WORKLOAD_KEYSTORE}
+      key-store-password: ${AUTH_WORKLOAD_KEYSTORE_PASSWORD}
+      trust-store: ${AUTH_WORKLOAD_TRUSTSTORE}
+      trust-store-password: ${AUTH_WORKLOAD_TRUSTSTORE_PASSWORD}
+      connect-timeout-ms: ${AUTH_WORKLOAD_CONNECT_TIMEOUT_MS}
+  keycloak:
+    private-client:
+      token-audience: ${AUTH_KC_TOKEN_AUDIENCE}
+      private-jwk: ${AUTH_KC_CLIENT_PRIVATE_JWK}
+      request-timeout-ms: ${AUTH_KC_REQUEST_TIMEOUT_MS}
+    id-token-trust:
+      issuer: ${AUTH_KC_ID_TOKEN_ISSUER}
+      key-id: ${AUTH_KC_ID_TOKEN_KID}
+      public-jwk: ${AUTH_KC_ID_TOKEN_PUBLIC_JWK}
+    context-trust:
+      issuer: ${AUTH_KC_CONTEXT_ISSUER}
+      key-id: ${AUTH_KC_CONTEXT_KID}
+      public-jwk: ${AUTH_KC_CONTEXT_PUBLIC_JWK}
+  customer:
+    origin: ${AUTH_CUSTOMER_ORIGIN}
+    request-timeout-ms: ${AUTH_CUSTOMER_REQUEST_TIMEOUT_MS}

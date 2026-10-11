@@ -1,0 +1,24 @@
+# Local IDE and operating-system files
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Build and runtime output
+/target/
+/out/
+/logs/
+*.log
+*.pid
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.pem
+*.key
+*.p8
