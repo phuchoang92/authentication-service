@@ -23,7 +23,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.json.JsonMapper;
 
 class HttpDirectGrantPasswordVerifierTest {
 
@@ -31,9 +30,8 @@ class HttpDirectGrantPasswordVerifierTest {
     void invalidGrantIsGenericRejectionAndNoPasswordLeaksViaToString() {
         DirectGrantTokenClient client = mock(DirectGrantTokenClient.class);
         when(client.verify(any())).thenReturn(new DirectGrantTokenClient.Response(
-                400, "{\"error\":\"invalid_grant\",\"error_description\":\"ignored\"}"));
-        var verifier = new HttpDirectGrantPasswordVerifier(client, mock(KeycloakIdTokenVerifier.class),
-                new StrictJoseJson(), JsonMapper.builder().build());
+                400, "invalid_grant", null));
+        var verifier = new HttpDirectGrantPasswordVerifier(client, mock(KeycloakIdTokenVerifier.class));
         PasswordVerification credential = new PasswordVerification("alice", "sensitive-password");
 
         assertInstanceOf(PasswordVerificationOutcome.Rejected.class, verifier.verify(credential));
@@ -57,13 +55,11 @@ class HttpDirectGrantPasswordVerifierTest {
         idToken.sign(new ECDSASigner(signingKey));
         DirectGrantTokenClient client = mock(DirectGrantTokenClient.class);
         when(client.verify(any())).thenReturn(new DirectGrantTokenClient.Response(200,
-                "{\"access_token\":\"must-never-escape\",\"refresh_token\":\"also-secret\","
-                        + "\"id_token\":\"" + idToken.serialize() + "\"}"));
+                null, idToken.serialize()));
         var idVerifier = new KeycloakIdTokenVerifier("https://kc.bank.test/realms/mobile-banking",
                 "kc-id-v1", signingKey.toPublicJWK(), new StrictJoseJson(),
                 Clock.fixed(now, ZoneOffset.UTC));
-        var gateway = new HttpDirectGrantPasswordVerifier(client, idVerifier,
-                new StrictJoseJson(), JsonMapper.builder().build());
+        var gateway = new HttpDirectGrantPasswordVerifier(client, idVerifier);
 
         var result = gateway.verify(new PasswordVerification("alice", "private-password"));
 
@@ -71,7 +67,7 @@ class HttpDirectGrantPasswordVerifierTest {
                 .identity().subject());
         assertThrows(KeycloakVerificationUnavailableException.class, () -> {
             when(client.verify(any())).thenReturn(new DirectGrantTokenClient.Response(200,
-                    "{\"access_token\":\"must-never-escape\"}"));
+                    null, null));
             gateway.verify(new PasswordVerification("alice", "private-password"));
         });
     }

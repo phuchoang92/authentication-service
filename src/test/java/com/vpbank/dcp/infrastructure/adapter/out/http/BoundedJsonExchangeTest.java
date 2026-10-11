@@ -41,9 +41,9 @@ class BoundedJsonExchangeTest {
         assertEquals(200, response.status());
         assertEquals("{\"ok\":true}", response.body());
         assertEquals("JsonResponse[redacted]", response.toString());
-        assertThrows(PartnerHttpFailureException.class,
+        assertThrows(ExternalHttpRequestFailedException.class,
                 () -> exchange.send(request("/internal/v1/not-allowed")));
-        assertThrows(PartnerHttpFailureException.class,
+        assertThrows(ExternalHttpRequestFailedException.class,
                 () -> exchange.send(HttpRequest.newBuilder(URI.create("https://other.internal" + PATH))
                         .GET().build()));
         verify(client, times(1)).sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
@@ -55,12 +55,12 @@ class BoundedJsonExchangeTest {
                 Map.of("Content-Type", List.of("application/json"),
                         "Content-Encoding", List.of("gzip")), new byte[] {1}),
                 Duration.ofSeconds(1), 64);
-        assertThrows(PartnerHttpFailureException.class, () -> encoded.send(request(PATH)));
+        assertThrows(ExternalHttpRequestFailedException.class, () -> encoded.send(request(PATH)));
 
         BoundedJsonExchange malformed = exchange(clientWithResponse(200,
                 Map.of("Content-Type", List.of("application/json")), new byte[] {(byte) 0xc3}),
                 Duration.ofSeconds(1), 64);
-        assertThrows(PartnerHttpFailureException.class, () -> malformed.send(request(PATH)));
+        assertThrows(ExternalHttpRequestFailedException.class, () -> malformed.send(request(PATH)));
     }
 
     @Test
@@ -72,7 +72,7 @@ class BoundedJsonExchangeTest {
                 .thenReturn(pending);
         BoundedJsonExchange exchange = exchange(client, Duration.ofMillis(5), 64);
 
-        assertThrows(PartnerHttpFailureException.class, () -> exchange.send(request(PATH)));
+        assertThrows(ExternalHttpRequestFailedException.class, () -> exchange.send(request(PATH)));
 
         assertTrue(pending.isCancelled());
         verify(client, times(1)).sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));

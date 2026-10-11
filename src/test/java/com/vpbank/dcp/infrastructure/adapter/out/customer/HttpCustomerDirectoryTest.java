@@ -10,6 +10,9 @@ import static org.mockito.Mockito.when;
 import com.vpbank.dcp.core.domain.customer.CustomerStatus;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
+import com.vpbank.dcp.infrastructure.adapter.out.http.InvalidExternalHttpSettingsException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -22,26 +25,16 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 class HttpCustomerDirectoryTest {
 
-    private final JsonMapper json = JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .build();
-
     @Test
     void decodesCompleteSnapshotWithoutInferringEligibility() {
-        var directory = directory();
-
-        var snapshot = directory.decode("""
+        var directory = directoryWithReply("""
                 {"customerId":"CUST-001","status":"BLOCKED","statusVersion":42,
                  "lastAccessBlockVersion":42,"checkedAt":"2026-10-11T03:10:00Z"}
                 """);
+        var snapshot = directory.resolve(identity());
 
         assertEquals(CustomerStatus.BLOCKED, snapshot.status());
         assertEquals(42, snapshot.lastAccessBlockVersion());
@@ -49,17 +42,27 @@ class HttpCustomerDirectoryTest {
 
     @Test
     void missingWatermarkAndUnknownFieldAreUnavailable() {
-        var directory = directory();
-
-        assertThrows(CustomerDirectoryUnavailableException.class, () -> directory.decode("""
+        assertThrows(CustomerDirectoryUnavailableException.class, () -> directoryWithReply("""
                 {"customerId":"CUST-001","status":"ELIGIBLE","statusVersion":43,
                  "checkedAt":"2026-10-11T03:10:00Z"}
-                """));
-        assertThrows(CustomerDirectoryUnavailableException.class, () -> directory.decode("""
+                """).resolve(identity()));
+        assertThrows(CustomerDirectoryUnavailableException.class, () -> directoryWithReply("""
                 {"customerId":"CUST-001","status":"ELIGIBLE","statusVersion":43,
                  "lastAccessBlockVersion":42,"checkedAt":"2026-10-11T03:10:00Z",
                  "allow":true}
-                """));
+                """).resolve(identity()));
+    }
+
+    @Test
+    void invalidCustomerStateAndTimestampAreUnavailable() {
+        assertThrows(CustomerDirectoryUnavailableException.class, () -> directoryWithReply("""
+                {"customerId":"CUST-001","status":"BLOCKED","statusVersion":43,
+                 "lastAccessBlockVersion":42,"checkedAt":"2026-10-11T03:10:00Z"}
+                """).resolve(identity()));
+        assertThrows(CustomerDirectoryUnavailableException.class, () -> directoryWithReply("""
+                {"customerId":"CUST-001","status":"ELIGIBLE","statusVersion":43,
+                 "lastAccessBlockVersion":42,"checkedAt":"not-a-dateZ"}
+                """).resolve(identity()));
     }
 
     @Test
@@ -77,8 +80,7 @@ class HttpCustomerDirectoryTest {
                 """.getBytes(StandardCharsets.UTF_8));
         when(client.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(CompletableFuture.completedFuture(response));
-        var directory = new HttpCustomerDirectory(client, URI.create("https://customer.internal"),
-                Duration.ofSeconds(1), json);
+        var directory = directory(client, URI.create("https://customer.internal"));
 
         assertThrows(CustomerDirectoryUnavailableException.class,
                 () -> directory.currentStatus("CUST-001"));
@@ -86,9 +88,9 @@ class HttpCustomerDirectoryTest {
 
     @Test
     void plainHttpOriginIsNotAccepted() {
-        assertThrows(InvalidCustomerDirectoryConfigurationException.class,
-                () -> new HttpCustomerDirectory(HttpClient.newHttpClient(),
-                        URI.create("http://customer.internal"), Duration.ofSeconds(1), json));
+        assertThrows(InvalidExternalHttpSettingsException.class,
+                () -> directory(HttpClient.newHttpClient(),
+                        URI.create("http://customer.internal")));
     }
 
     @Test
@@ -106,11 +108,9 @@ class HttpCustomerDirectoryTest {
                 """.getBytes(StandardCharsets.UTF_8));
         when(client.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(CompletableFuture.completedFuture(response));
-        var directory = new HttpCustomerDirectory(client, URI.create("https://customer.internal"),
-                Duration.ofSeconds(1), json);
+        var directory = directory(client, URI.create("https://customer.internal"));
 
-        var customer = directory.resolve(new VerifiedProviderIdentity(
-                "https://keycloak.internal/realms/bank", "immutable-sub"));
+        var customer = directory.resolve(identity());
 
         assertEquals("CUST-001", customer.customerId());
         assertEquals(CustomerStatus.ELIGIBLE, customer.status());
@@ -121,8 +121,27 @@ class HttpCustomerDirectoryTest {
                 sent.getValue().uri().getPath());
     }
 
-    private HttpCustomerDirectory directory() {
-        return new HttpCustomerDirectory(HttpClient.newHttpClient(),
-                URI.create("https://customer.internal"), Duration.ofSeconds(1), json);
+    @SuppressWarnings("unchecked")
+    private HttpCustomerDirectory directoryWithReply(String body) {
+        HttpClient client = mock(HttpClient.class);
+        when(client.followRedirects()).thenReturn(HttpClient.Redirect.NEVER);
+        HttpResponse<byte[]> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.headers()).thenReturn(HttpHeaders.of(
+                Map.of("Content-Type", List.of("application/json")), (name, value) -> true));
+        when(response.body()).thenReturn(body.getBytes(StandardCharsets.UTF_8));
+        when(client.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(response));
+        return directory(client, URI.create("https://customer.internal"));
+    }
+
+    private HttpCustomerDirectory directory(HttpClient client, URI origin) {
+        ExternalHttpSettings settings = new ExternalHttpSettings(origin, Duration.ofSeconds(1),
+                4096, CustomerHttpEndpoints.allowedRoutes());
+        return new HttpCustomerDirectory(new ExternalHttpClient(client, settings));
+    }
+
+    private VerifiedProviderIdentity identity() {
+        return new VerifiedProviderIdentity("https://keycloak.internal/realms/bank", "immutable-sub");
     }
 }

@@ -1,33 +1,24 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
-import com.nimbusds.jose.EncryptionMethod;
-import com.nimbusds.jose.JOSEException;
-import com.nimbusds.jose.JOSEObjectType;
-import com.nimbusds.jose.JWEAlgorithm;
-import com.nimbusds.jose.JWEHeader;
-import com.nimbusds.jose.JWEObject;
-import com.nimbusds.jose.JWSAlgorithm;
-import com.nimbusds.jose.JWSHeader;
-import com.nimbusds.jose.Payload;
+import com.nimbusds.jose.*;
 import com.nimbusds.jose.crypto.ECDHEncrypter;
 import com.nimbusds.jose.crypto.ECDSASigner;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import tools.jackson.databind.json.JsonMapper;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.Date;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
-import tools.jackson.databind.json.JsonMapper;
+import java.util.*;
 
-/** Encrypts the opaque banking token to software Kenc and signs exact-envelope delivery metadata. */
+/**
+ * Encrypts the opaque banking token to software Kenc and signs exact-envelope delivery metadata.
+ */
 public final class BankingTokenEnvelopeIssuer {
 
     private static final String PURPOSE = "BANKING_TOKEN";

@@ -58,8 +58,8 @@ public final class KeycloakIdTokenVerifier {
 
     public VerifiedProviderIdentity verify(String compact) {
         Objects.requireNonNull(compact, "compact");
-        strictJson.checkCompactJws(compact);
         try {
+            strictJson.checkCompactJws(compact);
             SignedJWT token = SignedJWT.parse(compact);
             if (!algorithm.equals(token.getHeader().getAlgorithm())
                     || !keyId.equals(token.getHeader().getKeyID())

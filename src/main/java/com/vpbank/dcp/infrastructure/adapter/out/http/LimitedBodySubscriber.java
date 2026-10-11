@@ -39,7 +39,7 @@ final class LimitedBodySubscriber implements HttpResponse.BodySubscriber<byte[]>
             int length = chunk.remaining();
             if (length > limit - bytes.size()) {
                 subscription.cancel();
-                body.completeExceptionally(new PartnerHttpFailureException());
+                body.completeExceptionally(new ExternalHttpRequestFailedException());
                 return;
             }
             byte[] copied = new byte[length];

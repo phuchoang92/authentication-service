@@ -5,4 +5,8 @@ public final class InvalidCustomerDirectoryConfigurationException extends Runtim
     public InvalidCustomerDirectoryConfigurationException() {
         super("Invalid Customer directory configuration");
     }
+
+    public InvalidCustomerDirectoryConfigurationException(Throwable cause) {
+        super("Invalid Customer directory configuration", cause);
+    }
 }

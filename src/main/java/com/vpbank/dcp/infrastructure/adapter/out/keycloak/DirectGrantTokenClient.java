@@ -2,18 +2,18 @@ package com.vpbank.dcp.infrastructure.adapter.out.keycloak;
 
 import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
-import com.vpbank.dcp.infrastructure.adapter.out.http.BoundedJsonExchange;
-import com.vpbank.dcp.infrastructure.adapter.out.http.PartnerHttpFailureException;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalForm;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpRequestFailedException;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
 
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
+import tools.jackson.databind.JsonNode;
 
 /**
  * One bounded Direct Grant exchange. No redirect, decompression or automatic retry.
@@ -25,48 +25,50 @@ public final class DirectGrantTokenClient {
             "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
     private static final int MAX_RESPONSE_BYTES = 65_536;
 
-    private final BoundedJsonExchange exchange;
-    private final URI endpoint;
+    private final ExternalHttpClient http;
+    private final String tokenPath;
     private final PrivateKeyJwtFactory assertions;
-    private final Duration timeout;
     private final Clock clock;
 
     public DirectGrantTokenClient(HttpClient client, URI endpoint, PrivateKeyJwtFactory assertions,
                                   Duration timeout, Clock clock) {
-        this.endpoint = checkedEndpoint(endpoint);
+        URI checked = checkedEndpoint(endpoint);
+        this.tokenPath = checked.getRawPath();
         this.assertions = Objects.requireNonNull(assertions, "assertions");
-        this.timeout = Objects.requireNonNull(timeout, "timeout");
         this.clock = Objects.requireNonNull(clock, "clock");
-        if (timeout.isZero() || timeout.isNegative()) {
-            throw new InvalidKeycloakClientConfigurationException();
-        }
-        this.exchange = new BoundedJsonExchange(client, endpoint.resolve("/"), timeout,
-                MAX_RESPONSE_BYTES, Set.of(BoundedJsonExchange.AllowedEndpoint.exact(
-                        "POST", endpoint.getRawPath())));
+        ExternalHttpSettings settings = new ExternalHttpSettings(endpoint.resolve("/"),
+                timeout, MAX_RESPONSE_BYTES,
+                Set.of(ExternalHttpSettings.Route.exact("POST", tokenPath)));
+        this.http = new ExternalHttpClient(client, settings);
     }
 
     public Response verify(PasswordVerification credential) {
         Objects.requireNonNull(credential, "credential");
-        String form = field("grant_type", "password")
-                + "&" + field("client_id", CLIENT_ID)
-                + "&" + field("client_assertion_type", ASSERTION_TYPE)
-                + "&" + field("client_assertion", assertions.issue(clock.instant()))
-                + "&" + field("scope", "openid")
-                + "&" + field("username", credential.username())
-                + "&" + field("password", credential.password());
-        HttpRequest request = HttpRequest.newBuilder(endpoint)
-                .timeout(timeout)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .header("Accept", "application/json")
-                .header("Accept-Encoding", "identity")
-                .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
-                .build();
+        ExternalForm form = new ExternalForm()
+                .add("grant_type", "password")
+                .add("client_id", CLIENT_ID)
+                .add("client_assertion_type", ASSERTION_TYPE)
+                .add("client_assertion", assertions.issue(clock.instant()))
+                .add("scope", "openid")
+                .add("username", credential.username())
+                .add("password", credential.password());
         try {
-            BoundedJsonExchange.JsonResponse response = exchange.send(request);
-            return new Response(response.status(), response.body());
-        } catch (PartnerHttpFailureException failure) {
+            ExternalHttpClient.Response<JsonNode> response = http.postForm(
+                    tokenPath, form, JsonNode.class);
+            JsonNode body = response.body();
+            if (!body.isObject()) {
+                throw new KeycloakVerificationUnavailableException();
+            }
+            return new Response(response.status(), stringField(body, "error"),
+                    stringField(body, "id_token"));
+        } catch (ExternalHttpRequestFailedException failure) {
             throw new KeycloakVerificationUnavailableException(failure);
         }
+    }
+
+    private static String stringField(JsonNode body, String name) {
+        JsonNode field = body.path(name);
+        return field.isString() ? field.asString() : null;
     }
 
     private static URI checkedEndpoint(URI endpoint) {
@@ -80,12 +82,7 @@ public final class DirectGrantTokenClient {
         return endpoint;
     }
 
-    private static String field(String name, String value) {
-        return URLEncoder.encode(name, StandardCharsets.UTF_8) + "="
-                + URLEncoder.encode(value, StandardCharsets.UTF_8);
-    }
-
-    public record Response(int status, String body) {
+    public record Response(int status, String errorCode, String identityToken) {
         @Override
         public String toString() {
             return "DirectGrantResponse[redacted]";

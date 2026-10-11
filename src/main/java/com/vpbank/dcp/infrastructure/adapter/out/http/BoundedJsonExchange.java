@@ -11,14 +11,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 import java.util.regex.Pattern;
 
 /**
- * Shared transport mechanics only. Each partner adapter owns its endpoint patterns,
+ * Shared transport mechanics only. Each external-service adapter owns its endpoint patterns,
  * request DTOs, response interpretation, and retry/reconciliation policy.
  */
 public final class BoundedJsonExchange {
@@ -43,21 +40,21 @@ public final class BoundedJsonExchange {
                 || !(origin.getRawPath().isEmpty() || "/".equals(origin.getRawPath()))
                 || deadline.isNegative() || deadline.isZero()
                 || maximumResponseBytes < 1 || this.endpoints.isEmpty()) {
-            throw new InvalidPartnerHttpConfigurationException();
+            throw new InvalidExternalHttpSettingsException();
         }
     }
 
     public JsonResponse send(HttpRequest request) {
         Objects.requireNonNull(request, "request");
         if (!allowed(request)) {
-            throw new PartnerHttpFailureException();
+            throw new ExternalHttpRequestFailedException();
         }
         CompletableFuture<HttpResponse<byte[]>> exchange;
         try {
             exchange = client.sendAsync(request,
                     ignored -> new LimitedBodySubscriber(maximumResponseBytes));
-        } catch (RuntimeException failure) {
-            throw new PartnerHttpFailureException(failure);
+        } catch (IllegalArgumentException | SecurityException | RejectedExecutionException failure) {
+            throw new ExternalHttpRequestFailedException(failure);
         }
         try {
             HttpResponse<byte[]> response = exchange.get(deadline.toNanos(), TimeUnit.NANOSECONDS);
@@ -66,7 +63,7 @@ public final class BoundedJsonExchange {
                     .map(value -> !value.toLowerCase(java.util.Locale.ROOT)
                             .matches("application/json(?:\\s*;.*)?"))
                     .orElse(true)) {
-                throw new PartnerHttpFailureException();
+                throw new ExternalHttpRequestFailedException();
             }
             String body = StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
@@ -76,15 +73,15 @@ public final class BoundedJsonExchange {
         } catch (InterruptedException failure) {
             exchange.cancel(true);
             Thread.currentThread().interrupt();
-            throw new PartnerHttpFailureException(failure);
+            throw new ExternalHttpRequestFailedException(failure);
         } catch (TimeoutException failure) {
             exchange.cancel(true);
-            throw new PartnerHttpFailureException(failure);
+            throw new ExternalHttpRequestFailedException(failure);
         } catch (ExecutionException failure) {
             exchange.cancel(true);
-            throw new PartnerHttpFailureException(failure.getCause());
+            throw new ExternalHttpRequestFailedException(failure.getCause());
         } catch (CharacterCodingException failure) {
-            throw new PartnerHttpFailureException(failure);
+            throw new ExternalHttpRequestFailedException(failure);
         }
     }
 
@@ -113,7 +110,7 @@ public final class BoundedJsonExchange {
             Objects.requireNonNull(method, "method");
             Objects.requireNonNull(path, "path");
             if (!method.matches("[A-Z]+")) {
-                throw new InvalidPartnerHttpConfigurationException();
+                throw new InvalidExternalHttpSettingsException();
             }
         }
 
@@ -126,7 +123,9 @@ public final class BoundedJsonExchange {
         }
     }
 
-    /** OAuth bodies can contain tokens; never include the body in diagnostics. */
+    /**
+     * OAuth bodies can contain tokens; never include the body in diagnostics.
+     */
     public static final class JsonResponse {
         private final int status;
         private final String body;
