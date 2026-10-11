@@ -3,11 +3,20 @@ package com.vpbank.dcp.infrastructure.config;
 import com.vpbank.dcp.core.port.out.authority.AuthorityControl;
 import com.vpbank.dcp.core.port.out.authority.GenerationInstaller;
 import com.vpbank.dcp.core.port.out.guard.SubjectBlockStore;
+import com.vpbank.dcp.core.port.out.password.PasswordProofReplay;
 import com.vpbank.dcp.core.port.out.replay.ReplayProtection;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.*;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.AuthorityRedisPreflight;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisAuthorityControl;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisGenerationInstaller;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisPasswordProofReplay;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisReplayProtectionAdapter;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisSubjectBlockStore;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.VerifiedAuthorityScript;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GenerationKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GuardKeys;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.key.PasswordProofReplayKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ReplayKeys;
 import com.vpbank.dcp.infrastructure.config.properties.AuthorityProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -23,6 +32,8 @@ public class AuthorityConfiguration {
 
     private static final String REPLAY_SCRIPT_SHA256 =
             "ad0c9e765269fe2f451b3520e662b3a9d83b3746ecb3157b4cd941f207d7c335";
+    private static final String PASSWORD_REPLAY_SHA256 =
+            "1a8ab1738ea33ee578f64a6c0c1d009fa3d6a00cfe79d9bb7624fb157eada77a";
     private static final String SUBJECT_BLOCK_SHA256 =
             "0874127dccef414f2456cbfb11ff3034d6b4127769d91e807a47dd90f0e7fff1";
     private static final String CLOSE_CONTROL_SHA256 =
@@ -41,6 +52,14 @@ public class AuthorityConfiguration {
                 "redis/replay_reserve.lua", REPLAY_SCRIPT_SHA256);
         return new RedisReplayProtectionAdapter(
                 redis, new ReplayKeys(scope), new GenerationKeys(scope), script);
+    }
+
+    @Bean
+    PasswordProofReplay passwordProofReplay(StringRedisTemplate redis, AuthorityScope scope) {
+        return new RedisPasswordProofReplay(redis, new GenerationKeys(scope),
+                new ReplayKeys(scope), new PasswordProofReplayKeys(scope),
+                VerifiedAuthorityScript.load("redis/password_proof_reserve.lua",
+                        PASSWORD_REPLAY_SHA256));
     }
 
     @Bean

@@ -1,0 +1,49 @@
+{
+  "realm": "g2-direct-grant",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "authentication-service",
+      "name": "G2 isolated integration test client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-jwt",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "jwt.credential.public.key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaxfR8uEsQkf4vOblY6RA8ncDfYEt\n6zOg9KE5RdiYwpZP40Li/hp/m47n60p8D54WK84zV2sxXs7LtkBoN79R9Q==\n-----END PUBLIC KEY-----\n",
+        "jwt.credential.kid": "test-client-key",
+        "token.endpoint.auth.signing.alg": "ES256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@example.test",
+      "firstName": "Alice",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {"type": "password", "value": "correct-password-test-only", "temporary": false}
+      ]
+    },
+    {
+      "username": "disabled-user",
+      "email": "disabled@example.test",
+      "firstName": "Disabled",
+      "lastName": "Test",
+      "enabled": false,
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {"type": "password", "value": "correct-password-test-only", "temporary": false}
+      ]
+    }
+  ]
+}

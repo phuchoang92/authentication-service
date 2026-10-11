@@ -11,6 +11,8 @@ public final class ContractVectors {
     private static final Path PATH = Path.of("../docs/DD/target/reference/crypto-vectors.json");
     private static final Path SOFTWARE_KEYS =
             Path.of("../docs/DD/target/reference/software-key-vectors.json");
+    private static final Path PASSWORD_ONE_SHOT =
+            Path.of("../docs/DD/target/reference/password-one-shot-vectors.json");
 
     private ContractVectors() {
     }
@@ -27,5 +29,12 @@ public final class ContractVectors {
             throw new IllegalStateException("Software-key vectors are unavailable");
         }
         return new JsonMapper().readTree(Files.readString(SOFTWARE_KEYS));
+    }
+
+    public static JsonNode loadPasswordOneShot() throws IOException {
+        if (!Files.isRegularFile(PASSWORD_ONE_SHOT)) {
+            throw new IllegalStateException("Password one-shot vectors are unavailable");
+        }
+        return new JsonMapper().readTree(Files.readString(PASSWORD_ONE_SHOT));
     }
 }

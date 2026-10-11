@@ -8,6 +8,9 @@ import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.port.out.replay.ReplayAttempt;
 import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.core.port.out.replay.ReplayReservation;
+import com.vpbank.dcp.core.port.out.password.PasswordProofIds;
+import com.vpbank.dcp.core.port.out.password.PasswordReplayAttempt;
+import com.vpbank.dcp.core.port.out.password.PasswordReplayResult;
 import com.vpbank.dcp.core.port.out.guard.SubjectBlock;
 import com.vpbank.dcp.core.port.out.guard.SubjectBlockResult;
 import com.vpbank.dcp.core.port.out.authority.ControlClosure;
@@ -18,6 +21,7 @@ import com.vpbank.dcp.infrastructure.adapter.out.crypto.ProofDigests;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GenerationKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GuardKeys;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.key.PasswordProofReplayKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ReplayKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingControlCodec;
@@ -51,6 +55,8 @@ class RedisReplayAuthorityIT {
             "ad0c9e765269fe2f451b3520e662b3a9d83b3746ecb3157b4cd941f207d7c335";
     private static final String SUBJECT_BLOCK_SHA256 =
             "0874127dccef414f2456cbfb11ff3034d6b4127769d91e807a47dd90f0e7fff1";
+    private static final String PASSWORD_REPLAY_SHA256 =
+            "1a8ab1738ea33ee578f64a6c0c1d009fa3d6a00cfe79d9bb7624fb157eada77a";
     private static final String CLOSE_CONTROL_SHA256 =
             "38ac6c49c6f9394efb54ab502c5f131c800c4c361cb9484f7f584c3a0b062af4";
     private static final String INSTALL_CLOSED_SHA256 =
@@ -102,6 +108,43 @@ class RedisReplayAuthorityIT {
         assertThat(secondReplica.reserve(attempt)).isEqualTo(ReplayReservation.REPLAYED);
         assertThat(redis.getExpire(replayKeys.forDpop(attempt.requestKey(), attempt.proofIdDigest())))
                 .isBetween(1L, 120L);
+    }
+
+    @Test
+    void passwordProofsAreReservedAtomicallyAcrossReplicas() {
+        setReady(Instant.now().plusSeconds(60));
+        PasswordReplayAttempt proof = passwordAttempt();
+        RedisPasswordProofReplay first = passwordReplayAdapter(redis);
+        RedisPasswordProofReplay second = passwordReplayAdapter(redis);
+        assertThat(first.reserve(proof)).isEqualTo(new PasswordReplayResult.Reserved(generation));
+        assertThat(second.reserve(proof)).isInstanceOf(PasswordReplayResult.Replayed.class);
+
+        var keys = new PasswordProofReplayKeys(SCOPE);
+        assertThat(redis.hasKey(replayKeys.forDpop(proof.requestKey(), proof.proofIds().dpop())))
+                .isTrue();
+        assertThat(redis.hasKey(keys.forRequestKey(proof.requestKey(),
+                proof.proofIds().requestKey()))).isTrue();
+        assertThat(redis.hasKey(keys.forDeviceKey(proof.deviceKeyThumbprint(),
+                proof.proofIds().deviceKey()))).isTrue();
+    }
+
+    @Test
+    void wrongTypeOrClosedControlWritesNoPasswordReplayMarkers() {
+        PasswordReplayAttempt proof = passwordAttempt();
+        var keys = new PasswordProofReplayKeys(SCOPE);
+        RedisPasswordProofReplay passwordReplay = passwordReplayAdapter(redis);
+        assertThat(passwordReplay.reserve(proof))
+                .isInstanceOf(PasswordReplayResult.AuthorityClosed.class);
+        setReady(Instant.now().plusSeconds(60));
+        String deviceMarker = keys.forDeviceKey(proof.deviceKeyThumbprint(),
+                proof.proofIds().deviceKey());
+        redis.opsForList().leftPush(deviceMarker, "wrong-type");
+        assertThat(passwordReplay.reserve(proof))
+                .isInstanceOf(PasswordReplayResult.AuthorityClosed.class);
+        assertThat(redis.hasKey(replayKeys.forDpop(proof.requestKey(), proof.proofIds().dpop())))
+                .isFalse();
+        assertThat(redis.hasKey(keys.forRequestKey(proof.requestKey(),
+                proof.proofIds().requestKey()))).isFalse();
     }
 
     @Test
@@ -293,6 +336,21 @@ class RedisReplayAuthorityIT {
         return new RedisSubjectBlockStore(redis, new RedisServerIdentity(redis),
                 new GuardKeys(SCOPE), generationKeys,
                 VerifiedAuthorityScript.load("redis/subject_block.lua", SUBJECT_BLOCK_SHA256));
+    }
+
+    private RedisPasswordProofReplay passwordReplayAdapter(StringRedisTemplate template) {
+        return new RedisPasswordProofReplay(template, generationKeys, replayKeys,
+                new PasswordProofReplayKeys(SCOPE), VerifiedAuthorityScript.load(
+                "redis/password_proof_reserve.lua", PASSWORD_REPLAY_SHA256));
+    }
+
+    private PasswordReplayAttempt passwordAttempt() {
+        ReplayAttempt dpop = attempt();
+        Digest32 deviceKey = new ProofDigests().ofProofId("fixture-device-thumbprint");
+        return new PasswordReplayAttempt(dpop.requestKey(), deviceKey,
+                new PasswordProofIds(dpop.proofIdDigest(),
+                        new ProofDigests().ofProofId("fixture-request-proof"),
+                        new ProofDigests().ofProofId("fixture-device-proof")));
     }
 
     private ReplayAttempt attempt() {

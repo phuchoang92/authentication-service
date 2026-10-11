@@ -21,7 +21,13 @@ G2 has started, but it is **not an accepted login service**. Implemented and uni
 - Customer and Keycloak adapters now share a service-local bounded HTTP exchange component for endpoint allowlisting, total exchange deadline/cancellation, response size, encoding and UTF-8 checks. Partner DTOs, status interpretation and failure mapping remain in their respective adapters. This is not yet a separately published library or proof of live Customer/Keycloak interoperability.
 - Opaque 256-bit token issuance, redacted token values, existing exact-token HMAC lookup, and pure 15-minute idle/one-hour absolute deadline rules. A separate issuer encrypts a supplied banking token to software P-256 Kenc with ECDH-ES/A256GCM and signs a receipt covering exact envelope bytes and key bindings.
 
-The public one-shot password API, Kreq/Kdev proof binding, durable journey/operation reservation, Customer event inbox/outbox and live-guard application, Redis session admission/activation/rotation/logout, guarded exact-envelope recovery and full App→BFF→Auth→Keycloak integration tests **are not implemented**. The Direct Grant and envelope adapters are not wired into a successful login use case. No ACTIVE token is issued. No test here proves G2 is complete or meets the two-second Customer revocation requirement. Keep production admission closed and do not deploy this artifact as a replacement service. Password no longer requires a custom Keycloak SPI; biometric still does.
+The G2 contract and reservation gate have advanced:
+
+- V3 Flyway migration pins the server HMAC key ID for password operations and permits a binding-free `ISSUE_PENDING` intent. The one-shot Kreq/Kdev proof and command-HMAC vectors are checked by Java tests.
+- Kreq/Kdev/Kenc binding verification, an atomic Redis replay gate, and an HMAC-protected semantic command reservation are implemented. MySQL tests cover duplicate reservation, concurrent insert, rollback, Kdev lookup and single dispatch claim. A component test uses real MySQL and Redis across two service instances; JOSE verification is tested separately, not stubbed in production code.
+- An isolated stock Keycloak 26.7.1 integration test uses the `authentication-service` confidential client with `private_key_jwt`, Direct Grant and a pinned verifier for its issued ID token. This test calls the token endpoint directly over a test-only HTTP container network; it does not prove production mTLS routing or a complete Auth use case.
+
+The public one-shot password API, durable post-Keycloak outcome/reconciliation, current Customer/guard application, Redis session admission/activation/rotation/logout, guarded exact-envelope recovery and full App→BFF→Auth→Keycloak integration tests **are not implemented**. The new admission service and existing Direct Grant/envelope adapters are not yet wired into a successful login use case. No ACTIVE token is issued. No test here proves G2 is complete or meets the two-second Customer revocation requirement. Keep production admission closed and do not deploy this artifact as a replacement service. Password no longer requires a custom Keycloak SPI; biometric still does.
 
 ## Build and test
 
@@ -29,12 +35,11 @@ On the current Mac, the verified command is:
 
 ```bash
 cd /Users/phuc/BigMoves/mobile-banking/authentication-service
-DOCKER_HOST=unix:///Users/phuc/.docker/run/docker.sock \
-JAVA_HOME=/opt/homebrew/opt/openjdk@25 \
+JAVA_HOME=/Users/phuc/Library/Java/JavaVirtualMachines/openjdk-25.0.2/Contents/Home \
 ./mvnw verify
 ```
 
-Tests use ephemeral, separate Testcontainers MySQL 8.4 and Redis 7.4 images pinned by digest in the test code. They do not use H2 or the running database/Redis. `./mvnw test` runs unit/architecture/vector tests only; `verify` additionally runs real-storage `*IT` tests. Synthetic vectors are read from `../docs/DD/target/reference/crypto-vectors.json` and `software-key-vectors.json`; older password-JWE cases are historical, not current password acceptance tests.
+Tests use ephemeral, separate Testcontainers MySQL 8.4, Redis 7.4 and Keycloak 26.7.1 instances. They do not use H2 or the running database/Redis/Keycloak. `./mvnw test` runs unit/architecture/vector tests only; `verify` additionally runs the isolated integration tests. Synthetic vectors are read from `../docs/DD/target/reference/crypto-vectors.json`, `software-key-vectors.json` and `password-one-shot-vectors.json`; older password-JWE cases are historical, not current password acceptance tests.
 
 ## Required runtime configuration
 

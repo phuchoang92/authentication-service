@@ -7,9 +7,11 @@ import com.vpbank.dcp.infrastructure.adapter.out.crypto.DpopProofVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.EnrollmentProofVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JcsCommandDigest;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JweEnvelopeInspector;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.JosePasswordProofVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.ProofDigests;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.SignedContextVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
+import com.vpbank.dcp.core.port.out.password.PasswordProofVerifier;
 import com.vpbank.dcp.infrastructure.config.properties.KeycloakContextTrustProperties;
 import com.vpbank.dcp.infrastructure.config.properties.BankingTokenDeliveryProperties;
 import java.text.ParseException;
@@ -39,6 +41,12 @@ public class CryptoConfiguration {
     @Bean
     DpopProofVerifier dpopProofVerifier(ProofDigests digests, StrictJoseJson json) {
         return new DpopProofVerifier(digests, json);
+    }
+
+    @Bean
+    PasswordProofVerifier passwordProofVerifier(DpopProofVerifier dpop, StrictJoseJson json,
+                                                ProofDigests digests) {
+        return new JosePasswordProofVerifier(dpop, json, digests);
     }
 
     @Bean

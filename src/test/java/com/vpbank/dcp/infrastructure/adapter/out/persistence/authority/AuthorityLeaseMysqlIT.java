@@ -174,6 +174,99 @@ class AuthorityLeaseMysqlIT {
         insertDeviceBinding(subject, "neo-mobile", UUID.randomUUID().toString(), "NONE");
     }
 
+    @Test
+    void passwordOperationRequiresDigestKeyAndNewDevicePendingIntentNeedsNoBinding() {
+        UUID subject = UUID.randomUUID();
+        UUID journey = UUID.randomUUID();
+        UUID operation = UUID.randomUUID();
+        insertSubject(subject, "customer-" + UUID.randomUUID());
+        jdbc.update("""
+                INSERT INTO auth_subject_app
+                (subject_id, app_id, status, version, created_at, updated_at)
+                VALUES (UNHEX(REPLACE(?, '-', '')), 'neo-mobile', 'ACTIVE', 0,
+                        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """, subject.toString());
+        jdbc.update("""
+                INSERT INTO auth_login_journey
+                (id, subject_id, app_id, method, purpose, installation_hash, request_jkt,
+                 request_public_jwk, state, credential_deadline, journey_deadline,
+                 created_at, updated_at)
+                VALUES (UNHEX(REPLACE(?, '-', '')), UNHEX(REPLACE(?, '-', '')),
+                        'neo-mobile', 'PASSWORD', 'LOGIN', UNHEX(REPEAT('11', 32)),
+                        UNHEX(REPEAT('22', 32)), '{}', 'PENDING_MFA',
+                        UTC_TIMESTAMP(6) + INTERVAL 2 MINUTE,
+                        UTC_TIMESTAMP(6) + INTERVAL 5 MINUTE,
+                        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """, journey.toString(), subject.toString());
+
+        assertThatThrownBy(() -> insertPasswordOperation(operation, journey, subject, null))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class)
+                .hasCauseInstanceOf(java.sql.SQLException.class)
+                .satisfies(failure -> assertThat(((java.sql.SQLException) failure.getCause()).getErrorCode())
+                        .isEqualTo(3819));
+        insertPasswordOperation(operation, journey, subject, "h1");
+
+        UUID intent = UUID.randomUUID();
+        insertPendingIntent(intent, journey, operation, subject, "33");
+        assertThat(jdbc.queryForObject("""
+                SELECT issuance_slot FROM auth_authority_intent
+                 WHERE id = UNHEX(REPLACE(?, '-', ''))
+                """, Integer.class, intent.toString())).isEqualTo(1);
+
+        UUID anotherOperation = UUID.randomUUID();
+        insertPasswordOperation(anotherOperation, journey, subject, "h1");
+        assertThatThrownBy(() -> insertPendingIntent(UUID.randomUUID(), journey,
+                anotherOperation, subject, "33"))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("""
+                UPDATE auth_authority_intent SET kind = 'ACTIVATE'
+                 WHERE id = UNHEX(REPLACE(?, '-', ''))
+                """, intent.toString()))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class)
+                .hasCauseInstanceOf(java.sql.SQLException.class)
+                .satisfies(failure -> assertThat(((java.sql.SQLException) failure.getCause()).getErrorCode())
+                        .isEqualTo(3819));
+    }
+
+    private void insertPasswordOperation(UUID operation, UUID journey, UUID subject,
+                                         String digestKeyId) {
+        jdbc.update("""
+                INSERT INTO auth_operation
+                (id, journey_id, subject_id, app_id, owner_scope, kind, idempotency_digest,
+                 command_digest, command_digest_key_id, request_jkt, state, deadline,
+                 created_at, updated_at)
+                VALUES (UNHEX(REPLACE(?, '-', '')), UNHEX(REPLACE(?, '-', '')),
+                        UNHEX(REPLACE(?, '-', '')), 'neo-mobile', UNHEX(SHA2(?, 256)),
+                        'PASSWORD_LOGIN', UNHEX(SHA2(?, 256)), UNHEX(REPEAT('44', 32)),
+                        ?, UNHEX(REPEAT('22', 32)), 'RESERVED',
+                        UTC_TIMESTAMP(6) + INTERVAL 5 MINUTE,
+                        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """, operation.toString(), journey.toString(), subject.toString(),
+                operation.toString(), operation.toString(), digestKeyId);
+    }
+
+    private void insertPendingIntent(UUID intent, UUID journey, UUID operation,
+                                     UUID subject, String lookupDigestByte) {
+        jdbc.update("""
+                INSERT INTO auth_authority_intent
+                (id, subject_id, app_id, journey_id, operation_id, binding_id, request_jkt,
+                 kind, state, generation, session_id, token_lookup_digest,
+                 lookup_key_version, expected_session_version, customer_security_version,
+                 credential_security_version, device_security_version, candidate_digest,
+                 deadline, created_at, updated_at)
+                VALUES (UNHEX(REPLACE(?, '-', '')), UNHEX(REPLACE(?, '-', '')),
+                        'neo-mobile', UNHEX(REPLACE(?, '-', '')),
+                        UNHEX(REPLACE(?, '-', '')), NULL, UNHEX(REPEAT('22', 32)),
+                        'ISSUE_PENDING', 'PREPARED', UNHEX(REPLACE(?, '-', '')),
+                        UNHEX(REPLACE(?, '-', '')), UNHEX(REPEAT(?, 32)), 'h1',
+                        0, 0, 0, 0, UNHEX(REPEAT('55', 32)),
+                        UTC_TIMESTAMP(6) + INTERVAL 2 MINUTE,
+                        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """, intent.toString(), subject.toString(), journey.toString(),
+                operation.toString(), UUID.randomUUID().toString(),
+                UUID.randomUUID().toString(), lookupDigestByte);
+    }
+
     private LeaseChangeResult attemptConcurrentChange(CountDownLatch ready,
                                                        CountDownLatch release) throws Exception {
         ready.countDown();
