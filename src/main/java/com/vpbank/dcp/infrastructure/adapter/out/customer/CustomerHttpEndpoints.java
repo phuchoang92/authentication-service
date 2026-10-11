@@ -8,11 +8,14 @@ import java.util.regex.Pattern;
 /** Paths accepted from the assumed Customer Service HTTP contract. */
 public final class CustomerHttpEndpoints {
 
-    static final ExternalEndpoint<CustomerResponse> RESOLVE = ExternalEndpoint.postJson(
-            "/internal/v1/customer-authentication/resolve", CustomerResponse.class, Set.of(200));
-    static final ExternalEndpoint<CustomerResponse> STATUS = ExternalEndpoint.getJson(
+    static final ExternalEndpoint<CustomerResponse, CustomerErrorResponse> RESOLVE =
+            ExternalEndpoint.postJson("/internal/v1/customer-authentication/resolve",
+                    CustomerResponse.class, Set.of(200), CustomerErrorResponse.class,
+                    Set.of(400, 404, 503));
+    static final ExternalEndpoint<CustomerResponse, CustomerErrorResponse> STATUS = ExternalEndpoint.getJson(
             "/internal/v1/customers/{customerId}/authentication-status",
-            CustomerResponse.class, Set.of(200));
+            CustomerResponse.class, Set.of(200), CustomerErrorResponse.class,
+            Set.of(400, 404, 503));
     private static final Pattern CUSTOMER_ID = Pattern.compile("[A-Za-z0-9._:-]{1,128}");
 
     private CustomerHttpEndpoints() {

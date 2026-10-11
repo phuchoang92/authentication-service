@@ -31,13 +31,13 @@ public final class ExternalHttpClient {
                         java.util.stream.Collectors.toUnmodifiableSet()));
     }
 
-    public <T> Response<T> getJson(ExternalEndpoint<T> endpoint) {
+    public <S, E> Response<S, E> getJson(ExternalEndpoint<S, E> endpoint) {
         Objects.requireNonNull(endpoint, "endpoint");
         endpoint.requireKind(ExternalEndpoint.Kind.GET_JSON);
         return read(request(endpoint.path()).GET().build(), endpoint);
     }
 
-    public <T> Response<T> postJson(ExternalEndpoint<T> endpoint, Object body) {
+    public <S, E> Response<S, E> postJson(ExternalEndpoint<S, E> endpoint, Object body) {
         Objects.requireNonNull(endpoint, "endpoint");
         endpoint.requireKind(ExternalEndpoint.Kind.POST_JSON);
         Objects.requireNonNull(body, "body");
@@ -51,7 +51,7 @@ public final class ExternalHttpClient {
         }
     }
 
-    public <T> Response<T> postForm(ExternalEndpoint<T> endpoint, ExternalForm body) {
+    public <S, E> Response<S, E> postForm(ExternalEndpoint<S, E> endpoint, ExternalForm body) {
         Objects.requireNonNull(endpoint, "endpoint");
         endpoint.requireKind(ExternalEndpoint.Kind.POST_FORM);
         Objects.requireNonNull(body, "body");
@@ -68,26 +68,75 @@ public final class ExternalHttpClient {
                 .header("Accept-Encoding", "identity");
     }
 
-    private <T> Response<T> read(HttpRequest request, ExternalEndpoint<T> endpoint) {
+    private <S, E> Response<S, E> read(HttpRequest request, ExternalEndpoint<S, E> endpoint) {
         BoundedJsonExchange.JsonResponse reply = exchange.send(request);
-        if (!endpoint.accepts(reply.status())) {
+        boolean success = endpoint.acceptsSuccess(reply.status());
+        boolean error = endpoint.acceptsError(reply.status());
+        if (!success && !error) {
             throw new ExternalHttpRequestFailedException(reply.status());
         }
         try {
-            T value = json.readValue(reply.body(), endpoint.responseType());
+            if (success) {
+                S value = json.readValue(reply.body(), endpoint.successType());
+                if (value == null) {
+                    throw new ExternalHttpRequestFailedException();
+                }
+                return Response.success(reply.status(), value);
+            }
+            E value = json.readValue(reply.body(), endpoint.errorType());
             if (value == null) {
                 throw new ExternalHttpRequestFailedException();
             }
-            return new Response<>(reply.status(), value);
+            return Response.error(reply.status(), value);
         } catch (JacksonException failure) {
             throw new ExternalHttpRequestFailedException(failure);
         }
     }
 
     /**
-     * A response may contain tokens. Its diagnostic representation is always redacted.
+     * A response may contain tokens or provider error details. Only one body is present.
      */
-    public record Response<T>(int status, T body) {
+    public static final class Response<S, E> {
+        private final int status;
+        private final S successBody;
+        private final E errorBody;
+
+        private Response(int status, S successBody, E errorBody) {
+            this.status = status;
+            this.successBody = successBody;
+            this.errorBody = errorBody;
+        }
+
+        private static <S, E> Response<S, E> success(int status, S body) {
+            return new Response<>(status, body, null);
+        }
+
+        private static <S, E> Response<S, E> error(int status, E body) {
+            return new Response<>(status, null, body);
+        }
+
+        public int status() {
+            return status;
+        }
+
+        public boolean isSuccess() {
+            return successBody != null;
+        }
+
+        public S successBody() {
+            if (!isSuccess()) {
+                throw new IllegalStateException("Response is not a success");
+            }
+            return successBody;
+        }
+
+        public E errorBody() {
+            if (isSuccess()) {
+                throw new IllegalStateException("Response is not an error");
+            }
+            return errorBody;
+        }
+
         @Override
         public String toString() {
             return "ExternalHttpResponse[redacted]";

@@ -25,7 +25,7 @@ import tools.jackson.databind.JsonNode;
 class ExternalHttpClientTest {
 
     private static final URI ORIGIN = URI.create("https://partner.internal");
-    private static final ExternalEndpoint<JsonNode> STATUS = ExternalEndpoint.getJson(
+    private static final ExternalEndpoint<JsonNode, Void> STATUS = ExternalEndpoint.getJson(
             "/status", JsonNode.class, Set.of(200));
 
     @Test
@@ -94,7 +94,7 @@ class ExternalHttpClientTest {
 
     @Test
     void bindsOnlyOneEncodedPathSegmentAndDerivesAllowlistFromTemplate() {
-        ExternalEndpoint<JsonNode> endpoint = ExternalEndpoint.getJson(
+        ExternalEndpoint<JsonNode, Void> endpoint = ExternalEndpoint.getJson(
                 "/customers/{customerId}/status", JsonNode.class, Set.of(200));
         assertTrue(endpoint.route().path().matcher("/customers/CUST%3A001/status").matches());
         assertTrue(!endpoint.route().path().matcher("/customers/CUST/001/status").matches());
@@ -112,6 +112,19 @@ class ExternalHttpClientTest {
         var http = client(200, "{}");
         assertThrows(InvalidExternalHttpSettingsException.class,
                 () -> http.postJson(STATUS, Map.of("value", 1)));
+    }
+
+    @Test
+    void parsesDeclaredErrorIntoItsOwnDtoWithoutTreatingItAsSuccess() {
+        ExternalEndpoint<JsonNode, JsonNode> endpoint = ExternalEndpoint.getJson(
+                "/status", JsonNode.class, Set.of(200), JsonNode.class, Set.of(404));
+        ExternalHttpClient.Response<JsonNode, JsonNode> reply =
+                client(404, "{\"code\":\"NOT_FOUND\"}").getJson(endpoint);
+
+        assertTrue(!reply.isSuccess());
+        assertEquals("NOT_FOUND", reply.errorBody().path("code").asString());
+        assertThrows(IllegalStateException.class, reply::successBody);
+        assertEquals("ExternalHttpResponse[redacted]", reply.toString());
     }
 
     @SuppressWarnings("unchecked")

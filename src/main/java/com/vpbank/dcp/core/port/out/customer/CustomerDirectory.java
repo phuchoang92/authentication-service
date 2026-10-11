@@ -5,7 +5,7 @@ import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 
 public interface CustomerDirectory {
 
-    CustomerAuthenticationState resolve(VerifiedProviderIdentity identity);
+    CustomerResolution resolve(VerifiedProviderIdentity identity);
 
     CustomerAuthenticationState currentStatus(String customerId);
 }

@@ -2,7 +2,8 @@ package com.vpbank.dcp.infrastructure.config;
 
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.infrastructure.adapter.out.customer.CustomerHttpEndpoints;
-import com.vpbank.dcp.infrastructure.adapter.out.customer.HttpCustomerDirectory;
+import com.vpbank.dcp.infrastructure.adapter.out.customer.CustomerHttpClient;
+import com.vpbank.dcp.infrastructure.adapter.out.customer.CustomerDirectoryAdapter;
 import com.vpbank.dcp.infrastructure.adapter.out.customer.InvalidCustomerDirectoryConfigurationException;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
@@ -32,7 +33,7 @@ public class CustomerDirectoryConfiguration {
                 MAX_CUSTOMER_RESPONSE_BYTES, CustomerHttpEndpoints.allowedRoutes());
         try {
             ExternalHttpClient customerHttp = new ExternalHttpClient(workloadHttpClient, settings);
-            return new HttpCustomerDirectory(customerHttp);
+            return new CustomerDirectoryAdapter(new CustomerHttpClient(customerHttp));
         } catch (InvalidExternalHttpSettingsException failure) {
             throw new InvalidCustomerDirectoryConfigurationException(failure);
         }

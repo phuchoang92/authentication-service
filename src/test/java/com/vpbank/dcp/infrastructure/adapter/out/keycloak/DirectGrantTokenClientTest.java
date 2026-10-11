@@ -10,8 +10,9 @@ import static org.mockito.Mockito.when;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
-import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
-import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalEndpoint;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -24,9 +25,11 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.JsonNode;
 
 class DirectGrantTokenClientTest {
 
@@ -45,16 +48,14 @@ class DirectGrantTokenClientTest {
         when(http.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(CompletableFuture.completedFuture(reply));
         var key = new ECKeyGenerator(Curve.P_256).keyID("auth-client-test").generate();
-        var client = new DirectGrantTokenClient(http, endpoint,
-                new PrivateKeyJwtFactory(endpoint, key), Duration.ofSeconds(1),
-                Clock.fixed(Instant.parse("2026-10-11T12:00:00Z"), ZoneOffset.UTC));
+        var client = client(http, endpoint, key);
 
-        DirectGrantTokenClient.Response result = client.verify(
-                new PasswordVerification("alice", "private-password"));
+        ExternalHttpClient.Response<JsonNode, JsonNode> result =
+                client.requestTokens("alice", "private-password");
 
         assertEquals(400, result.status());
-        assertEquals("invalid_grant", result.errorCode());
-        assertEquals("DirectGrantResponse[redacted]", result.toString());
+        assertEquals("invalid_grant", result.errorBody().path("error").asString());
+        assertEquals("ExternalHttpResponse[redacted]", result.toString());
         ArgumentCaptor<HttpRequest> sent = ArgumentCaptor.forClass(HttpRequest.class);
         verify(http).sendAsync(sent.capture(), any(HttpResponse.BodyHandler.class));
         assertEquals("POST", sent.getValue().method());
@@ -63,7 +64,7 @@ class DirectGrantTokenClientTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void discardsAccessAndRefreshTokensAtPartnerBoundary() throws Exception {
+    void keepsOAuthResponseRedactedUntilTheAdapterSelectsTheIdToken() throws Exception {
         URI endpoint = URI.create("https://keycloak.internal/realms/bank/protocol/openid-connect/token");
         HttpClient http = mock(HttpClient.class);
         when(http.followRedirects()).thenReturn(HttpClient.Redirect.NEVER);
@@ -78,15 +79,13 @@ class DirectGrantTokenClientTest {
         when(http.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(CompletableFuture.completedFuture(reply));
         var key = new ECKeyGenerator(Curve.P_256).keyID("auth-client-test").generate();
-        var client = new DirectGrantTokenClient(http, endpoint,
-                new PrivateKeyJwtFactory(endpoint, key), Duration.ofSeconds(1),
-                Clock.fixed(Instant.parse("2026-10-11T12:00:00Z"), ZoneOffset.UTC));
+        var client = client(http, endpoint, key);
 
-        DirectGrantTokenClient.Response result = client.verify(
-                new PasswordVerification("alice", "private-password"));
+        ExternalHttpClient.Response<JsonNode, JsonNode> result =
+                client.requestTokens("alice", "private-password");
 
-        assertEquals("signed-identity", result.identityToken());
-        assertEquals("DirectGrantResponse[redacted]", result.toString());
+        assertEquals("signed-identity", result.successBody().path("id_token").asString());
+        assertEquals("ExternalHttpResponse[redacted]", result.toString());
     }
 
     @Test
@@ -104,13 +103,21 @@ class DirectGrantTokenClientTest {
         when(http.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(CompletableFuture.completedFuture(reply));
         var key = new ECKeyGenerator(Curve.P_256).keyID("auth-client-test").generate();
-        var client = new DirectGrantTokenClient(http, endpoint,
-                new PrivateKeyJwtFactory(endpoint, key), Duration.ofSeconds(1),
-                Clock.fixed(Instant.parse("2026-10-11T12:00:00Z"), ZoneOffset.UTC));
+        var client = client(http, endpoint, key);
 
-        assertThrows(KeycloakVerificationUnavailableException.class,
-                () -> client.verify(new PasswordVerification("alice", "private-password")));
+        assertThrows(com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpRequestFailedException.class,
+                () -> client.requestTokens("alice", "private-password"));
         verify(http, times(1)).sendAsync(any(HttpRequest.class),
                 any(HttpResponse.BodyHandler.class));
+    }
+
+    private DirectGrantTokenClient client(HttpClient http, URI endpoint,
+                                          com.nimbusds.jose.jwk.ECKey key) {
+        ExternalEndpoint<JsonNode, JsonNode> tokenEndpoint = KeycloakTokenEndpoints.directGrant(endpoint);
+        ExternalHttpSettings settings = new ExternalHttpSettings(endpoint.resolve("/"),
+                Duration.ofSeconds(1), 65_536, Set.of(tokenEndpoint.route()));
+        return new DirectGrantTokenClient(new ExternalHttpClient(http, settings), tokenEndpoint,
+                new PrivateKeyJwtFactory(endpoint, key),
+                Clock.fixed(Instant.parse("2026-10-11T12:00:00Z"), ZoneOffset.UTC));
     }
 }

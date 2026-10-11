@@ -18,20 +18,23 @@ import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableExce
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerificationOutcome;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
-class HttpDirectGrantPasswordVerifierTest {
+class KeycloakPasswordVerifierAdapterTest {
 
     @Test
-    void invalidGrantIsGenericRejectionAndNoPasswordLeaksViaToString() {
+    void invalidGrantIsGenericRejectionAndNoPasswordLeaksViaToString() throws Exception {
         DirectGrantTokenClient client = mock(DirectGrantTokenClient.class);
-        when(client.verify(any())).thenReturn(new DirectGrantTokenClient.Response(
-                400, "invalid_grant", null));
-        var verifier = new HttpDirectGrantPasswordVerifier(client, mock(KeycloakIdTokenVerifier.class));
+        ExternalHttpClient.Response<JsonNode, JsonNode> reply = errorReply("invalid_grant");
+        when(client.requestTokens(any(), any())).thenReturn(reply);
+        var verifier = new KeycloakPasswordVerifierAdapter(client, mock(KeycloakIdTokenVerifier.class));
         PasswordVerification credential = new PasswordVerification("alice", "sensitive-password");
 
         assertInstanceOf(PasswordVerificationOutcome.Rejected.class, verifier.verify(credential));
@@ -39,11 +42,11 @@ class HttpDirectGrantPasswordVerifierTest {
     }
 
     @Test
-    void otherClientErrorIsNotMistakenForWrongPassword() {
+    void otherClientErrorIsNotMistakenForWrongPassword() throws Exception {
         DirectGrantTokenClient client = mock(DirectGrantTokenClient.class);
-        when(client.verify(any())).thenReturn(new DirectGrantTokenClient.Response(
-                400, "invalid_client", null));
-        var verifier = new HttpDirectGrantPasswordVerifier(client,
+        ExternalHttpClient.Response<JsonNode, JsonNode> reply = errorReply("invalid_client");
+        when(client.requestTokens(any(), any())).thenReturn(reply);
+        var verifier = new KeycloakPasswordVerifierAdapter(client,
                 mock(KeycloakIdTokenVerifier.class));
 
         assertThrows(KeycloakVerificationUnavailableException.class,
@@ -66,21 +69,40 @@ class HttpDirectGrantPasswordVerifierTest {
                 .keyID("kc-id-v1").build(), claims);
         idToken.sign(new ECDSASigner(signingKey));
         DirectGrantTokenClient client = mock(DirectGrantTokenClient.class);
-        when(client.verify(any())).thenReturn(new DirectGrantTokenClient.Response(200,
-                null, idToken.serialize()));
+        ExternalHttpClient.Response<JsonNode, JsonNode> reply = successReply(idToken.serialize());
+        when(client.requestTokens(any(), any())).thenReturn(reply);
         var idVerifier = new KeycloakIdTokenVerifier("https://kc.bank.test/realms/mobile-banking",
                 "kc-id-v1", signingKey.toPublicJWK(), new StrictJoseJson(),
                 Clock.fixed(now, ZoneOffset.UTC));
-        var gateway = new HttpDirectGrantPasswordVerifier(client, idVerifier);
+        var gateway = new KeycloakPasswordVerifierAdapter(client, idVerifier);
 
         var result = gateway.verify(new PasswordVerification("alice", "private-password"));
 
         assertEquals("immutable-sub", ((PasswordVerificationOutcome.Verified) result)
                 .identity().subject());
+        ExternalHttpClient.Response<JsonNode, JsonNode> missingIdentity = successReply(null);
         assertThrows(KeycloakVerificationUnavailableException.class, () -> {
-            when(client.verify(any())).thenReturn(new DirectGrantTokenClient.Response(200,
-                    null, null));
+            when(client.requestTokens(any(), any())).thenReturn(missingIdentity);
             gateway.verify(new PasswordVerification("alice", "private-password"));
         });
+    }
+
+    @SuppressWarnings("unchecked")
+    private ExternalHttpClient.Response<JsonNode, JsonNode> errorReply(String code) throws Exception {
+        ExternalHttpClient.Response<JsonNode, JsonNode> response = mock(ExternalHttpClient.Response.class);
+        when(response.status()).thenReturn(400);
+        when(response.errorBody()).thenReturn(JsonMapper.builder().build()
+                .readTree("{\"error\":\"" + code + "\"}"));
+        return response;
+    }
+
+    @SuppressWarnings("unchecked")
+    private ExternalHttpClient.Response<JsonNode, JsonNode> successReply(String identityToken) throws Exception {
+        ExternalHttpClient.Response<JsonNode, JsonNode> response = mock(ExternalHttpClient.Response.class);
+        when(response.status()).thenReturn(200);
+        when(response.isSuccess()).thenReturn(true);
+        String body = identityToken == null ? "{}" : "{\"id_token\":\"" + identityToken + "\"}";
+        when(response.successBody()).thenReturn(JsonMapper.builder().build().readTree(body));
+        return response;
     }
 }
