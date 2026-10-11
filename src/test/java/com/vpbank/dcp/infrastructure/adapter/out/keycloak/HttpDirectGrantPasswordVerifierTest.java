@@ -39,6 +39,18 @@ class HttpDirectGrantPasswordVerifierTest {
     }
 
     @Test
+    void otherClientErrorIsNotMistakenForWrongPassword() {
+        DirectGrantTokenClient client = mock(DirectGrantTokenClient.class);
+        when(client.verify(any())).thenReturn(new DirectGrantTokenClient.Response(
+                400, "invalid_client", null));
+        var verifier = new HttpDirectGrantPasswordVerifier(client,
+                mock(KeycloakIdTokenVerifier.class));
+
+        assertThrows(KeycloakVerificationUnavailableException.class,
+                () -> verifier.verify(new PasswordVerification("alice", "private-password")));
+    }
+
+    @Test
     void verifiedIdTokenYieldsOnlyProviderIdentity() throws Exception {
         Instant now = Instant.parse("2026-10-11T12:00:00Z");
         var signingKey = new ECKeyGenerator(Curve.P_256).keyID("kc-id-v1").generate();

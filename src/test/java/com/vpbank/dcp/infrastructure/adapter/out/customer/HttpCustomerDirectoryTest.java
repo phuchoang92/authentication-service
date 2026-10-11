@@ -1,6 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.out.customer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -11,6 +13,7 @@ import com.vpbank.dcp.core.domain.customer.CustomerStatus;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpRequestFailedException;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
 import com.vpbank.dcp.infrastructure.adapter.out.http.InvalidExternalHttpSettingsException;
 import java.net.URI;
@@ -63,6 +66,21 @@ class HttpCustomerDirectoryTest {
                 {"customerId":"CUST-001","status":"ELIGIBLE","statusVersion":43,
                  "lastAccessBlockVersion":42,"checkedAt":"not-a-dateZ"}
                 """).resolve(identity()));
+    }
+
+    @Test
+    void nonSuccessStatusDoesNotParseCustomerErrorBody() {
+        for (int status : List.of(400, 404, 503)) {
+            HttpCustomerDirectory directory = directoryWithReply(status,
+                    "{\"error\":\"customer-error\"}");
+            CustomerDirectoryUnavailableException failure = assertThrows(
+                    CustomerDirectoryUnavailableException.class,
+                    () -> directory.resolve(identity()));
+            ExternalHttpRequestFailedException transport = assertInstanceOf(
+                    ExternalHttpRequestFailedException.class, failure.getCause());
+            assertEquals(status, transport.statusCode());
+            assertNull(transport.getCause());
+        }
     }
 
     @Test
@@ -123,10 +141,15 @@ class HttpCustomerDirectoryTest {
 
     @SuppressWarnings("unchecked")
     private HttpCustomerDirectory directoryWithReply(String body) {
+        return directoryWithReply(200, body);
+    }
+
+    @SuppressWarnings("unchecked")
+    private HttpCustomerDirectory directoryWithReply(int status, String body) {
         HttpClient client = mock(HttpClient.class);
         when(client.followRedirects()).thenReturn(HttpClient.Redirect.NEVER);
         HttpResponse<byte[]> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(200);
+        when(response.statusCode()).thenReturn(status);
         when(response.headers()).thenReturn(HttpHeaders.of(
                 Map.of("Content-Type", List.of("application/json")), (name, value) -> true));
         when(response.body()).thenReturn(body.getBytes(StandardCharsets.UTF_8));

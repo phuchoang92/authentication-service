@@ -8,6 +8,7 @@ import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpRequestFailedException;
+
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Objects;
@@ -28,8 +29,8 @@ public final class HttpCustomerDirectory implements CustomerDirectory {
         Objects.requireNonNull(identity, "identity");
         try {
             ResolveCustomerRequest request = ResolveCustomerRequest.from(identity);
-            return readCustomerResponse(http.postJson(CustomerHttpEndpoints.RESOLVE,
-                    request, CustomerResponse.class));
+            CustomerResponse response = http.postJson(CustomerHttpEndpoints.RESOLVE, request).body();
+            return toCustomerState(response);
         } catch (ExternalHttpRequestFailedException failure) {
             throw new CustomerDirectoryUnavailableException(failure);
         }
@@ -41,9 +42,9 @@ public final class HttpCustomerDirectory implements CustomerDirectory {
             throw new CustomerDirectoryUnavailableException();
         }
         try {
-            String path = CustomerHttpEndpoints.status(customerId);
-            CustomerAuthenticationState state = readCustomerResponse(
-                    http.get(path, CustomerResponse.class));
+            CustomerResponse response = http.getJson(CustomerHttpEndpoints.STATUS
+                    .bindSegment("customerId", customerId)).body();
+            CustomerAuthenticationState state = toCustomerState(response);
             if (!customerId.equals(state.customerId())) {
                 throw new CustomerDirectoryUnavailableException();
             }
@@ -51,14 +52,6 @@ public final class HttpCustomerDirectory implements CustomerDirectory {
         } catch (ExternalHttpRequestFailedException failure) {
             throw new CustomerDirectoryUnavailableException(failure);
         }
-    }
-
-    private CustomerAuthenticationState readCustomerResponse(
-            ExternalHttpClient.Response<CustomerResponse> response) {
-        if (response.status() != 200) {
-            throw new CustomerDirectoryUnavailableException();
-        }
-        return toCustomerState(response.body());
     }
 
     private CustomerAuthenticationState toCustomerState(CustomerResponse reply) {
@@ -82,12 +75,7 @@ public final class HttpCustomerDirectory implements CustomerDirectory {
 
     private record ResolveCustomerRequest(ProviderIdentity identity) {
         private static ResolveCustomerRequest from(VerifiedProviderIdentity identity) {
-            return new ResolveCustomerRequest(
-                    new ProviderIdentity(identity.issuer(), identity.subject()));
+            return new ResolveCustomerRequest(new ProviderIdentity(identity.issuer(), identity.subject()));
         }
-    }
-
-    private record CustomerResponse(String customerId, String status, Long statusVersion,
-                                    Long lastAccessBlockVersion, String checkedAt) {
     }
 }

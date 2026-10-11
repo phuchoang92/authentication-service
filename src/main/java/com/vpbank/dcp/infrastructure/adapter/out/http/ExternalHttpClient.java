@@ -1,16 +1,17 @@
 package com.vpbank.dcp.infrastructure.adapter.out.http;
 
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.util.Objects;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.util.Objects;
+
 /**
- * Sends bounded JSON requests to an allowlisted external service. The caller decides
- * what each HTTP status means; this class handles only HTTP and JSON mechanics.
+ * Sends bounded JSON requests to an allowlisted external service. Endpoint contracts
+ * select which statuses may be parsed; adapters interpret their business meaning.
  */
 public final class ExternalHttpClient {
 
@@ -26,32 +27,38 @@ public final class ExternalHttpClient {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.exchange = new BoundedJsonExchange(client, settings.origin(), settings.deadline(),
                 settings.maximumResponseBytes(), settings.allowedRoutes().stream()
-                        .map(ExternalHttpSettings.Route::allowed).collect(
+                .map(ExternalHttpSettings.Route::allowed).collect(
                         java.util.stream.Collectors.toUnmodifiableSet()));
     }
 
-    public <T> Response<T> get(String path, Class<T> responseType) {
-        return read(request(path).GET().build(), responseType);
+    public <T> Response<T> getJson(ExternalEndpoint<T> endpoint) {
+        Objects.requireNonNull(endpoint, "endpoint");
+        endpoint.requireKind(ExternalEndpoint.Kind.GET_JSON);
+        return read(request(endpoint.path()).GET().build(), endpoint);
     }
 
-    public <T> Response<T> postJson(String path, Object body, Class<T> responseType) {
+    public <T> Response<T> postJson(ExternalEndpoint<T> endpoint, Object body) {
+        Objects.requireNonNull(endpoint, "endpoint");
+        endpoint.requireKind(ExternalEndpoint.Kind.POST_JSON);
         Objects.requireNonNull(body, "body");
         try {
             byte[] encoded = json.writeValueAsBytes(body);
-            HttpRequest request = request(path).header("Content-Type", "application/json")
+            HttpRequest request = request(endpoint.path()).header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofByteArray(encoded)).build();
-            return read(request, responseType);
+            return read(request, endpoint);
         } catch (JacksonException failure) {
             throw new ExternalRequestEncodingException(failure);
         }
     }
 
-    public <T> Response<T> postForm(String path, ExternalForm body, Class<T> responseType) {
+    public <T> Response<T> postForm(ExternalEndpoint<T> endpoint, ExternalForm body) {
+        Objects.requireNonNull(endpoint, "endpoint");
+        endpoint.requireKind(ExternalEndpoint.Kind.POST_FORM);
         Objects.requireNonNull(body, "body");
-        HttpRequest request = request(path)
+        HttpRequest request = request(endpoint.path())
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body.bytes())).build();
-        return read(request, responseType);
+        return read(request, endpoint);
     }
 
     private HttpRequest.Builder request(String path) {
@@ -61,11 +68,13 @@ public final class ExternalHttpClient {
                 .header("Accept-Encoding", "identity");
     }
 
-    private <T> Response<T> read(HttpRequest request, Class<T> responseType) {
-        Objects.requireNonNull(responseType, "responseType");
+    private <T> Response<T> read(HttpRequest request, ExternalEndpoint<T> endpoint) {
         BoundedJsonExchange.JsonResponse reply = exchange.send(request);
+        if (!endpoint.accepts(reply.status())) {
+            throw new ExternalHttpRequestFailedException(reply.status());
+        }
         try {
-            T value = json.readValue(reply.body(), responseType);
+            T value = json.readValue(reply.body(), endpoint.responseType());
             if (value == null) {
                 throw new ExternalHttpRequestFailedException();
             }
@@ -75,7 +84,9 @@ public final class ExternalHttpClient {
         }
     }
 
-    /** A response may contain tokens. Its diagnostic representation is always redacted. */
+    /**
+     * A response may contain tokens. Its diagnostic representation is always redacted.
+     */
     public record Response<T>(int status, T body) {
         @Override
         public String toString() {

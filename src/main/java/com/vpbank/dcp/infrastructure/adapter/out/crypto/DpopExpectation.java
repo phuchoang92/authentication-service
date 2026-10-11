@@ -1,11 +1,14 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
+
 import java.net.URI;
 import java.time.Instant;
 import java.util.Objects;
 
-/** Expected server-side DPoP bindings. The exact token is deliberately redacted. */
+/**
+ * Expected server-side DPoP bindings. The exact token is deliberately redacted.
+ */
 public final class DpopExpectation {
 
     private final String method;

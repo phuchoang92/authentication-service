@@ -1,14 +1,17 @@
 package com.vpbank.dcp.infrastructure.adapter.out.keycloak;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
+import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -84,5 +87,30 @@ class DirectGrantTokenClientTest {
 
         assertEquals("signed-identity", result.identityToken());
         assertEquals("DirectGrantResponse[redacted]", result.toString());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void unlistedServerStatusIsRejectedWithoutParsingOAuthTokens() throws Exception {
+        URI endpoint = URI.create("https://keycloak.internal/realms/bank/protocol/openid-connect/token");
+        HttpClient http = mock(HttpClient.class);
+        when(http.followRedirects()).thenReturn(HttpClient.Redirect.NEVER);
+        HttpResponse<byte[]> reply = mock(HttpResponse.class);
+        when(reply.statusCode()).thenReturn(500);
+        when(reply.headers()).thenReturn(HttpHeaders.of(
+                Map.of("Content-Type", List.of("application/json")), (name, value) -> true));
+        when(reply.body()).thenReturn("{\"error\":\"server-error\"}"
+                .getBytes(StandardCharsets.UTF_8));
+        when(http.sendAsync(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(CompletableFuture.completedFuture(reply));
+        var key = new ECKeyGenerator(Curve.P_256).keyID("auth-client-test").generate();
+        var client = new DirectGrantTokenClient(http, endpoint,
+                new PrivateKeyJwtFactory(endpoint, key), Duration.ofSeconds(1),
+                Clock.fixed(Instant.parse("2026-10-11T12:00:00Z"), ZoneOffset.UTC));
+
+        assertThrows(KeycloakVerificationUnavailableException.class,
+                () -> client.verify(new PasswordVerification("alice", "private-password")));
+        verify(http, times(1)).sendAsync(any(HttpRequest.class),
+                any(HttpResponse.BodyHandler.class));
     }
 }

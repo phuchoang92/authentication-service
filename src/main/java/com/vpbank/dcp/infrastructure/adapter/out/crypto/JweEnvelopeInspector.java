@@ -2,13 +2,16 @@ package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
 import com.nimbusds.jose.EncryptionMethod;
 import com.nimbusds.jose.JWEAlgorithm;
-import com.nimbusds.jose.JWEObject;
 import com.nimbusds.jose.JWEHeader;
+import com.nimbusds.jose.JWEObject;
+
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
 import java.util.Objects;
 
-/** Checks the ciphertext envelope before forwarding it unchanged to its verifier. */
+/**
+ * Checks the ciphertext envelope before forwarding it unchanged to its verifier.
+ */
 public final class JweEnvelopeInspector {
 
     private final ProofDigests digests;

@@ -10,13 +10,16 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
+
 import java.net.URI;
 import java.text.ParseException;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 
-/** Verifies JOSE and server-pinned HTTP bindings; replay reservation remains a separate atomic step. */
+/**
+ * Verifies JOSE and server-pinned HTTP bindings; replay reservation remains a separate atomic step.
+ */
 public final class DpopProofVerifier {
 
     private static final Set<String> ALLOWED_CLAIMS = Set.of(
@@ -53,7 +56,7 @@ public final class DpopProofVerifier {
             if (!ALLOWED_CLAIMS.containsAll(claims.getClaims().keySet())
                     || !expectation.method().equals(claims.getStringClaim("htm"))
                     || !canonicalExternalUri(expectation.externalUri())
-                            .equals(canonicalExternalUri(URI.create(claims.getStringClaim("htu"))))) {
+                    .equals(canonicalExternalUri(URI.create(claims.getStringClaim("htu"))))) {
                 throw new InvalidCryptographicInputException();
             }
             Instant issuedAt = Objects.requireNonNull(claims.getIssueTime(), "iat").toInstant();

@@ -3,6 +3,7 @@ package com.vpbank.dcp.infrastructure.adapter.out.keycloak;
 import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalForm;
+import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalEndpoint;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpRequestFailedException;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
@@ -26,19 +27,20 @@ public final class DirectGrantTokenClient {
     private static final int MAX_RESPONSE_BYTES = 65_536;
 
     private final ExternalHttpClient http;
-    private final String tokenPath;
+    private final ExternalEndpoint<JsonNode> tokenEndpoint;
     private final PrivateKeyJwtFactory assertions;
     private final Clock clock;
 
     public DirectGrantTokenClient(HttpClient client, URI endpoint, PrivateKeyJwtFactory assertions,
                                   Duration timeout, Clock clock) {
         URI checked = checkedEndpoint(endpoint);
-        this.tokenPath = checked.getRawPath();
+        this.tokenEndpoint = ExternalEndpoint.postForm(checked.getRawPath(),
+                JsonNode.class, Set.of(200, 400));
         this.assertions = Objects.requireNonNull(assertions, "assertions");
         this.clock = Objects.requireNonNull(clock, "clock");
         ExternalHttpSettings settings = new ExternalHttpSettings(endpoint.resolve("/"),
                 timeout, MAX_RESPONSE_BYTES,
-                Set.of(ExternalHttpSettings.Route.exact("POST", tokenPath)));
+                Set.of(tokenEndpoint.route()));
         this.http = new ExternalHttpClient(client, settings);
     }
 
@@ -53,8 +55,7 @@ public final class DirectGrantTokenClient {
                 .add("username", credential.username())
                 .add("password", credential.password());
         try {
-            ExternalHttpClient.Response<JsonNode> response = http.postForm(
-                    tokenPath, form, JsonNode.class);
+            ExternalHttpClient.Response<JsonNode> response = http.postForm(tokenEndpoint, form);
             JsonNode body = response.body();
             if (!body.isObject()) {
                 throw new KeycloakVerificationUnavailableException();

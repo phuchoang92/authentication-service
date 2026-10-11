@@ -1,6 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.out.http;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,13 +25,15 @@ import tools.jackson.databind.JsonNode;
 class ExternalHttpClientTest {
 
     private static final URI ORIGIN = URI.create("https://partner.internal");
+    private static final ExternalEndpoint<JsonNode> STATUS = ExternalEndpoint.getJson(
+            "/status", JsonNode.class, Set.of(200));
 
     @Test
     void strictResponseParsingRejectsDuplicateMembers() {
         var http = client(200, "{\"status\":\"ok\",\"status\":\"altered\"}");
 
         assertThrows(ExternalHttpRequestFailedException.class,
-                () -> http.get("/status", JsonNode.class));
+                () -> http.getJson(STATUS));
     }
 
     @Test
@@ -38,14 +41,15 @@ class ExternalHttpClientTest {
         var http = client(200, "{}");
 
         assertThrows(ExternalHttpRequestFailedException.class,
-                () -> http.get("/other", JsonNode.class));
+                () -> http.getJson(ExternalEndpoint.getJson("/other", JsonNode.class,
+                        Set.of(200))));
     }
 
     @Test
     void redactsResponseAndFormDiagnostics() {
         var http = client(200, "{\"access_token\":\"secret\"}");
         var form = new ExternalForm().add("password", "private-password");
-        var reply = http.get("/status", JsonNode.class);
+        var reply = http.getJson(STATUS);
 
         assertEquals("ExternalHttpResponse[redacted]", reply.toString());
         assertEquals("ExternalForm[redacted]", form.toString());
@@ -73,7 +77,41 @@ class ExternalHttpClientTest {
         var http = client(200, "{\"broken\":");
 
         assertThrows(ExternalHttpRequestFailedException.class,
-                () -> http.get("/status", JsonNode.class));
+                () -> http.getJson(STATUS));
+    }
+
+    @Test
+    void rejectsUnlistedStatusBeforeParsingSuccessDto() {
+        var http = client(400, "{\"error\":\"not-a-status-dto\"}");
+
+        ExternalHttpRequestFailedException failure = assertThrows(
+                ExternalHttpRequestFailedException.class, () -> http.getJson(STATUS));
+
+        assertEquals(400, failure.statusCode());
+        assertNull(failure.getCause());
+        assertTrue(!failure.toString().contains("not-a-status-dto"));
+    }
+
+    @Test
+    void bindsOnlyOneEncodedPathSegmentAndDerivesAllowlistFromTemplate() {
+        ExternalEndpoint<JsonNode> endpoint = ExternalEndpoint.getJson(
+                "/customers/{customerId}/status", JsonNode.class, Set.of(200));
+        assertTrue(endpoint.route().path().matcher("/customers/CUST%3A001/status").matches());
+        assertTrue(!endpoint.route().path().matcher("/customers/CUST/001/status").matches());
+        assertThrows(InvalidExternalHttpSettingsException.class,
+                () -> endpoint.bindSegment("wrongName", "CUST:001"));
+        assertThrows(InvalidExternalHttpSettingsException.class,
+                () -> ExternalEndpoint.getJson("/customers/prefix{customerId}/status",
+                        JsonNode.class, Set.of(200)));
+        assertEquals("/customers/CUST%3A001/status",
+                endpoint.bindSegment("customerId", "CUST:001").path());
+    }
+
+    @Test
+    void methodKindCannotBeChangedAtCallSite() {
+        var http = client(200, "{}");
+        assertThrows(InvalidExternalHttpSettingsException.class,
+                () -> http.postJson(STATUS, Map.of("value", 1)));
     }
 
     @SuppressWarnings("unchecked")
@@ -89,7 +127,7 @@ class ExternalHttpClientTest {
                 .thenReturn(CompletableFuture.completedFuture(response));
         ExternalHttpSettings settings = new ExternalHttpSettings(ORIGIN,
                 Duration.ofSeconds(1), 4096,
-                Set.of(ExternalHttpSettings.Route.exact("GET", "/status")));
+                Set.of(STATUS.route()));
         return new ExternalHttpClient(client, settings);
     }
 }
