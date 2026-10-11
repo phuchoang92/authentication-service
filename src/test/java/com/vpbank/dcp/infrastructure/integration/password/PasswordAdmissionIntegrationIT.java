@@ -1,13 +1,21 @@
 package com.vpbank.dcp.infrastructure.integration.password;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import com.vpbank.dcp.core.application.password.PasswordAdmissionCommand;
 import com.vpbank.dcp.core.application.password.PasswordAdmissionResult;
 import com.vpbank.dcp.core.application.password.PasswordAdmissionService;
+import com.vpbank.dcp.core.application.password.PasswordCredentialCheckResult;
+import com.vpbank.dcp.core.application.password.PasswordCredentialCheckService;
+import com.vpbank.dcp.core.application.password.CustomerSnapshotCheckService;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
+import com.vpbank.dcp.core.port.out.keycloak.PasswordVerificationOutcome;
+import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
+import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
+import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyStore;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
@@ -28,11 +36,14 @@ import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingControlCodec
 import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingControlSnapshot;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingState;
 import java.net.URI;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -142,6 +153,57 @@ class PasswordAdmissionIntegrationIT {
                 .isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auth_login_journey", Integer.class))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void rejectedPasswordIsDispatchedOnceAcrossTwoServiceInstances() {
+        UUID operationId = UUID.randomUUID();
+        AtomicInteger providerCalls = new AtomicInteger();
+        PasswordCredentialCheckService first = checkService(credential -> {
+                    providerCalls.incrementAndGet();
+                    return new PasswordVerificationOutcome.Rejected();
+                });
+        PasswordCredentialCheckService second = checkService(credential -> {
+                    providerCalls.incrementAndGet();
+                    return new PasswordVerificationOutcome.Rejected();
+                });
+
+        assertThat(first.check(command(operationId, "wrong-password", "first")))
+                .isInstanceOf(PasswordCredentialCheckResult.Rejected.class);
+        assertThat(second.check(command(operationId, "wrong-password", "second")))
+                .isInstanceOf(PasswordCredentialCheckResult.Processing.class);
+        assertThat(providerCalls.get()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT state FROM auth_operation WHERE id = UUID_TO_BIN(?)",
+                String.class, operationId.toString())).isEqualTo("REJECTED");
+    }
+
+    @Test
+    void unknownProviderReplyLeavesDurableUncertaintyAndNeverResendsPassword() {
+        UUID operationId = UUID.randomUUID();
+        AtomicInteger providerCalls = new AtomicInteger();
+        PasswordCredentialCheckService first = checkService(credential -> {
+                    providerCalls.incrementAndGet();
+                    throw new KeycloakVerificationUnavailableException();
+                });
+        PasswordCredentialCheckService second = checkService(credential -> {
+                    providerCalls.incrementAndGet();
+                    return new PasswordVerificationOutcome.Rejected();
+                });
+
+        assertThat(first.check(command(operationId, "password-a", "first")))
+                .isInstanceOf(PasswordCredentialCheckResult.Processing.class);
+        assertThat(second.check(command(operationId, "password-a", "second")))
+                .isInstanceOf(PasswordCredentialCheckResult.Processing.class);
+        assertThat(providerCalls.get()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT state FROM auth_operation WHERE id = UUID_TO_BIN(?)",
+                String.class, operationId.toString())).isEqualTo("UNCERTAIN");
+    }
+
+    private PasswordCredentialCheckService checkService(DirectGrantPasswordVerifier verifier) {
+        CustomerSnapshotCheckService customer = new CustomerSnapshotCheckService(
+                mock(CustomerDirectory.class), Duration.ofSeconds(30));
+        return new PasswordCredentialCheckService(service(), operations, verifier, customer,
+                Clock.systemUTC());
     }
 
     private PasswordAdmissionService service() {

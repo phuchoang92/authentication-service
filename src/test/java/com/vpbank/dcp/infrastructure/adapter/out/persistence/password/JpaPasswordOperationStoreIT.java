@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.port.out.password.PasswordDispatchResult;
+import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
 import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyStore;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
@@ -96,12 +97,101 @@ class JpaPasswordOperationStoreIT {
                 .as(clock).isTrue();
         assertThat(store.claimDispatch(request.operation().operationId()))
                 .isEqualTo(PasswordDispatchResult.CLAIMED);
+        assertThat(journeyState(created.journeyId())).isEqualTo("CREDENTIAL_PROCESSING");
         assertThat(store.claimDispatch(request.operation().operationId()))
                 .isEqualTo(PasswordDispatchResult.ALREADY_CLAIMED);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auth_operation", Integer.class))
                 .isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auth_login_journey", Integer.class))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void definiteRejectionFailsJourneyAndCannotBeRedispatched() {
+        PasswordReservation request = reservation(UUID.randomUUID(), digest(4));
+        PasswordReservationResult.Created created =
+                (PasswordReservationResult.Created) store.reserve(request);
+        assertThat(store.claimDispatch(request.operation().operationId()))
+                .isEqualTo(PasswordDispatchResult.CLAIMED);
+
+        assertThat(store.recordRejection(request.operation().operationId()))
+                .isEqualTo(PasswordCredentialRecordResult.RECORDED);
+        assertThat(store.recordRejection(request.operation().operationId()))
+                .isEqualTo(PasswordCredentialRecordResult.ALREADY_RECORDED);
+        assertThat(journeyState(created.journeyId())).isEqualTo("FAILED");
+        assertThat(operationState(request.operation().operationId())).isEqualTo("REJECTED");
+        assertThat(store.claimDispatch(request.operation().operationId()))
+                .isEqualTo(PasswordDispatchResult.ALREADY_CLAIMED);
+    }
+
+    @Test
+    void unknownKeycloakOutcomeIsDurableAndNeverRedispatched() {
+        PasswordReservation request = reservation(UUID.randomUUID(), digest(4));
+        PasswordReservationResult.Created created =
+                (PasswordReservationResult.Created) store.reserve(request);
+        assertThat(store.claimDispatch(request.operation().operationId()))
+                .isEqualTo(PasswordDispatchResult.CLAIMED);
+
+        assertThat(store.recordUncertain(request.operation().operationId()))
+                .isEqualTo(PasswordCredentialRecordResult.RECORDED);
+        assertThat(store.recordUncertain(request.operation().operationId()))
+                .isEqualTo(PasswordCredentialRecordResult.ALREADY_RECORDED);
+        assertThat(operationState(request.operation().operationId())).isEqualTo("UNCERTAIN");
+        assertThat(journeyState(created.journeyId())).isEqualTo("CREDENTIAL_PROCESSING");
+        assertThat(store.claimDispatch(request.operation().operationId()))
+                .isEqualTo(PasswordDispatchResult.ALREADY_CLAIMED);
+        assertThat(store.recordRejection(request.operation().operationId()))
+                .isEqualTo(PasswordCredentialRecordResult.NOT_RECORDABLE);
+    }
+
+    @Test
+    void cancelledJourneyCannotClaimPasswordDispatch() {
+        PasswordReservation request = reservation(UUID.randomUUID(), digest(4));
+        PasswordReservationResult.Created created =
+                (PasswordReservationResult.Created) store.reserve(request);
+        jdbc.update("UPDATE auth_login_journey SET state = 'CANCELLED' WHERE id = UUID_TO_BIN(?)",
+                created.journeyId().toString());
+
+        assertThat(store.claimDispatch(request.operation().operationId()))
+                .isEqualTo(PasswordDispatchResult.NOT_CLAIMABLE);
+        assertThat(operationState(request.operation().operationId())).isEqualTo("RESERVED");
+    }
+
+    @Test
+    void twoCallersCanClaimOnlyOnePasswordDispatch() throws Exception {
+        PasswordReservation request = reservation(UUID.randomUUID(), digest(4));
+        store.reserve(request);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> claimTogether(request.operation().operationId(), ready, start));
+            var second = workers.submit(() -> claimTogether(request.operation().operationId(), ready, start));
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            assertThat(java.util.List.of(first.get(10, TimeUnit.SECONDS),
+                    second.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(PasswordDispatchResult.CLAIMED,
+                            PasswordDispatchResult.ALREADY_CLAIMED);
+        }
+    }
+
+    private PasswordDispatchResult claimTogether(UUID operationId, CountDownLatch ready,
+                                                 CountDownLatch start) throws InterruptedException {
+        ready.countDown();
+        if (!start.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("Test start latch timed out");
+        }
+        return store.claimDispatch(operationId);
+    }
+
+    private String operationState(UUID operationId) {
+        return jdbc.queryForObject("SELECT state FROM auth_operation WHERE id = UUID_TO_BIN(?)",
+                String.class, operationId.toString());
+    }
+
+    private String journeyState(UUID journeyId) {
+        return jdbc.queryForObject("SELECT state FROM auth_login_journey WHERE id = UUID_TO_BIN(?)",
+                String.class, journeyId.toString());
     }
 
     @Test
@@ -144,6 +234,27 @@ class JpaPasswordOperationStoreIT {
                 .isEqualTo(1);
         assertThat(store.claimDispatch(valid.operation().operationId()))
                 .isEqualTo(PasswordDispatchResult.CLAIMED);
+    }
+
+    @Test
+    void idempotencyConstraintReturnsOriginalOperationWithoutAnExtraJourney() {
+        PasswordReservation original = reservation(UUID.randomUUID(), digest(4));
+        store.reserve(original);
+        PasswordReservation alternate = reservation(UUID.randomUUID(), digest(4));
+        var sameIdempotency = new PasswordReservationFingerprints(
+                original.fingerprints().ownerScope(), original.fingerprints().idempotency(),
+                alternate.fingerprints().command(), alternate.fingerprints().commandKeyId(),
+                alternate.fingerprints().installation());
+        PasswordReservation duplicate = new PasswordReservation(alternate.operation(),
+                alternate.proofs(), sameIdempotency, alternate.now(),
+                alternate.credentialDeadline(), alternate.journeyDeadline());
+
+        PasswordReservationResult result = store.reserve(duplicate);
+        assertThat(result).isInstanceOf(PasswordReservationResult.Existing.class);
+        assertThat(((PasswordReservationResult.Existing) result).operationId())
+                .isEqualTo(original.operation().operationId());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auth_login_journey",
+                Integer.class)).isEqualTo(1);
     }
 
     @Test

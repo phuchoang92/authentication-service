@@ -18,7 +18,7 @@ public record CustomerAuthenticationState(
     public CustomerAuthenticationState {
         if (customerId == null || !customerId.matches("[A-Za-z0-9._:-]{1,128}")
                 || status == null || checkedAt == null
-                || statusVersion > MAX_SAFE_INTEGER
+                || statusVersion < 0 || statusVersion > MAX_SAFE_INTEGER
                 || lastAccessBlockVersion < 0 || lastAccessBlockVersion > statusVersion
                 || (!status.allowsLogin() && lastAccessBlockVersion != statusVersion)) {
             throw new InvalidCustomerStateException();

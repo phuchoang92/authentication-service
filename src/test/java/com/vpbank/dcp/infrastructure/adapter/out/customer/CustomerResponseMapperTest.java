@@ -35,6 +35,9 @@ class CustomerResponseMapperTest {
         assertThrows(CustomerDirectoryUnavailableException.class,
                 () -> CustomerResponseMapper.fromResolve(new CustomerResponse("CUST-001",
                         "ELIGIBLE", 43L, 42L, "not-a-dateZ")));
+        assertThrows(CustomerDirectoryUnavailableException.class,
+                () -> CustomerResponseMapper.fromResolve(new CustomerResponse("CUST-001",
+                        "ELIGIBLE", -1L, 0L, "2026-10-11T03:10:00Z")));
     }
 
     @Test

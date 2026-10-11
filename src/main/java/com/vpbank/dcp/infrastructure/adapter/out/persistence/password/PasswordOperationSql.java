@@ -35,19 +35,24 @@ final class PasswordOperationSql {
                AND idempotency_digest = :idempotency
             """;
 
+    static final String FIND_JOURNEY_ID = """
+            SELECT BIN_TO_UUID(journey_id) FROM auth_operation
+             WHERE id = UUID_TO_BIN(:operationId) AND kind = 'PASSWORD_LOGIN'
+            """;
+
+    static final String LOCK_JOURNEY = """
+            SELECT state FROM auth_login_journey
+             WHERE id = UUID_TO_BIN(:journeyId) FOR UPDATE
+            """;
+
     static final String CLAIM_JOURNEY_FOR_DISPATCH = """
-            UPDATE auth_login_journey journey
-              JOIN auth_operation operation ON operation.journey_id = journey.id
-               SET journey.state = 'CREDENTIAL_PROCESSING',
-                   journey.version = journey.version + 1,
-                   journey.updated_at = UTC_TIMESTAMP(6)
-             WHERE operation.id = UUID_TO_BIN(:operationId)
-               AND operation.kind = 'PASSWORD_LOGIN'
-               AND operation.state = 'RESERVED'
-               AND operation.deadline > UTC_TIMESTAMP(6)
-               AND journey.state = 'INITIALIZED'
-               AND journey.credential_deadline > UTC_TIMESTAMP(6)
-               AND journey.version < 9007199254740991
+            UPDATE auth_login_journey
+               SET state = 'CREDENTIAL_PROCESSING', version = version + 1,
+                   updated_at = UTC_TIMESTAMP(6)
+             WHERE id = UUID_TO_BIN(:journeyId)
+               AND state = 'INITIALIZED'
+               AND credential_deadline > UTC_TIMESTAMP(6)
+               AND version < 9007199254740991
             """;
 
     static final String CLAIM_DISPATCH = """
@@ -60,20 +65,18 @@ final class PasswordOperationSql {
                AND version < 9007199254740991
             """;
 
-    static final String FIND_DISPATCH_STATE = """
+    static final String LOCK_DISPATCH_STATE = """
             SELECT state FROM auth_operation
-             WHERE id = UUID_TO_BIN(:operationId) AND kind = 'PASSWORD_LOGIN'
+             WHERE id = UUID_TO_BIN(:operationId) AND kind = 'PASSWORD_LOGIN' FOR UPDATE
             """;
 
     static final String REJECT_JOURNEY = """
-            UPDATE auth_login_journey journey
-              JOIN auth_operation operation ON operation.journey_id = journey.id
-               SET journey.state = 'FAILED', journey.version = journey.version + 1,
-                   journey.updated_at = UTC_TIMESTAMP(6)
-             WHERE operation.id = UUID_TO_BIN(:operationId)
-               AND operation.kind = 'PASSWORD_LOGIN' AND operation.state = 'DISPATCHED'
-               AND journey.state = 'CREDENTIAL_PROCESSING'
-               AND journey.version < 9007199254740991
+            UPDATE auth_login_journey
+               SET state = 'FAILED', version = version + 1,
+                   updated_at = UTC_TIMESTAMP(6)
+             WHERE id = UUID_TO_BIN(:journeyId)
+               AND state = 'CREDENTIAL_PROCESSING'
+               AND version < 9007199254740991
             """;
 
     static final String REJECT_OPERATION = """
