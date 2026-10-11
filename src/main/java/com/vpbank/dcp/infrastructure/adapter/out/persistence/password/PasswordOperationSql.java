@@ -5,13 +5,14 @@ final class PasswordOperationSql {
     static final String INSERT_JOURNEY = """
             INSERT INTO auth_login_journey
               (id, app_id, method, purpose, installation_hash, request_jkt,
-               request_public_jwk, candidate_binding_id, state,
+               request_public_jwk, candidate_binding_id, device_proof_jkt, state,
                response_key_version, response_key_algorithm, response_key_format,
                response_key_thumbprint, response_public_jwk, credential_deadline,
                journey_deadline, created_at, updated_at)
             VALUES (UUID_TO_BIN(:journeyId), :appId, 'PASSWORD', 'LOGIN', :installationHash,
                     :requestJkt, :requestPublicJwk,
                     CASE WHEN :bindingId IS NULL THEN NULL ELSE UUID_TO_BIN(:bindingId) END,
+                    :deviceProofJkt,
                     'INITIALIZED', 1, 'ECDH-ES+A256GCM', 'JWK', :responseJkt,
                     :responsePublicJwk, :credentialDeadline, :journeyDeadline, :now, :now)
             """;
@@ -70,6 +71,39 @@ final class PasswordOperationSql {
              WHERE id = UUID_TO_BIN(:operationId) AND kind = 'PASSWORD_LOGIN' FOR UPDATE
             """;
 
+    static final String READ_PROGRESS = """
+            SELECT state FROM auth_operation
+             WHERE id = UUID_TO_BIN(:operationId) AND kind = 'PASSWORD_LOGIN'
+            """;
+
+    static final String RECORD_VERIFIED_IDENTITY = """
+            UPDATE auth_operation o
+              JOIN auth_login_journey j ON j.id = o.journey_id
+               SET o.state = 'VERIFIED', o.verified_issuer = :issuer,
+                   o.verified_subject = :subject, o.verified_at = UTC_TIMESTAMP(6),
+                   o.version = o.version + 1, o.updated_at = UTC_TIMESTAMP(6)
+             WHERE o.id = UUID_TO_BIN(:operationId)
+               AND o.kind = 'PASSWORD_LOGIN' AND o.state = 'DISPATCHED'
+               AND j.state = 'CREDENTIAL_PROCESSING'
+               AND o.deadline > UTC_TIMESTAMP(6)
+               AND o.version < 9007199254740991
+            """;
+
+    static final String READ_VERIFIED_IDENTITY = """
+            SELECT verified_issuer, verified_subject FROM auth_operation
+             WHERE id = UUID_TO_BIN(:operationId) AND kind = 'PASSWORD_LOGIN'
+               AND state IN ('VERIFIED','CONFIRMED','COMPLETED')
+            """;
+
+    static final String READ_CONFIRMED_OWNER = """
+            SELECT o.verified_issuer, o.verified_subject, BIN_TO_UUID(o.subject_id),
+                   s.customer_id, s.status, s.customer_status_version,
+                   s.customer_last_block_version, s.customer_status_checked_at
+              FROM auth_operation o JOIN auth_subject s ON s.id = o.subject_id
+             WHERE o.id = UUID_TO_BIN(:operationId) AND o.kind = 'PASSWORD_LOGIN'
+               AND o.state IN ('CONFIRMED','COMPLETED')
+            """;
+
     static final String REJECT_JOURNEY = """
             UPDATE auth_login_journey
                SET state = 'FAILED', version = version + 1,
@@ -84,7 +118,7 @@ final class PasswordOperationSql {
                SET state = 'REJECTED', version = version + 1,
                    updated_at = UTC_TIMESTAMP(6)
              WHERE id = UUID_TO_BIN(:operationId)
-               AND kind = 'PASSWORD_LOGIN' AND state = 'DISPATCHED'
+               AND kind = 'PASSWORD_LOGIN' AND state IN ('DISPATCHED','VERIFIED')
                AND version < 9007199254740991
             """;
 
@@ -94,6 +128,24 @@ final class PasswordOperationSql {
                    updated_at = UTC_TIMESTAMP(6)
              WHERE id = UUID_TO_BIN(:operationId)
                AND kind = 'PASSWORD_LOGIN' AND state = 'DISPATCHED'
+               AND version < 9007199254740991
+            """;
+
+    static final String RECORD_MFA_UNAVAILABLE_JOURNEY = """
+            UPDATE auth_login_journey
+               SET state = 'FAILED', route = :route, version = version + 1,
+                   updated_at = UTC_TIMESTAMP(6)
+             WHERE id = UUID_TO_BIN(:journeyId)
+               AND state = 'CREDENTIAL_PROCESSING'
+               AND version < 9007199254740991
+            """;
+
+    static final String RECORD_MFA_UNAVAILABLE_OPERATION = """
+            UPDATE auth_operation
+               SET state = 'MFA_UNAVAILABLE', version = version + 1,
+                   updated_at = UTC_TIMESTAMP(6)
+             WHERE id = UUID_TO_BIN(:operationId)
+               AND kind = 'PASSWORD_LOGIN' AND state = 'CONFIRMED'
                AND version < 9007199254740991
             """;
 

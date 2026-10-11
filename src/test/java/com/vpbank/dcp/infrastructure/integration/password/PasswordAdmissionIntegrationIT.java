@@ -9,6 +9,7 @@ import com.vpbank.dcp.core.application.password.PasswordAdmissionService;
 import com.vpbank.dcp.core.application.password.PasswordCredentialCheckResult;
 import com.vpbank.dcp.core.application.password.PasswordCredentialCheckService;
 import com.vpbank.dcp.core.application.password.CustomerSnapshotCheckService;
+import com.vpbank.dcp.core.application.password.CustomerAcceptanceService;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
@@ -16,6 +17,7 @@ import com.vpbank.dcp.core.port.out.keycloak.PasswordVerificationOutcome;
 import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
 import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
+import com.vpbank.dcp.core.port.out.customer.CustomerOwnerStore;
 import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyStore;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
@@ -171,7 +173,25 @@ class PasswordAdmissionIntegrationIT {
         assertThat(first.check(command(operationId, "wrong-password", "first")))
                 .isInstanceOf(PasswordCredentialCheckResult.Rejected.class);
         assertThat(second.check(command(operationId, "wrong-password", "second")))
-                .isInstanceOf(PasswordCredentialCheckResult.Processing.class);
+                .isInstanceOf(PasswordCredentialCheckResult.Rejected.class);
+        assertThat(providerCalls.get()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT state FROM auth_operation WHERE id = UUID_TO_BIN(?)",
+                String.class, operationId.toString())).isEqualTo("REJECTED");
+    }
+
+    @Test
+    void reservedOperationCanBeDispatchedByAnotherReplicaAfterCallerStops() {
+        UUID operationId = UUID.randomUUID();
+        assertThat(service().reserve(command(operationId, "wrong-password", "initial")))
+                .isInstanceOf(PasswordAdmissionResult.Reserved.class);
+        AtomicInteger providerCalls = new AtomicInteger();
+        PasswordCredentialCheckService resumed = checkService(credential -> {
+            providerCalls.incrementAndGet();
+            return new PasswordVerificationOutcome.Rejected();
+        });
+
+        assertThat(resumed.check(command(operationId, "wrong-password", "resume")))
+                .isInstanceOf(PasswordCredentialCheckResult.Rejected.class);
         assertThat(providerCalls.get()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT state FROM auth_operation WHERE id = UUID_TO_BIN(?)",
                 String.class, operationId.toString())).isEqualTo("REJECTED");
@@ -200,8 +220,10 @@ class PasswordAdmissionIntegrationIT {
     }
 
     private PasswordCredentialCheckService checkService(DirectGrantPasswordVerifier verifier) {
-        CustomerSnapshotCheckService customer = new CustomerSnapshotCheckService(
+        CustomerSnapshotCheckService snapshots = new CustomerSnapshotCheckService(
                 mock(CustomerDirectory.class), Duration.ofSeconds(30));
+        CustomerAcceptanceService customer = new CustomerAcceptanceService(snapshots,
+                mock(CustomerOwnerStore.class), "test-policy");
         return new PasswordCredentialCheckService(service(), operations, verifier, customer,
                 Clock.systemUTC());
     }

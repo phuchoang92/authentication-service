@@ -15,9 +15,11 @@ import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableExce
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerificationOutcome;
 import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
+import com.vpbank.dcp.core.port.out.password.ConfirmedPasswordOwner;
 import com.vpbank.dcp.core.port.out.password.PasswordDispatchResult;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationProgress;
 import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
 import java.net.URI;
 import java.time.Clock;
@@ -31,7 +33,7 @@ class PasswordCredentialCheckServiceTest {
     private final PasswordAdmissionService admission = mock(PasswordAdmissionService.class);
     private final PasswordOperationStore operations = mock(PasswordOperationStore.class);
     private final DirectGrantPasswordVerifier keycloak = mock(DirectGrantPasswordVerifier.class);
-    private final CustomerSnapshotCheckService customers = mock(CustomerSnapshotCheckService.class);
+    private final CustomerAcceptanceService customers = mock(CustomerAcceptanceService.class);
     private final Instant now = Instant.parse("2026-10-11T10:00:00Z");
     private final PasswordCredentialCheckService service =
             new PasswordCredentialCheckService(admission, operations, keycloak, customers,
@@ -60,19 +62,23 @@ class PasswordCredentialCheckServiceTest {
                 .thenReturn(new PasswordAdmissionResult.Reserved(operationId, UUID.randomUUID()));
         when(operations.claimDispatch(operationId)).thenReturn(PasswordDispatchResult.CLAIMED);
         when(keycloak.verify(credential)).thenReturn(new PasswordVerificationOutcome.Verified(identity));
+        when(operations.recordVerifiedIdentity(operationId, identity))
+                .thenReturn(PasswordCredentialRecordResult.RECORDED);
         CustomerAuthenticationState customer = new CustomerAuthenticationState("CUST-1",
                 CustomerStatus.ELIGIBLE, 1, 0, now);
-        when(customers.check(identity, now))
-                .thenReturn(new CustomerSnapshotCheckResult.Eligible(customer));
+        UUID subjectId = UUID.randomUUID();
+        when(customers.accept(operationId, "neo-mobile", identity, now))
+                .thenReturn(new CustomerAcceptanceResult.Accepted(subjectId, customer));
 
         assertThat(service.check(command))
-                .isEqualTo(new PasswordCredentialCheckResult.Verified(identity, customer));
+                .isEqualTo(new PasswordCredentialCheckResult.Verified(identity, customer, subjectId));
         org.mockito.InOrder ordering = org.mockito.Mockito.inOrder(admission, operations,
                 keycloak, customers);
         ordering.verify(admission).reserve(command);
         ordering.verify(operations).claimDispatch(operationId);
         ordering.verify(keycloak).verify(credential);
-        ordering.verify(customers).check(identity, now);
+        ordering.verify(operations).recordVerifiedIdentity(operationId, identity);
+        ordering.verify(customers).accept(operationId, "neo-mobile", identity, now);
         ordering.verifyNoMoreInteractions();
     }
 
@@ -82,19 +88,90 @@ class PasswordCredentialCheckServiceTest {
                 .thenReturn(new PasswordAdmissionResult.Reserved(operationId, UUID.randomUUID()));
         when(operations.claimDispatch(operationId))
                 .thenReturn(PasswordDispatchResult.ALREADY_CLAIMED);
+        when(operations.progress(operationId)).thenReturn(PasswordOperationProgress.DISPATCHED);
         assertThat(service.check(command))
                 .isInstanceOf(PasswordCredentialCheckResult.Processing.class);
         verify(keycloak, never()).verify(credential);
     }
 
     @Test
-    void sameSemanticCommandReturnsOriginalOperationWithoutAnotherDispatch() {
+    void reservedCommandCanClaimItsOnlyDispatchAfterAnInterruptedCaller() {
         when(admission.reserve(command))
                 .thenReturn(new PasswordAdmissionResult.Existing(operationId, UUID.randomUUID()));
+        when(operations.claimDispatch(operationId)).thenReturn(PasswordDispatchResult.CLAIMED);
+        when(keycloak.verify(credential)).thenReturn(new PasswordVerificationOutcome.Rejected());
+        when(operations.recordRejection(operationId))
+                .thenReturn(PasswordCredentialRecordResult.RECORDED);
+        assertThat(service.check(command))
+                .isInstanceOf(PasswordCredentialCheckResult.Rejected.class);
+        verify(operations).claimDispatch(operationId);
+        verify(keycloak).verify(credential);
+    }
+
+    @Test
+    void retryReturnsCommittedRejectionWithoutAnotherKeycloakCall() {
+        when(admission.reserve(command))
+                .thenReturn(new PasswordAdmissionResult.Existing(operationId, UUID.randomUUID()));
+        when(operations.claimDispatch(operationId))
+                .thenReturn(PasswordDispatchResult.ALREADY_CLAIMED);
+        when(operations.progress(operationId)).thenReturn(PasswordOperationProgress.REJECTED);
+
+        assertThat(service.check(command))
+                .isInstanceOf(PasswordCredentialCheckResult.Rejected.class);
+        verify(keycloak, never()).verify(credential);
+    }
+
+    @Test
+    void retryOfUncertainOperationDoesNotRedispatchCredential() {
+        when(admission.reserve(command))
+                .thenReturn(new PasswordAdmissionResult.Existing(operationId, UUID.randomUUID()));
+        when(operations.claimDispatch(operationId))
+                .thenReturn(PasswordDispatchResult.ALREADY_CLAIMED);
+        when(operations.progress(operationId)).thenReturn(PasswordOperationProgress.UNCERTAIN);
+
         assertThat(service.check(command))
                 .isInstanceOf(PasswordCredentialCheckResult.Processing.class);
-        verify(operations, never()).claimDispatch(operationId);
         verify(keycloak, never()).verify(credential);
+    }
+
+    @Test
+    void retryAfterDurableKeycloakResultResumesCustomerWithoutPasswordRedispatch() {
+        VerifiedProviderIdentity identity = new VerifiedProviderIdentity(
+                "https://auth.bank.test/realms/mobile", "kc-user-1");
+        when(admission.reserve(command))
+                .thenReturn(new PasswordAdmissionResult.Existing(operationId, UUID.randomUUID()));
+        when(operations.claimDispatch(operationId))
+                .thenReturn(PasswordDispatchResult.ALREADY_CLAIMED);
+        when(operations.progress(operationId)).thenReturn(PasswordOperationProgress.VERIFIED);
+        when(operations.verifiedIdentity(operationId)).thenReturn(java.util.Optional.of(identity));
+        when(customers.accept(operationId, "neo-mobile", identity, now))
+                .thenReturn(new CustomerAcceptanceResult.Unavailable());
+
+        assertThat(service.check(command))
+                .isInstanceOf(PasswordCredentialCheckResult.Processing.class);
+        verify(keycloak, never()).verify(credential);
+        verify(customers).accept(operationId, "neo-mobile", identity, now);
+    }
+
+    @Test
+    void retryAfterCustomerCommitRecoversOwnerWithoutPasswordRedispatch() {
+        VerifiedProviderIdentity identity = new VerifiedProviderIdentity(
+                "https://auth.bank.test/realms/mobile", "kc-user-1");
+        CustomerAuthenticationState customer = new CustomerAuthenticationState("CUST-1",
+                CustomerStatus.ELIGIBLE, 1, 0, now);
+        UUID subjectId = UUID.randomUUID();
+        when(admission.reserve(command))
+                .thenReturn(new PasswordAdmissionResult.Existing(operationId, UUID.randomUUID()));
+        when(operations.claimDispatch(operationId))
+                .thenReturn(PasswordDispatchResult.ALREADY_CLAIMED);
+        when(operations.progress(operationId)).thenReturn(PasswordOperationProgress.CONFIRMED);
+        when(operations.confirmedOwner(operationId)).thenReturn(java.util.Optional.of(
+                new ConfirmedPasswordOwner(identity, customer, subjectId)));
+
+        assertThat(service.check(command))
+                .isEqualTo(new PasswordCredentialCheckResult.Verified(identity, customer, subjectId));
+        verify(keycloak, never()).verify(credential);
+        verify(customers, never()).accept(operationId, "neo-mobile", identity, now);
     }
 
     @Test
@@ -163,7 +240,8 @@ class PasswordCredentialCheckServiceTest {
                 .thenReturn(new PasswordAdmissionResult.Reserved(operationId, UUID.randomUUID()));
         when(operations.claimDispatch(operationId)).thenReturn(PasswordDispatchResult.CLAIMED);
         when(keycloak.verify(credential)).thenReturn(new PasswordVerificationOutcome.Verified(identity));
-        when(customers.check(identity, now)).thenReturn(new CustomerSnapshotCheckResult.Rejected());
+        when(customers.accept(operationId, "neo-mobile", identity, now))
+                .thenReturn(new CustomerAcceptanceResult.Rejected());
         when(operations.recordRejection(operationId))
                 .thenReturn(PasswordCredentialRecordResult.RECORDED);
 
@@ -180,12 +258,14 @@ class PasswordCredentialCheckServiceTest {
                 .thenReturn(new PasswordAdmissionResult.Reserved(operationId, UUID.randomUUID()));
         when(operations.claimDispatch(operationId)).thenReturn(PasswordDispatchResult.CLAIMED);
         when(keycloak.verify(credential)).thenReturn(new PasswordVerificationOutcome.Verified(identity));
-        when(customers.check(identity, now)).thenReturn(new CustomerSnapshotCheckResult.Unavailable());
-        when(operations.recordUncertain(operationId))
+        when(customers.accept(operationId, "neo-mobile", identity, now))
+                .thenReturn(new CustomerAcceptanceResult.Unavailable());
+        when(operations.recordVerifiedIdentity(operationId, identity))
                 .thenReturn(PasswordCredentialRecordResult.RECORDED);
 
         assertThat(service.check(command))
                 .isInstanceOf(PasswordCredentialCheckResult.Processing.class);
-        verify(operations).recordUncertain(operationId);
+        verify(operations).recordVerifiedIdentity(operationId, identity);
+        verify(operations, never()).recordUncertain(operationId);
     }
 }

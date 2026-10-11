@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
+import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.port.out.password.PasswordDispatchResult;
 import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
 import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyStore;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationProgress;
 import com.vpbank.dcp.core.port.out.password.PasswordProofIds;
 import com.vpbank.dcp.core.port.out.password.PasswordReservation;
 import com.vpbank.dcp.core.port.out.password.PasswordReservationFingerprints;
@@ -97,6 +99,8 @@ class JpaPasswordOperationStoreIT {
                 .as(clock).isTrue();
         assertThat(store.claimDispatch(request.operation().operationId()))
                 .isEqualTo(PasswordDispatchResult.CLAIMED);
+        assertThat(store.progress(request.operation().operationId()))
+                .isEqualTo(PasswordOperationProgress.DISPATCHED);
         assertThat(journeyState(created.journeyId())).isEqualTo("CREDENTIAL_PROCESSING");
         assertThat(store.claimDispatch(request.operation().operationId()))
                 .isEqualTo(PasswordDispatchResult.ALREADY_CLAIMED);
@@ -120,6 +124,8 @@ class JpaPasswordOperationStoreIT {
                 .isEqualTo(PasswordCredentialRecordResult.ALREADY_RECORDED);
         assertThat(journeyState(created.journeyId())).isEqualTo("FAILED");
         assertThat(operationState(request.operation().operationId())).isEqualTo("REJECTED");
+        assertThat(store.progress(request.operation().operationId()))
+                .isEqualTo(PasswordOperationProgress.REJECTED);
         assertThat(store.claimDispatch(request.operation().operationId()))
                 .isEqualTo(PasswordDispatchResult.ALREADY_CLAIMED);
     }
@@ -137,11 +143,51 @@ class JpaPasswordOperationStoreIT {
         assertThat(store.recordUncertain(request.operation().operationId()))
                 .isEqualTo(PasswordCredentialRecordResult.ALREADY_RECORDED);
         assertThat(operationState(request.operation().operationId())).isEqualTo("UNCERTAIN");
+        assertThat(store.progress(request.operation().operationId()))
+                .isEqualTo(PasswordOperationProgress.UNCERTAIN);
         assertThat(journeyState(created.journeyId())).isEqualTo("CREDENTIAL_PROCESSING");
         assertThat(store.claimDispatch(request.operation().operationId()))
                 .isEqualTo(PasswordDispatchResult.ALREADY_CLAIMED);
         assertThat(store.recordRejection(request.operation().operationId()))
                 .isEqualTo(PasswordCredentialRecordResult.NOT_RECORDABLE);
+    }
+
+    @Test
+    void verifiedIdentityCommitsOnceAndCanBeReadAfterAnotherCallerTakesOver() {
+        PasswordReservation request = reservation(UUID.randomUUID(), digest(4));
+        store.reserve(request);
+        UUID operationId = request.operation().operationId();
+        VerifiedProviderIdentity identity = new VerifiedProviderIdentity(
+                "https://auth.bank.test/realms/mobile", "kc-user-1");
+        assertThat(store.claimDispatch(operationId)).isEqualTo(PasswordDispatchResult.CLAIMED);
+        assertThat(store.recordVerifiedIdentity(operationId, identity))
+                .isEqualTo(PasswordCredentialRecordResult.RECORDED);
+        assertThat(store.progress(operationId)).isEqualTo(PasswordOperationProgress.VERIFIED);
+        assertThat(store.verifiedIdentity(operationId)).contains(identity);
+        assertThat(store.recordVerifiedIdentity(operationId, identity))
+                .isEqualTo(PasswordCredentialRecordResult.ALREADY_RECORDED);
+        assertThat(store.recordVerifiedIdentity(operationId, new VerifiedProviderIdentity(
+                identity.issuer(), "another-user")))
+                .isEqualTo(PasswordCredentialRecordResult.NOT_RECORDABLE);
+        assertThat(store.claimDispatch(operationId))
+                .isEqualTo(PasswordDispatchResult.ALREADY_CLAIMED);
+    }
+
+    @Test
+    void cancelledJourneyCannotRecordLateKeycloakIdentity() {
+        PasswordReservation request = reservation(UUID.randomUUID(), digest(4));
+        PasswordReservationResult.Created created =
+                (PasswordReservationResult.Created) store.reserve(request);
+        UUID operationId = request.operation().operationId();
+        assertThat(store.claimDispatch(operationId)).isEqualTo(PasswordDispatchResult.CLAIMED);
+        jdbc.update("UPDATE auth_login_journey SET state = 'CANCELLED' WHERE id = UUID_TO_BIN(?)",
+                created.journeyId().toString());
+
+        VerifiedProviderIdentity identity = new VerifiedProviderIdentity(
+                "https://auth.bank.test/realms/mobile", "kc-user-1");
+        assertThat(store.recordVerifiedIdentity(operationId, identity))
+                .isEqualTo(PasswordCredentialRecordResult.NOT_RECORDABLE);
+        assertThat(store.verifiedIdentity(operationId)).isEmpty();
     }
 
     @Test
