@@ -39,7 +39,7 @@ class ArchitectureRulesTest {
 
     private static final ArchRule ADAPTERS_DO_NOT_EXECUTE_SQL = noClasses()
             .that().resideInAnyPackage("..persistence.password..", "..persistence.customer..",
-                    "..persistence.session..", "..persistence.authority..")
+                    "..persistence.session..")
             .should().dependOnClassesThat().haveFullyQualifiedName("jakarta.persistence.EntityManager");
 
     private static final ArchRule REPOSITORIES_DO_NOT_USE_COORDINATORS = noClasses()

@@ -57,7 +57,7 @@ public final class WorkloadIdentityFilter extends OncePerRequestFilter {
                 return false;
             }
             return names.stream().anyMatch(name -> name.size() >= 2
-                    && Integer.valueOf(6).equals(name.get(0))
+                    && Integer.valueOf(6).equals(name.getFirst())
                     && allowedWorkloadUris.contains(name.get(1)));
         } catch (CertificateParsingException | java.security.cert.CertificateExpiredException
                  | java.security.cert.CertificateNotYetValidException failure) {

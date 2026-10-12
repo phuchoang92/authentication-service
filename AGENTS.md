@@ -25,6 +25,8 @@ relationships, cascades or generic base repository. Customer freshness belongs t
 JDK-only `CustomerFreshnessPolicy`; protected delivery serialization and digest checking
 belong to `PasswordDeliveryEscrowCodec`.
 
-Keep the current expanded schema and migrations. The DD three-table password-first
+Preserve applied migration files and checksums. The user explicitly retired SQL
+Authority Control: V9 removes `auth_authority_control`, and its lease port/adapter/repository
+must not be restored. The remaining expanded schema stays in place. The DD three-table password-first
 schema is a separate change. Preserve Redis/BFF work in progress and historical test
 reports; this refactor does not authorize deployment, storage cutover or Git push.

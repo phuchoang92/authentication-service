@@ -8,7 +8,7 @@ This is the isolated, clean-build G1 source tree, renamed from `authentication-s
 - JDK-only `core` ports and values; Spring/HTTP/JPA/Redis/JOSE implementations in `infrastructure`.
 - Strict JSON parsing, safe public errors, redacted secret-bearing values, configured public URI, inbound mTLS URI-SAN filter, outbound TLS 1.3 client identity/trust factory.
 - Pinned biometric Keycloak context verifier, DPoP verifier, typed enrollment JWS verifier, JWE envelope inspector, JCS command digest and signing-input codec. Password now travels through authenticated TLS to standard Keycloak Direct Grant; OTP remains an MFA-recipient JWE. Auth never decrypts OTP JWE.
-- Fresh MySQL 8.4 Flyway schema (21 `auth_` tables), a focused EntityManager CAS adapter for the authority-control fence, and short transaction tests. Additive V8 renames `auth_subject` to `auth_customer` without changing child `subject_id` columns or previously applied migrations.
+- Fresh MySQL 8.4 Flyway schema (20 `auth_` tables) and short transaction tests. Additive V8 renames `auth_subject` to `auth_customer`; V9 removes the unused `auth_authority_control` table after retiring its SQL lease capability. V1–V8 and their checksums are unchanged.
 - Dedicated Redis key factories and a development/integration-only online session store. Replay uses native `SET NX` with expiry; session and nonce records use Redis hashes with TTL. There is no Lua or Redis Authority Control implementation. Redis run-ID changes close old sessions, but multi-key activation, touch and revocation are **not atomic**.
 
 ## G2 implementation status
@@ -47,8 +47,8 @@ infrastructure.adapter.out.persistence.<capability>.Jpa<Capability>Adapter
     └── repository.password.PasswordOperationJpaRepository (Spring Data read projections)
 ```
 
-The six SQL capabilities are CustomerOwner, PasswordOperation, PasswordDeviceKey,
-PasswordDeviceRoute, PasswordSession and AuthorityLease. Redis ports retain their
+The five SQL capabilities are CustomerOwner, PasswordOperation, PasswordDeviceKey,
+PasswordDeviceRoute and PasswordSession. Redis ports retain their
 existing names. There are no compatibility aliases for the replaced SQL ports.
 
 Adapters own short transactions, lock ordering, multi-table updates and recovery after
@@ -63,8 +63,10 @@ disabled.
 Customer freshness uses the configured maximum age through `CustomerFreshnessPolicy`;
 a snapshot expires exactly at `checkedAt + maxAge`. `PasswordDeliveryEscrowCodec` preserves
 the existing JsonMapper encoding and checks SHA-256 using the JDK before decoding stored
-bytes. This refactor keeps the existing expanded schema, migrations, API and transaction
-boundaries. The separate three-table target is not implemented by this change.
+bytes. The persistence refactor preserved the API and transaction boundaries; the later
+explicit Authority Control removal adds V9 and deletes its unused core port, adapter and
+internal SQL repository. It does not remove `auth_authority_intent` or other session data.
+The separate three-table target is not implemented by these changes.
 
 Architecture tests enforce the dependency boundaries, including negative fixtures.
 Real MySQL tests cover reservation/duplicate recovery, concurrent dispatch, owner conflict
@@ -86,6 +88,11 @@ Persistence refactor verification on 2026-10-12: the initial worktree baseline p
 tests, with zero failures, errors or skips, using UTC test JVMs and isolated Testcontainers
 storage. These totals describe the complete worktree, which also contained independent
 HTTP/Redis work in progress; they are not a count of tests added solely by this refactor.
+
+The subsequent Authority Control removal passed `clean verify` with 144 unit/architecture
+and 44 integration tests (188 total, zero failures/errors/skips). MySQL coverage includes
+fresh V9 schema creation and upgrading populated V8 storage while preserving Customer
+data and V1–V8 checksums. Only isolated test storage was migrated.
 
 On the current Mac, the verified command is:
 
@@ -112,7 +119,7 @@ Names of mandatory environment inputs are in `src/main/resources/application.yam
 | Build and architecture | Maven `verify`; ArchUnit positive and negative fixtures | Dependency policy for future controllers/use cases must be enforced as they are added |
 | HTTP and TLS | Strict JSON, safe error and URI tests; exact URI-SAN filter tests; local TLS 1.3 client-certificate handshake | Full BFF→Auth deployment trust chain and real partner TLS interoperability |
 | Crypto | Shared DPoP, context, enrollment, token-envelope JWE and signing-input vectors | Keycloak/MFA verifier interoperability, App receipt/decryption interop and software-key extraction threat acceptance |
-| MySQL | Flyway on fresh MySQL 8.4; constraints, concurrent CAS, mandatory transaction and rollback | Cross-system operation/recovery transactions from G2/G3 |
+| MySQL | Flyway on fresh MySQL 8.4; constraints, concurrent CAS, rollback and V8→V9 upgrade | Cross-system operation/recovery transactions from G2/G3 |
 | Redis | Real Redis replay, generation marker and session/nonce records under the integration profile | Atomic revocation, failover fencing, Customer block admission and production recovery |
 
 Open decisions remain in `../docs/DD/target/17-implementation-readiness.md`: Customer event broker and outage policy under the 2-second block bound, operational nonce/lease timing, retention/privacy, password abuse controls and real Customer/MFA provider agreement. No permissive production defaults were chosen here.
