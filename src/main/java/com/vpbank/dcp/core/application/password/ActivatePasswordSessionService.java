@@ -3,7 +3,7 @@ package com.vpbank.dcp.core.application.password;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.port.out.session.PasswordSessionAuthority;
 import com.vpbank.dcp.core.port.out.session.PasswordSessionCryptography;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionStore;
+import com.vpbank.dcp.core.port.out.session.PasswordSessionRepository;
 import com.vpbank.dcp.core.port.out.session.PrepareSessionResult;
 import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
@@ -14,12 +14,12 @@ import java.util.UUID;
 
 /** Publishes one durable LAST_TRUSTED candidate only after live guarded Redis apply. */
 public final class ActivatePasswordSessionService {
-    private final PasswordSessionStore store;
+    private final PasswordSessionRepository store;
     private final PasswordSessionCryptography cryptography;
     private final PasswordSessionAuthority authority;
     private final Clock clock;
 
-    public ActivatePasswordSessionService(PasswordSessionStore store,
+    public ActivatePasswordSessionService(PasswordSessionRepository store,
                                   PasswordSessionCryptography cryptography,
                                   PasswordSessionAuthority authority, Clock clock) {
         this.store = Objects.requireNonNull(store);

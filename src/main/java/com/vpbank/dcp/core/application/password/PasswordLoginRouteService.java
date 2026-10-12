@@ -3,7 +3,7 @@ package com.vpbank.dcp.core.application.password;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRoute;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginCommand;
 import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import java.util.Objects;
 
 /** Freezes unsupported MFA routes without creating a challenge or a banking token. */
@@ -11,11 +11,11 @@ public final class PasswordLoginRouteService {
 
     private final VerifyPasswordLoginIdentityService credentials;
     private final ResolveTrustedDeviceRouteService devices;
-    private final PasswordOperationStore operations;
+    private final PasswordOperationRepository operations;
 
     public PasswordLoginRouteService(VerifyPasswordLoginIdentityService credentials,
                                      ResolveTrustedDeviceRouteService devices,
-                                     PasswordOperationStore operations) {
+                                     PasswordOperationRepository operations) {
         this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.devices = Objects.requireNonNull(devices, "devices");
         this.operations = Objects.requireNonNull(operations, "operations");

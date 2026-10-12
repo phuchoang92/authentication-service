@@ -3,7 +3,7 @@ package com.vpbank.dcp.core.application.password;
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerAcceptance;
-import com.vpbank.dcp.core.port.out.customer.CustomerOwnerStore;
+import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
 import com.vpbank.dcp.core.port.out.customer.InvalidCustomerOwnerCommandException;
 import java.time.Instant;
 import java.util.Objects;
@@ -13,11 +13,11 @@ import java.util.UUID;
 public final class ConfirmPasswordLoginOwnerService {
 
     private final CheckCustomerLoginEligibilityService snapshots;
-    private final CustomerOwnerStore owners;
+    private final CustomerOwnerRepository owners;
     private final String policyVersion;
 
     public ConfirmPasswordLoginOwnerService(CheckCustomerLoginEligibilityService snapshots,
-                                     CustomerOwnerStore owners, String policyVersion) {
+                                     CustomerOwnerRepository owners, String policyVersion) {
         this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
         this.owners = Objects.requireNonNull(owners, "owners");
         if (policyVersion == null || policyVersion.isBlank() || policyVersion.length() > 64) {

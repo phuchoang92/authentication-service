@@ -11,17 +11,17 @@ import java.util.Objects;
  */
 public final class ReservePasswordLoginService {
 
-    private final PasswordDeviceKeyStore deviceKeys;
+    private final PasswordDeviceKeyRepository deviceKeys;
     private final PasswordProofVerifier proofVerifier;
     private final PasswordProofReplay proofReplay;
     private final PasswordCommandHasher commandHasher;
-    private final PasswordOperationStore operations;
+    private final PasswordOperationRepository operations;
 
-    public ReservePasswordLoginService(PasswordDeviceKeyStore deviceKeys,
+    public ReservePasswordLoginService(PasswordDeviceKeyRepository deviceKeys,
                                     PasswordProofVerifier proofVerifier,
                                     PasswordProofReplay proofReplay,
                                     PasswordCommandHasher commandHasher,
-                                    PasswordOperationStore operations) {
+                                    PasswordOperationRepository operations) {
         this.deviceKeys = Objects.requireNonNull(deviceKeys, "deviceKeys");
         this.proofVerifier = Objects.requireNonNull(proofVerifier, "proofVerifier");
         this.proofReplay = Objects.requireNonNull(proofReplay, "proofReplay");

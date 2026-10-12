@@ -17,10 +17,10 @@ import com.vpbank.dcp.core.port.out.keycloak.PasswordVerificationOutcome;
 import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
 import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
-import com.vpbank.dcp.core.port.out.customer.CustomerOwnerStore;
-import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyStore;
+import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
+import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordProofIds;
 import com.vpbank.dcp.core.port.out.password.PasswordProofVerifier;
 import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
@@ -29,21 +29,17 @@ import com.vpbank.dcp.infrastructure.adapter.out.crypto.LengthPrefixedSigningInp
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.PasswordCommandHmac;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisPasswordProofReplay;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.VerifiedAuthorityScript;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GenerationKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.PasswordProofReplayKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ReplayKeys;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingControlCodec;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingControlSnapshot;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingState;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.key.RuntimeKeys;
 import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
-import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -53,7 +49,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -79,8 +74,6 @@ import org.testcontainers.utility.DockerImageName;
 class PasswordLoginOperationIT {
 
     private static final AuthorityScope SCOPE = new AuthorityScope("bank-test-neo");
-    private static final String REPLAY_SHA =
-            "1a8ab1738ea33ee578f64a6c0c1d009fa3d6a00cfe79d9bb7624fb157eada77a";
     private static final Sha256Digests DIGESTS = new Sha256Digests();
 
     @Container
@@ -103,10 +96,10 @@ class PasswordLoginOperationIT {
     }
 
     @Autowired
-    private PasswordOperationStore operations;
+    private PasswordOperationRepository operations;
 
     @Autowired
-    private PasswordDeviceKeyStore deviceKeys;
+    private PasswordDeviceKeyRepository deviceKeys;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -124,14 +117,7 @@ class PasswordLoginOperationIT {
         redis = new StringRedisTemplate(factory);
         redis.afterPropertiesSet();
         redis.getConnectionFactory().getConnection().serverCommands().flushDb();
-        var keys = new GenerationKeys(SCOPE);
-        String runId = redis.execute((RedisCallback<String>) connection -> {
-            Properties info = connection.serverCommands().info("server");
-            return info.getProperty("run_id");
-        });
-        redis.opsForHash().putAll(keys.control(), new ServingControlCodec().encode(
-                new ServingControlSnapshot(ServingState.READY, UUID.randomUUID(), runId,
-                        UUID.randomUUID(), 1, Instant.now().plusSeconds(60))));
+        new RedisServerIdentity(redis, new RuntimeKeys(SCOPE)).initialize();
     }
 
     @AfterEach
@@ -223,7 +209,7 @@ class PasswordLoginOperationIT {
         CheckCustomerLoginEligibilityService snapshots = new CheckCustomerLoginEligibilityService(
                 mock(CustomerDirectory.class), Duration.ofSeconds(30));
         ConfirmPasswordLoginOwnerService customer = new ConfirmPasswordLoginOwnerService(snapshots,
-                mock(CustomerOwnerStore.class), "test-policy");
+                mock(CustomerOwnerRepository.class), "test-policy");
         return new VerifyPasswordLoginIdentityService(service(), operations, verifier, customer,
                 Clock.systemUTC());
     }
@@ -235,9 +221,9 @@ class PasswordLoginOperationIT {
                     null, new PasswordProofIds(DIGESTS.ofProofId(proofId + "-dpop"),
                     DIGESTS.ofProofId(proofId + "-kreq"), null), "{}", "{}");
         };
-        var replay = new RedisPasswordProofReplay(redis, new GenerationKeys(SCOPE),
-                new ReplayKeys(SCOPE), new PasswordProofReplayKeys(SCOPE),
-                VerifiedAuthorityScript.load("redis/password_proof_reserve.lua", REPLAY_SHA));
+        var replay = new RedisPasswordProofReplay(redis,
+                new RedisServerIdentity(redis, new RuntimeKeys(SCOPE)),
+                new ReplayKeys(SCOPE), new PasswordProofReplayKeys(SCOPE));
         byte[] key = new byte[32];
         Arrays.fill(key, (byte) 17);
         var hasher = new PasswordCommandHmac("h1", Map.of("h1", key),

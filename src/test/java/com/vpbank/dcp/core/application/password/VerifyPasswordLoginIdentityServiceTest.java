@@ -19,7 +19,7 @@ import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
 import com.vpbank.dcp.core.port.out.password.ConfirmedPasswordOwner;
 import com.vpbank.dcp.core.port.out.password.PasswordDispatchResult;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationProgress;
 import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
 import java.net.URI;
@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
 class VerifyPasswordLoginIdentityServiceTest {
 
     private final ReservePasswordLoginService admission = mock(ReservePasswordLoginService.class);
-    private final PasswordOperationStore operations = mock(PasswordOperationStore.class);
+    private final PasswordOperationRepository operations = mock(PasswordOperationRepository.class);
     private final DirectGrantPasswordVerifier keycloak = mock(DirectGrantPasswordVerifier.class);
     private final ConfirmPasswordLoginOwnerService customers = mock(ConfirmPasswordLoginOwnerService.class);
     private final Instant now = Instant.parse("2026-10-11T10:00:00Z");

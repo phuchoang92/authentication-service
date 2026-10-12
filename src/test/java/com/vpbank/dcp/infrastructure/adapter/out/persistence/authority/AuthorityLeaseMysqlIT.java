@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vpbank.dcp.core.port.out.authority.AuthorityLeaseChange;
-import com.vpbank.dcp.core.port.out.authority.AuthorityLeaseStore;
+import com.vpbank.dcp.core.port.out.authority.AuthorityLeaseRepository;
 import com.vpbank.dcp.core.port.out.authority.LeaseChangeResult;
 import java.time.Instant;
 import java.util.UUID;
@@ -55,7 +55,7 @@ class AuthorityLeaseMysqlIT {
     private JdbcTemplate jdbc;
 
     @Autowired
-    private AuthorityLeaseStore store;
+    private AuthorityLeaseRepository store;
 
     @Autowired
     private TransactionTemplate transactions;

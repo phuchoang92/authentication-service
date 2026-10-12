@@ -6,6 +6,10 @@ import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
@@ -14,11 +18,10 @@ import java.util.Base64;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
-/** Checks that the parsed command is exactly the captured public body before admission. */
+/**
+ * Checks that the parsed command is exactly the captured public body before admission.
+ */
 public final class PasswordLoginRequestMapper {
     private static final String PATH = "/api/v1/authentications/password";
     private static final Set<String> JWK_MEMBERS = Set.of("kty", "crv", "x", "y");
@@ -33,8 +36,8 @@ public final class PasswordLoginRequestMapper {
     private final Clock clock;
 
     public PasswordLoginRequestMapper(ExternalUriPolicy externalUris,
-                                        PasswordFlowProperties policy, JsonMapper json,
-                                        Clock clock) {
+                                      PasswordFlowProperties policy, JsonMapper json,
+                                      Clock clock) {
         this.externalUris = Objects.requireNonNull(externalUris);
         this.policy = Objects.requireNonNull(policy);
         this.json = Objects.requireNonNull(json);

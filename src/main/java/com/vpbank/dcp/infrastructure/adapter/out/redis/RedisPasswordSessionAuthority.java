@@ -1,62 +1,42 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
 import com.vpbank.dcp.core.port.out.session.PasswordSessionAuthority;
+import com.vpbank.dcp.core.port.out.session.PasswordSessionFacts;
 import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingControlCodec;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingState;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ApplyReceiptKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.CustomerFeedKeys;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GenerationKeys;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GuardKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.NonceKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.List;
+import java.time.Instant;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 
-/** The candidate is never online without an exact fenced apply and live delivery check. */
+/** Integration-only session publication using ordinary Redis commands. */
 public final class RedisPasswordSessionAuthority implements PasswordSessionAuthority {
+
     private final StringRedisTemplate redis;
     private final RedisServerIdentity identity;
-    private final GenerationKeys generations;
-    private final CustomerFeedKeys feeds;
-    private final GuardKeys guards;
-    private final SessionKeys sessions;
+    private final SessionKeys sessions = new SessionKeys();
     private final NonceKeys nonces;
-    private final ApplyReceiptKeys receipts;
-    private final DefaultRedisScript<String> applyScript;
-    private final DefaultRedisScript<String> deliverScript;
-    private final String feedSource;
     private final Duration nonceValidity;
     private final Clock clock;
     private final Sha256Digests digests = new Sha256Digests();
 
-    public RedisPasswordSessionAuthority(StringRedisTemplate redis,
-                                         RedisServerIdentity identity, AuthorityScope scope,
-                                         DefaultRedisScript<String> applyScript,
-                                         DefaultRedisScript<String> deliverScript,
-                                         String feedSource, Duration nonceValidity, Clock clock) {
+    public RedisPasswordSessionAuthority(StringRedisTemplate redis, RedisServerIdentity identity,
+                                         AuthorityScope scope, Duration nonceValidity, Clock clock) {
         this.redis = Objects.requireNonNull(redis);
         this.identity = Objects.requireNonNull(identity);
-        this.generations = new GenerationKeys(scope);
-        this.feeds = new CustomerFeedKeys(scope);
-        this.guards = new GuardKeys(scope);
-        this.sessions = new SessionKeys();
-        this.nonces = new NonceKeys(scope);
-        this.receipts = new ApplyReceiptKeys(scope);
-        this.applyScript = Objects.requireNonNull(applyScript);
-        this.deliverScript = Objects.requireNonNull(deliverScript);
-        this.feeds.forSource(feedSource);
-        this.feedSource = feedSource;
+        this.nonces = new NonceKeys(Objects.requireNonNull(scope));
         this.nonceValidity = Objects.requireNonNull(nonceValidity);
         this.clock = Objects.requireNonNull(clock);
         if (nonceValidity.toMillis() < 1000 || nonceValidity.toMillis() > 120000) {
@@ -67,17 +47,7 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
     @Override
     public Optional<UUID> currentGeneration() {
         try {
-            String runId = identity.currentRunId();
-            if (runId == null) {
-                return Optional.empty();
-            }
-            var control = new ServingControlCodec().decode(redis.opsForHash().entries(
-                    generations.control()));
-            if (control.state() != ServingState.READY || !runId.equals(control.redisRunId())
-                    || !clock.instant().isBefore(control.leaseUntil())) {
-                return Optional.empty();
-            }
-            return Optional.of(control.generation());
+            return identity.currentGeneration();
         } catch (RuntimeException failure) {
             return Optional.empty();
         }
@@ -86,44 +56,28 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
     @Override
     public SessionApplyResult apply(PreparedPasswordSession session) {
         Objects.requireNonNull(session);
-        String runId = identity.currentRunId();
-        if (runId == null || runId.isBlank()) {
-            return SessionApplyResult.AUTHORITY_CLOSED;
-        }
-        var facts = session.facts();
-        List<String> keys = List.of(generations.control(), feeds.forSource(feedSource),
-                guards.forSubject(facts.subjectId()), guards.forDevice(facts.bindingId()),
-                guards.forSession(session.sessionId()),
-                sessions.forLookup(session.lookupVersion(), session.lookupDigest()),
-                nonces.forFamily(session.sessionId()), receipts.forIntent(session.intentId()));
-        String assurance = "{\"biometricEnforcement\":\"NOT_APPLICABLE\","
-                + "\"devicePossession\":\"MFA_KEY_POSSESSION\","
-                + "\"platformEvidence\":\"" + facts.platformAssurance() + "\"}";
-        String nonceDigest = digests.sha256(session.dpopNonce().getBytes(StandardCharsets.US_ASCII))
-                .base64Url();
         try {
-            String result = redis.execute(applyScript, keys, runId,
-                    session.generation().toString(), facts.operationId().toString(),
-                    session.intentId().toString(), session.candidateDigest().base64Url(),
-                    session.sessionId().toString(), facts.subjectId().toString(),
-                    facts.bindingId().toString(), facts.appId(), facts.requestPublicJwk(),
-                    facts.requestKey().base64Url(), nonceDigest,
-                    Long.toString(facts.customerSecurityVersion()),
-                    Long.toString(facts.credentialSecurityVersion()),
-                    Long.toString(facts.deviceSecurityVersion()),
-                    Long.toString(facts.customerStatusVersion()),
-                    Long.toString(facts.customerStatusValidUntil().toEpochMilli()),
-                    Long.toString(session.deadlines().idleExpiresAt().toEpochMilli()),
-                    Long.toString(session.deadlines().absoluteExpiresAt().toEpochMilli()),
-                    Long.toString(session.deliveryDeadline().toEpochMilli()),
-                    session.lookupDigest().base64Url(), assurance,
-                    Long.toString(nonceValidity.toMillis()), feedSource);
-            return switch (result) {
-                case "APPLIED" -> SessionApplyResult.APPLIED;
-                case "ALREADY_APPLIED" -> SessionApplyResult.ALREADY_APPLIED;
-                case "DENIED" -> SessionApplyResult.DENIED;
-                default -> SessionApplyResult.AUTHORITY_CLOSED;
-            };
+            if (!isCurrent(session)) {
+                return SessionApplyResult.AUTHORITY_CLOSED;
+            }
+            String sessionKey = sessionKey(session);
+            if (Boolean.TRUE.equals(redis.hasKey(sessionKey))) {
+                return deliverable(session) ? SessionApplyResult.ALREADY_APPLIED
+                        : SessionApplyResult.AUTHORITY_CLOSED;
+            }
+            redis.opsForHash().putAll(sessionKey, sessionFields(session));
+            if (!Boolean.TRUE.equals(redis.expireAt(sessionKey,
+                    Date.from(session.deadlines().idleExpiresAt())))) {
+                return SessionApplyResult.AUTHORITY_CLOSED;
+            }
+            String nonceKey = nonces.forFamily(session.sessionId());
+            redis.opsForHash().putAll(nonceKey, nonceFields(session));
+            if (!Boolean.TRUE.equals(redis.expireAt(nonceKey,
+                    Date.from(session.deadlines().absoluteExpiresAt())))) {
+                return SessionApplyResult.AUTHORITY_CLOSED;
+            }
+            return deliverable(session) ? SessionApplyResult.APPLIED
+                    : SessionApplyResult.AUTHORITY_CLOSED;
         } catch (RuntimeException failure) {
             return SessionApplyResult.AUTHORITY_CLOSED;
         }
@@ -132,23 +86,90 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
     @Override
     public boolean deliverable(PreparedPasswordSession session) {
         Objects.requireNonNull(session);
-        String runId = identity.currentRunId();
-        if (runId == null || runId.isBlank()) {
-            return false;
-        }
-        var facts = session.facts();
-        List<String> keys = List.of(generations.control(), feeds.forSource(feedSource),
-                guards.forSubject(facts.subjectId()), guards.forDevice(facts.bindingId()),
-                guards.forSession(session.sessionId()),
-                sessions.forLookup(session.lookupVersion(), session.lookupDigest()),
-                nonces.forFamily(session.sessionId()));
         try {
-            return "DELIVERABLE".equals(redis.execute(deliverScript, keys, runId,
-                    session.generation().toString(), session.sessionId().toString(),
-                    facts.subjectId().toString(), facts.bindingId().toString(),
-                    facts.requestKey().base64Url(), facts.appId(), feedSource));
+            if (!isCurrent(session)) {
+                return false;
+            }
+            Map<Object, Object> stored = redis.opsForHash().entries(sessionKey(session));
+            Map<Object, Object> nonce = redis.opsForHash().entries(
+                    nonces.forFamily(session.sessionId()));
+            Long sessionTtl = redis.getExpire(sessionKey(session), TimeUnit.MILLISECONDS);
+            Long nonceTtl = redis.getExpire(nonces.forFamily(session.sessionId()),
+                    TimeUnit.MILLISECONDS);
+            return sessionTtl != null && sessionTtl > 0
+                    && nonceTtl != null && nonceTtl > 0
+                    && stored.size() == 23 && nonce.size() == 9
+                    && "1".equals(stored.get("schemaVersion"))
+                    && "ACTIVE".equals(stored.get("state"))
+                    && session.sessionId().toString().equals(stored.get("sessionId"))
+                    && session.generation().toString().equals(stored.get("generation"))
+                    && session.facts().subjectId().toString().equals(stored.get("subjectId"))
+                    && session.facts().bindingId().toString().equals(stored.get("deviceBindingId"))
+                    && session.facts().requestKey().base64Url().equals(stored.get("requestKeyJkt"))
+                    && "1".equals(nonce.get("schemaVersion"))
+                    && session.sessionId().toString().equals(nonce.get("familyId"));
         } catch (RuntimeException failure) {
             return false;
         }
+    }
+
+    private boolean isCurrent(PreparedPasswordSession session) {
+        Instant now = clock.instant();
+        return session.generation().equals(identity.currentGeneration().orElse(null))
+                && now.isBefore(session.deadlines().idleExpiresAt())
+                && now.isBefore(session.deadlines().absoluteExpiresAt())
+                && now.isBefore(session.deliveryDeadline())
+                && now.isBefore(session.facts().customerStatusValidUntil());
+    }
+
+    private String sessionKey(PreparedPasswordSession session) {
+        return sessions.forLookup(session.lookupVersion(), session.lookupDigest());
+    }
+
+    private Map<String, String> sessionFields(PreparedPasswordSession session) {
+        PasswordSessionFacts facts = session.facts();
+        Map<String, String> fields = new HashMap<>();
+        fields.put("schemaVersion", "1");
+        fields.put("state", "ACTIVE");
+        fields.put("sessionId", session.sessionId().toString());
+        fields.put("subjectId", facts.subjectId().toString());
+        fields.put("appId", facts.appId());
+        fields.put("audience", facts.appId());
+        fields.put("channel", "MOBILE");
+        fields.put("scope", "[\"banking\"]");
+        fields.put("deviceBindingId", facts.bindingId().toString());
+        fields.put("requestKeyJkt", facts.requestKey().base64Url());
+        fields.put("requestPublicJwk", facts.requestPublicJwk());
+        fields.put("generation", session.generation().toString());
+        fields.put("customerSecurityVersion", Long.toString(facts.customerSecurityVersion()));
+        fields.put("credentialSecurityVersion", Long.toString(facts.credentialSecurityVersion()));
+        fields.put("deviceSecurityVersion", Long.toString(facts.deviceSecurityVersion()));
+        fields.put("sessionVersion", "0");
+        fields.put("customerStatusVersion", Long.toString(facts.customerStatusVersion()));
+        fields.put("customerStatusValidUntilMs",
+                Long.toString(facts.customerStatusValidUntil().toEpochMilli()));
+        fields.put("createdAtMs", Long.toString(clock.millis()));
+        fields.put("idleExpiresAtMs", Long.toString(session.deadlines().idleExpiresAt().toEpochMilli()));
+        fields.put("absoluteExpiresAtMs", Long.toString(session.deadlines().absoluteExpiresAt().toEpochMilli()));
+        fields.put("nonceFamilyId", session.sessionId().toString());
+        fields.put("assurance", "{\"biometricEnforcement\":\"NOT_APPLICABLE\","
+                + "\"devicePossession\":\"MFA_KEY_POSSESSION\","
+                + "\"platformEvidence\":\"" + facts.platformAssurance() + "\"}");
+        return fields;
+    }
+
+    private Map<String, String> nonceFields(PreparedPasswordSession session) {
+        String digest = digests.sha256(session.dpopNonce().getBytes(StandardCharsets.US_ASCII))
+                .base64Url();
+        Instant expiry = clock.instant().plus(nonceValidity);
+        if (expiry.isAfter(session.deadlines().absoluteExpiresAt())) {
+            expiry = session.deadlines().absoluteExpiresAt();
+        }
+        return Map.of("schemaVersion", "1", "familyId", session.sessionId().toString(),
+                "requestKeyJkt", session.facts().requestKey().base64Url(),
+                "familyVersion", "0", "currentDigest", digest,
+                "currentExpiresAtMs", Long.toString(expiry.toEpochMilli()),
+                "previousDigest", "", "previousExpiresAtMs", "0",
+                "familyDeadlineMs", Long.toString(session.deadlines().absoluteExpiresAt().toEpochMilli()));
     }
 }

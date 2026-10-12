@@ -4,56 +4,45 @@ import com.vpbank.dcp.core.port.out.replay.ReplayAttempt;
 import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.core.port.out.replay.ReplayProtection;
 import com.vpbank.dcp.core.port.out.replay.ReplayReservation;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GenerationKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ReplayKeys;
-import java.util.List;
+import java.time.Duration;
 import java.util.Objects;
+import java.util.UUID;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 
+/** Single-key replay protection for the integration-only password slice. */
 public final class RedisReplayProtection implements ReplayProtection {
+
+    private static final Duration REPLAY_TTL = Duration.ofSeconds(120);
 
     private final StringRedisTemplate redis;
     private final RedisServerIdentity identity;
-    private final ReplayKeys replayKeys;
-    private final GenerationKeys generationKeys;
-    private final DefaultRedisScript<String> reserveScript;
+    private final ReplayKeys keys;
 
-    public RedisReplayProtection(
-            StringRedisTemplate redis,
-            ReplayKeys replayKeys,
-            GenerationKeys generationKeys,
-            DefaultRedisScript<String> reserveScript) {
-        this.redis = Objects.requireNonNull(redis, "redis");
-        this.identity = new RedisServerIdentity(redis);
-        this.replayKeys = Objects.requireNonNull(replayKeys, "replayKeys");
-        this.generationKeys = Objects.requireNonNull(generationKeys, "generationKeys");
-        this.reserveScript = Objects.requireNonNull(reserveScript, "reserveScript");
+    public RedisReplayProtection(StringRedisTemplate redis, RedisServerIdentity identity,
+                                 ReplayKeys keys) {
+        this.redis = Objects.requireNonNull(redis);
+        this.identity = Objects.requireNonNull(identity);
+        this.keys = Objects.requireNonNull(keys);
     }
 
     @Override
     public ReplayReservation reserve(ReplayAttempt attempt) {
-        Objects.requireNonNull(attempt, "attempt");
-        String controlKey = generationKeys.control();
-        String replayKey = replayKeys.forDpop(attempt.requestKey(), attempt.proofIdDigest());
-
+        Objects.requireNonNull(attempt);
         try {
-            String observedRunId = identity.currentRunId();
-            if (observedRunId == null || observedRunId.isBlank()) {
+            UUID generation = identity.currentGeneration().orElse(null);
+            if (generation == null || !generation.equals(attempt.generation())) {
                 return ReplayReservation.AUTHORITY_CLOSED;
             }
-
-            String result = redis.execute(
-                    reserveScript,
-                    List.of(controlKey, replayKey),
-                    attempt.generation().toString(),
-                    observedRunId);
-            return switch (result) {
-                case "RESERVED" -> ReplayReservation.RESERVED;
-                case "REPLAYED" -> ReplayReservation.REPLAYED;
-                case "AUTHORITY_CLOSED" -> ReplayReservation.AUTHORITY_CLOSED;
-                case null, default -> ReplayReservation.AUTHORITY_CLOSED;
-            };
+            Boolean reserved = redis.opsForValue().setIfAbsent(
+                    keys.forDpop(attempt.requestKey(), attempt.proofIdDigest()), "1", REPLAY_TTL);
+            if (reserved == null) {
+                return ReplayReservation.AUTHORITY_CLOSED;
+            }
+            if (!generation.equals(identity.currentGeneration().orElse(null))) {
+                return ReplayReservation.AUTHORITY_CLOSED;
+            }
+            return reserved ? ReplayReservation.RESERVED : ReplayReservation.REPLAYED;
         } catch (RuntimeException failure) {
             throw new ReplayAuthorityUnavailableException(failure);
         }

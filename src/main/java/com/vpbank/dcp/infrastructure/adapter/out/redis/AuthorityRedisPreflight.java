@@ -12,9 +12,11 @@ import java.util.Properties;
 public final class AuthorityRedisPreflight {
 
     private final StringRedisTemplate redis;
+    private final RedisServerIdentity identity;
 
-    public AuthorityRedisPreflight(StringRedisTemplate redis) {
+    public AuthorityRedisPreflight(StringRedisTemplate redis, RedisServerIdentity identity) {
         this.redis = Objects.requireNonNull(redis, "redis");
+        this.identity = Objects.requireNonNull(identity);
     }
 
     public void verify() {
@@ -37,6 +39,7 @@ public final class AuthorityRedisPreflight {
             if (!Boolean.TRUE.equals(safe)) {
                 throw new InvalidAuthorityRedisConfigurationException();
             }
+            identity.initialize();
         } catch (RuntimeException failure) {
             if (failure instanceof InvalidAuthorityRedisConfigurationException) {
                 throw failure;

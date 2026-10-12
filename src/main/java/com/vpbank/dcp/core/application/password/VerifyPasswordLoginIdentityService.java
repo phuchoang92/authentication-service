@@ -7,7 +7,7 @@ import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableExce
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerificationOutcome;
 import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
 import com.vpbank.dcp.core.port.out.password.PasswordDispatchResult;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationProgress;
 import java.time.Clock;
 import java.util.Objects;
@@ -17,13 +17,13 @@ import java.util.UUID;
 public final class VerifyPasswordLoginIdentityService {
 
     private final ReservePasswordLoginService admission;
-    private final PasswordOperationStore operations;
+    private final PasswordOperationRepository operations;
     private final DirectGrantPasswordVerifier keycloak;
     private final ConfirmPasswordLoginOwnerService customers;
     private final Clock clock;
 
     public VerifyPasswordLoginIdentityService(ReservePasswordLoginService admission,
-                                          PasswordOperationStore operations,
+                                          PasswordOperationRepository operations,
                                           DirectGrantPasswordVerifier keycloak,
                                           ConfirmPasswordLoginOwnerService customers,
                                           Clock clock) {

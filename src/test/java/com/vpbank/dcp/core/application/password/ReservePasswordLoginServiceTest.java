@@ -13,9 +13,9 @@ import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
 import com.vpbank.dcp.core.port.out.password.PasswordCommandHasher;
-import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyStore;
+import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordProofIds;
 import com.vpbank.dcp.core.port.out.password.PasswordProofReplay;
 import com.vpbank.dcp.core.port.out.password.PasswordProofRequest;
@@ -38,11 +38,11 @@ import org.junit.jupiter.api.Test;
 
 class ReservePasswordLoginServiceTest {
 
-    private final PasswordDeviceKeyStore keys = mock(PasswordDeviceKeyStore.class);
+    private final PasswordDeviceKeyRepository keys = mock(PasswordDeviceKeyRepository.class);
     private final PasswordProofVerifier verifier = mock(PasswordProofVerifier.class);
     private final PasswordProofReplay replay = mock(PasswordProofReplay.class);
     private final PasswordCommandHasher hasher = mock(PasswordCommandHasher.class);
-    private final PasswordOperationStore operations = mock(PasswordOperationStore.class);
+    private final PasswordOperationRepository operations = mock(PasswordOperationRepository.class);
     private final ReservePasswordLoginService service = new ReservePasswordLoginService(keys,
             verifier, replay, hasher, operations);
 

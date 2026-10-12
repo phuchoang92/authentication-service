@@ -3,7 +3,7 @@ package com.vpbank.dcp.core.application.password;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRoute;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRouting;
 import com.vpbank.dcp.core.port.out.password.PasswordDeviceRouteEvidence;
-import com.vpbank.dcp.core.port.out.password.PasswordDeviceRouteStore;
+import com.vpbank.dcp.core.port.out.password.PasswordDeviceRouteRepository;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -11,10 +11,10 @@ import java.util.UUID;
 /** Classifies the current binding only after provider identity and Customer ownership commit. */
 public final class ResolveTrustedDeviceRouteService {
 
-    private final PasswordDeviceRouteStore routes;
+    private final PasswordDeviceRouteRepository routes;
     private final TrustedDeviceRouting routing;
 
-    public ResolveTrustedDeviceRouteService(PasswordDeviceRouteStore routes,
+    public ResolveTrustedDeviceRouteService(PasswordDeviceRouteRepository routes,
                                       TrustedDeviceRouting routing) {
         this.routes = Objects.requireNonNull(routes, "routes");
         this.routing = Objects.requireNonNull(routing, "routing");

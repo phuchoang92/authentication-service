@@ -12,7 +12,7 @@ import com.vpbank.dcp.core.domain.customer.CustomerStatus;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRoute;
 import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,7 @@ class PasswordLoginRouteServiceTest {
 
     private final VerifyPasswordLoginIdentityService credentials = mock(VerifyPasswordLoginIdentityService.class);
     private final ResolveTrustedDeviceRouteService devices = mock(ResolveTrustedDeviceRouteService.class);
-    private final PasswordOperationStore operations = mock(PasswordOperationStore.class);
+    private final PasswordOperationRepository operations = mock(PasswordOperationRepository.class);
     private final PasswordLoginRouteService service = new PasswordLoginRouteService(
             credentials, devices, operations);
     private final PasswordLoginCommand command = mock(PasswordLoginCommand.class);

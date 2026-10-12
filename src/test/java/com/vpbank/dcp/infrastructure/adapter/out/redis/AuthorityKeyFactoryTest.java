@@ -6,9 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GuardKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.InvalidAuthorityScopeException;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.key.RuntimeKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.InvalidCryptographicInputException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import java.util.UUID;
@@ -26,11 +26,9 @@ class AuthorityKeyFactoryTest {
 
     @Test
     void identityAndVersionDimensionsHaveUnambiguousKeys() {
-        UUID id = UUID.randomUUID();
-        GuardKeys guards = new GuardKeys(new AuthorityScope("bank-dev-neo"));
-        assertThat(guards.forSubject(id)).isNotEqualTo(guards.forDevice(id));
-        assertThat(guards.forSubject(id)).isNotEqualTo(
-                new GuardKeys(new AuthorityScope("bank-prod-neo")).forSubject(id));
+        RuntimeKeys runtime = new RuntimeKeys(new AuthorityScope("bank-dev-neo"));
+        assertThat(runtime.marker()).isNotEqualTo(
+                new RuntimeKeys(new AuthorityScope("bank-prod-neo")).marker());
 
         Digest32 digest = Digest32.fromBytes(new byte[32]);
         SessionKeys sessions = new SessionKeys();
