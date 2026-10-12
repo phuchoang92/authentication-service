@@ -9,13 +9,12 @@ import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
 import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
 import com.vpbank.dcp.core.port.out.password.*;
 import com.vpbank.dcp.core.port.out.session.*;
-import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginRequestMapper;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.*;
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.session.JpaPasswordSessionAdapter;
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.session.PasswordSessionPersistenceRepository;
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.session.PasswordDeliveryEscrowCodec;
+import com.vpbank.dcp.infrastructure.persistence.adapter.JpaPasswordSessionAdapter;
+import com.vpbank.dcp.infrastructure.persistence.repository.PasswordSessionPersistenceRepository;
+import com.vpbank.dcp.infrastructure.persistence.codec.PasswordDeliveryEscrowCodec;
 import com.vpbank.dcp.core.domain.customer.CustomerFreshnessPolicy;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisPasswordSessionAuthority;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
@@ -53,10 +52,9 @@ public class PasswordFlowConfiguration {
     }
 
     @Bean
-    PasswordLoginRequestMapper passwordLoginRequestMapper(ExternalUriPolicy uri,
-                                                              PasswordFlowProperties policy,
+    PasswordLoginRequestMapper passwordLoginRequestMapper(PasswordFlowProperties policy,
                                                               JsonMapper json, Clock clock) {
-        return new PasswordLoginRequestMapper(uri, policy, json, clock);
+        return new PasswordLoginRequestMapper(policy, json, clock);
     }
 
     @Bean

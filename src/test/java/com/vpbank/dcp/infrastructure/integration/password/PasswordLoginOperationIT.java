@@ -34,7 +34,7 @@ import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.PasswordProofReplayKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ReplayKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.RuntimeKeys;
-import java.net.URI;
+import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -236,8 +236,8 @@ class PasswordLoginOperationIT {
         var operation = new PasswordOperationContext(operationId, "neo-mobile", "ANDROID",
                 "install-1", "alice", null);
         var wire = new PasswordWireProofs(
-                URI.create("https://api.bank.test/api/v1/authentications/password"),
-                proofId + "-dpop", proofId, null, "{}");
+                new VerifiedDpopProof(new RequestKeyThumbprint(digest(1)),
+                        DIGESTS.ofProofId(proofId + "-dpop"), Instant.now(), "{}"), proofId, null, "{}");
         Instant now = Instant.now();
         return new PasswordLoginCommand(operation, new PasswordVerification("alice", password),
                 wire, now, now.plusSeconds(120), now.plusSeconds(300));

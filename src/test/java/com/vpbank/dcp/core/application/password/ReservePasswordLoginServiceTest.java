@@ -28,7 +28,7 @@ import com.vpbank.dcp.core.port.out.password.PasswordReservationResult;
 import com.vpbank.dcp.core.port.out.password.PasswordSemanticCommand;
 import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
 import com.vpbank.dcp.core.port.out.password.VerifiedPasswordProofs;
-import java.net.URI;
+import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Optional;
@@ -57,8 +57,7 @@ class ReservePasswordLoginServiceTest {
         Instant now = Instant.now();
         command = new PasswordLoginCommand(operation,
                 new PasswordVerification("alice", "secret-test-only"),
-                new PasswordWireProofs(URI.create("https://api.bank.test/api/v1/authentications/password"),
-                        "dpop", "requestProof", null, "{}"), now,
+                new PasswordWireProofs(mock(VerifiedDpopProof.class), "requestProof", null, "{}"), now,
                 now.plusSeconds(120), now.plusSeconds(300));
         verified = new VerifiedPasswordProofs(new RequestKeyThumbprint(digest(1)), digest(2),
                 null, new PasswordProofIds(digest(3), digest(4), null), "{}", "{}");

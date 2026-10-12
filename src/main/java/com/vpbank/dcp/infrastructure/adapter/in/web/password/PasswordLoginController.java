@@ -1,7 +1,10 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.constant.PasswordRequestAttributes;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import jakarta.validation.Valid;
+import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -36,8 +39,9 @@ public final class PasswordLoginController {
     @PostMapping(path = "/password", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> login(@RequestHeader HttpHeaders headers,
-                                   @Valid @RequestBody PasswordLoginRequest body) {
-        var command = requests.map(PasswordLoginHeaders.from(headers), body);
+                                   @Valid @RequestBody PasswordLoginRequest body,
+                                   @RequestAttribute(PasswordRequestAttributes.VERIFIED_DPOP_PROOF) VerifiedDpopProof dpop) {
+        var command = requests.map(PasswordLoginHeaders.from(headers), body, dpop);
         return responses.map(command.operation().operationId(), passwords.login(command));
     }
 }

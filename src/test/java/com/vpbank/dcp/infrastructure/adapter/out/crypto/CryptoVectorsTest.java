@@ -1,5 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
+import com.vpbank.dcp.core.port.out.security.DpopExpectation;
+import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
+import com.vpbank.dcp.core.port.out.security.InvalidDpopProofException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -30,7 +33,7 @@ class CryptoVectorsTest {
         JsonNode vectors = ContractVectors.load();
         String token = vectors.path("dpop").path("token").asText();
         String jkt = vectors.path("keys").path("Kreq").path("jkt").asText();
-        DpopProofVerifier verifier = new DpopProofVerifier(digests, strictJson);
+        SpringDpopProofDecoder verifier = new SpringDpopProofDecoder(digests, strictJson);
         var expected = DpopExpectation.forToken("GET", URI.create("https://api.bank.example/api/accounts"),
                 new RequestKeyThumbprint(Digest32.fromBase64Url(jkt)),
                 vectors.path("dpop").path("protectedPayload").path("nonce").asText(),
@@ -44,11 +47,11 @@ class CryptoVectorsTest {
         assertThatThrownBy(() -> verifier.verify(vectors.path("dpop").path("protected").asText(),
                 DpopExpectation.forToken("POST", expected.externalUri(), expected.requestKey(),
                         expected.nonce(), token, expected.now())))
-                .isInstanceOf(InvalidCryptographicInputException.class);
+                .isInstanceOf(InvalidDpopProofException.class);
         assertThatThrownBy(() -> verifier.verify(vectors.path("dpop").path("protected").asText(),
                 DpopExpectation.forToken("GET", expected.externalUri(), expected.requestKey(),
                         expected.nonce(), "stolen-token", expected.now())))
-                .isInstanceOf(InvalidCryptographicInputException.class);
+                .isInstanceOf(InvalidDpopProofException.class);
     }
 
     @Test

@@ -8,7 +8,7 @@ import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.adapter.in.web.InvalidExternalUriException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.error.ApiErrorHandler;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.DpopExpectation;
+import com.vpbank.dcp.core.port.out.security.DpopExpectation;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.InvalidCryptographicInputException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.TokenLookupHasher;

@@ -22,7 +22,7 @@ import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationProgress;
 import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
-import java.net.URI;
+import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -48,9 +48,7 @@ class VerifyPasswordLoginIdentityServiceTest {
         Instant now = Instant.now();
         PasswordOperationContext operation = new PasswordOperationContext(operationId,
                 "neo-mobile", "ANDROID", "installation-test", "alice", null);
-        PasswordWireProofs proofs = new PasswordWireProofs(
-                URI.create("https://api.bank.test/api/v1/authentications/password"),
-                "dpop", "request-proof", null, "{}");
+        PasswordWireProofs proofs = new PasswordWireProofs(mock(VerifiedDpopProof.class), "request-proof", null, "{}");
         return new PasswordLoginCommand(operation, credential, proofs, now,
                 now.plusSeconds(120), now.plusSeconds(300));
     }

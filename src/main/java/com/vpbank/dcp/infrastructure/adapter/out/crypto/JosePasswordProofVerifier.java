@@ -9,6 +9,7 @@ import com.nimbusds.jose.util.JSONObjectUtils;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.InvalidPasswordProofException;
 import com.vpbank.dcp.core.port.out.password.PasswordProofIds;
@@ -39,13 +40,10 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
     private static final Set<String> JWS_HEADERS = Set.of("alg", "kid", "typ");
     private static final Set<String> RECIPIENT_MEMBERS = Set.of("kty", "crv", "x", "y");
 
-    private final DpopProofVerifier dpopVerifier;
     private final StrictJoseJson strictJson;
     private final Sha256Digests digests;
 
-    public JosePasswordProofVerifier(DpopProofVerifier dpopVerifier,
-                                     StrictJoseJson strictJson, Sha256Digests digests) {
-        this.dpopVerifier = Objects.requireNonNull(dpopVerifier, "dpopVerifier");
+    public JosePasswordProofVerifier(StrictJoseJson strictJson, Sha256Digests digests) {
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
         this.digests = Objects.requireNonNull(digests, "digests");
     }
@@ -69,9 +67,8 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
             throw new InvalidCryptographicInputException();
         }
 
-        VerifiedDpopProof dpop = dpopVerifier.verify(request.wire().dpop(),
-                DpopExpectation.forInitial("POST", request.wire().externalUri(), request.now()));
-        ECKey requestKey = dpopPublicKey(request.wire().dpop(), dpop.requestKey().digest());
+        VerifiedDpopProof dpop = request.wire().dpop();
+        ECKey requestKey = verifiedRequestKey(dpop);
         ECKey responseKey = recipientKey(request.wire().responsePublicJwk());
         Digest32 responseThumbprint = thumbprint(responseKey);
         String installationHash = digests.sha256(
@@ -97,11 +94,11 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
                 responseKey.toPublicJWK().toJSONString());
     }
 
-    private ECKey dpopPublicKey(String compact, Digest32 expectedThumbprint) {
+    private ECKey verifiedRequestKey(VerifiedDpopProof verified) {
         try {
-            SignedJWT proof = SignedJWT.parse(compact);
-            if (!(proof.getHeader().getJWK() instanceof ECKey key)
-                    || !thumbprint(key).equals(expectedThumbprint)) {
+            ECKey key = ECKey.parse(verified.publicJwk());
+            if (key.isPrivate() || !Curve.P_256.equals(key.getCurve())
+                    || !thumbprint(key).equals(verified.requestKey().digest())) {
                 throw new InvalidCryptographicInputException();
             }
             return key;

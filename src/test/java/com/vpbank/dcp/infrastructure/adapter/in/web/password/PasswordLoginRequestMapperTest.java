@@ -14,6 +14,9 @@ import com.vpbank.dcp.core.port.in.password.PasswordLoginCommand;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
+import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
+import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
+import com.vpbank.dcp.infrastructure.adapter.in.web.security.SecurityErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.error.ApiErrorHandler;
 import com.vpbank.dcp.infrastructure.config.JsonConfiguration;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
@@ -45,6 +48,7 @@ class PasswordLoginRequestMapperTest {
     private static final String DPOP = "p".repeat(64);
     private final PasswordLoginUseCase passwords = mock(PasswordLoginUseCase.class);
     private final LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
+    private final VerifiedDpopProof dpop = mock(VerifiedDpopProof.class);
     private JsonMapper json;
     private MockMvc mvc;
 
@@ -56,14 +60,17 @@ class PasswordLoginRequestMapperTest {
         }
         json = builder.build();
         Clock clock = Clock.fixed(Instant.parse("2026-10-12T00:00:00Z"), ZoneOffset.UTC);
-        var mapper = new PasswordLoginRequestMapper(new ExternalUriPolicy("https://api.bank.example"),
-                new PasswordFlowProperties("k1", "unused", "v1", 30_000, 120_000, 300_000), json, clock);
+        var mapper = new PasswordLoginRequestMapper(new PasswordFlowProperties("k1", "unused", "v1", 30_000, 120_000, 300_000), json, clock);
+        DpopProofDecoder decoder = mock(DpopProofDecoder.class);
+        when(decoder.verify(any(), any())).thenReturn(dpop);
         validator.afterPropertiesSet();
         mvc = MockMvcBuilders.standaloneSetup(new PasswordLoginController(mapper, passwords,
                         new PasswordLoginResponseMapper(clock)))
                 .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
                 .setValidator(validator)
-                .setControllerAdvice(new PasswordLoginBodyAdvice(), new ApiErrorHandler()).build();
+                .setControllerAdvice(new PasswordLoginBodyAdvice(), new ApiErrorHandler())
+                .addFilter(new DpopProofFilter(decoder, new ExternalUriPolicy("https://api.bank.example"),
+                        clock, new SecurityErrorResponse(json))).build();
         when(passwords.login(any())).thenReturn(new PasswordLoginResult.Rejected());
     }
 
@@ -86,9 +93,7 @@ class PasswordLoginRequestMapperTest {
         assertThat(command.getValue().credential().password()).isEqualTo(password);
         assertThat(command.getValue().credential().username()).isEqualTo("alice");
         assertThat(command.getValue().operation().operationId().toString()).isEqualTo(OPERATION);
-        assertThat(command.getValue().proofs().dpop()).isEqualTo(DPOP);
-        assertThat(command.getValue().proofs().externalUri().toString())
-                .isEqualTo("https://api.bank.example/api/v1/authentications/password");
+        assertThat(command.getValue().proofs().dpop()).isSameAs(dpop);
         assertThat(command.getValue().credentialDeadline()).isEqualTo(Instant.parse("2026-10-12T00:02:00Z"));
         assertThat(command.getValue().toString()).doesNotContain(password);
         var parsed = json.readValue(body, PasswordLoginRequest.class);

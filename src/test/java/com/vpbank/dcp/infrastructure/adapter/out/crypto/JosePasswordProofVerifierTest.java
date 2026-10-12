@@ -3,6 +3,7 @@ package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.vpbank.dcp.core.port.out.password.InvalidPasswordProofException;
+import com.vpbank.dcp.core.port.out.security.DpopExpectation;
 
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -31,7 +32,7 @@ class JosePasswordProofVerifierTest {
     private final StrictJoseJson json = new StrictJoseJson();
     private final Sha256Digests digests = new Sha256Digests();
     private final JosePasswordProofVerifier verifier = new JosePasswordProofVerifier(
-            new DpopProofVerifier(digests, json), json, digests);
+            json, digests);
 
     @Test
     void verifiesKreqKdevAndKencAgainstTheSameOperation() throws Exception {
@@ -78,8 +79,10 @@ class JosePasswordProofVerifierTest {
                 vector.path("installationId").asText(), username,
                 UUID.fromString("22222222-2222-4222-8222-222222222222"));
         var wire = new PasswordWireProofs(
-                URI.create("https://api.bank.example/api/v1/authentications/password"),
-                dpop(), vector.path("requestKeyProof").asText(),
+                new SpringDpopProofDecoder(digests, json).verify(dpop(),
+                        DpopExpectation.forInitial("POST",
+                                URI.create("https://api.bank.example/api/v1/authentications/password"),
+                                Instant.ofEpochSecond(1791687601))), vector.path("requestKeyProof").asText(),
                 vector.path("deviceProof").asText(), recipientJwk);
         return new PasswordProofRequest(operation, wire, Instant.ofEpochSecond(1791687601));
     }

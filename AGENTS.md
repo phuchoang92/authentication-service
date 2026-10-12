@@ -10,14 +10,22 @@ Core is JDK-only and owns ports. Infrastructure owns Spring, HTTP, JPA, Redis an
 
 The approved persistence refactor uses core `...Repository` ports and `Jpa...Adapter`
 implementations, overriding the older Store naming examples in the shared design rules.
-Keep adapters in `infrastructure.adapter.out.persistence.<capability>` and internal
-repositories, entities, projections, codecs and SQL in
-`infrastructure.adapter.out.persistence.repository.<capability>`. Custom EntityManager
-repositories use `...PersistenceRepository`; Spring Data interfaces use `...JpaRepository`.
+Persistence now uses the user-approved `infrastructure.persistence` root, grouped by
+technical role: `adapter`, `repository`, `entity`, `projection`, `mapper` and `codec`.
+Do not introduce customer/password/session subpackages in this persistence tree. Core
+continues to organize ports/domain by capability. This layout overrides the older
+persistence package examples in shared documentation. Custom EntityManager repositories
+use `...PersistenceRepository`; Spring Data interfaces use `...JpaRepository`.
 Do not introduce classes with the Reader suffix or aliases for the replaced SQL ports.
 
 Adapters own transaction boundaries, lock order and multi-statement transitions.
-Repositories only bind/execute SQL, map typed projections and check affected rows.
+Repositories only bind/execute SQL, extract typed database projections and check affected
+rows. Handwritten stateless `...PersistenceMapper` classes restore domain/core result
+values; adapters call them. Entities and projections contain database values only, with
+no core object components or domain conversion methods. Preserve defensive byte copies,
+content equality and redacted output. Existing core-typed write parameters remain allowed;
+repositories must not construct core values or depend on adapters/mappers. Mappers perform
+no I/O, clock access, transaction orchestration or freshness decisions.
 `PasswordOperationJpaRepository` exposes read projections for progress and verified
 identity only. Guarded reads, joins, locks and mutations use EntityManager repositories;
 never use a previously loaded entity for a decision after acquiring locks. No JPA caches,

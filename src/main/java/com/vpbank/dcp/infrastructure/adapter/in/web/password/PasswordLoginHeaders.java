@@ -7,11 +7,9 @@ import org.springframework.http.HttpHeaders;
 /** Login headers are parsed independently of the JSON body. */
 public final class PasswordLoginHeaders {
     private final UUID operationId;
-    private final String dpopProof;
 
-    private PasswordLoginHeaders(UUID operationId, String dpopProof) {
+    private PasswordLoginHeaders(UUID operationId) {
         this.operationId = operationId;
-        this.dpopProof = dpopProof;
     }
 
     public static PasswordLoginHeaders from(HttpHeaders headers) {
@@ -20,13 +18,12 @@ public final class PasswordLoginHeaders {
             throw new InvalidPasswordLoginRequestException();
         }
         String operation = single(headers, "Idempotency-Key", 36, 36);
-        String proof = single(headers, "DPoP", 64, 4096);
         try {
             UUID operationId = UUID.fromString(operation);
             if (!operationId.toString().equals(operation)) {
                 throw new InvalidPasswordLoginRequestException();
             }
-            return new PasswordLoginHeaders(operationId, proof);
+            return new PasswordLoginHeaders(operationId);
         } catch (IllegalArgumentException invalid) {
             throw new InvalidPasswordLoginRequestException(invalid);
         }
@@ -43,7 +40,6 @@ public final class PasswordLoginHeaders {
     }
 
     public UUID operationId() { return operationId; }
-    public String dpopProof() { return dpopProof; }
 
     @Override
     public String toString() {
