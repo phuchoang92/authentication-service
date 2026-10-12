@@ -1,14 +1,14 @@
 package com.vpbank.dcp.infrastructure.config;
 
 import com.nimbusds.jose.jwk.ECKey;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ChallengeSigningInput;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.LengthPrefixedSigningInputEncoder;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.DpopProofVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.EnrollmentProofVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JcsCommandDigest;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JweEnvelopeInspector;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JosePasswordProofVerifier;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ProofDigests;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.SignedContextVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.core.port.out.password.PasswordProofVerifier;
@@ -29,8 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
 public class CryptoConfiguration {
 
     @Bean
-    ProofDigests proofDigests() {
-        return new ProofDigests();
+    Sha256Digests proofDigests() {
+        return new Sha256Digests();
     }
 
     @Bean
@@ -39,34 +39,34 @@ public class CryptoConfiguration {
     }
 
     @Bean
-    DpopProofVerifier dpopProofVerifier(ProofDigests digests, StrictJoseJson json) {
+    DpopProofVerifier dpopProofVerifier(Sha256Digests digests, StrictJoseJson json) {
         return new DpopProofVerifier(digests, json);
     }
 
     @Bean
     PasswordProofVerifier passwordProofVerifier(DpopProofVerifier dpop, StrictJoseJson json,
-                                                ProofDigests digests) {
+                                                Sha256Digests digests) {
         return new JosePasswordProofVerifier(dpop, json, digests);
     }
 
     @Bean
-    JweEnvelopeInspector jweEnvelopeInspector(ProofDigests digests, StrictJoseJson json) {
+    JweEnvelopeInspector jweEnvelopeInspector(Sha256Digests digests, StrictJoseJson json) {
         return new JweEnvelopeInspector(digests, json);
     }
 
     @Bean
-    EnrollmentProofVerifier enrollmentProofVerifier(StrictJoseJson json, ProofDigests digests) {
+    EnrollmentProofVerifier enrollmentProofVerifier(StrictJoseJson json, Sha256Digests digests) {
         return new EnrollmentProofVerifier(json, digests);
     }
 
     @Bean
-    JcsCommandDigest jcsCommandDigest(StrictJoseJson json, ProofDigests digests) {
+    JcsCommandDigest jcsCommandDigest(StrictJoseJson json, Sha256Digests digests) {
         return new JcsCommandDigest(json, digests);
     }
 
     @Bean
-    ChallengeSigningInput challengeSigningInput() {
-        return new ChallengeSigningInput();
+    LengthPrefixedSigningInputEncoder challengeSigningInput() {
+        return new LengthPrefixedSigningInputEncoder();
     }
 
     @Bean

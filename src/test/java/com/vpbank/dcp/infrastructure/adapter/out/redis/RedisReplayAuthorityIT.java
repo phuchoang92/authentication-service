@@ -17,7 +17,7 @@ import com.vpbank.dcp.core.port.out.authority.ControlClosure;
 import com.vpbank.dcp.core.port.out.authority.ControlCloseResult;
 import com.vpbank.dcp.core.port.out.authority.ClosedGeneration;
 import com.vpbank.dcp.core.port.out.authority.GenerationInstallResult;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ProofDigests;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GenerationKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GuardKeys;
@@ -72,7 +72,7 @@ class RedisReplayAuthorityIT {
     private StringRedisTemplate redis;
     private GenerationKeys generationKeys;
     private ReplayKeys replayKeys;
-    private RedisReplayProtectionAdapter adapter;
+    private RedisReplayProtection adapter;
     private UUID generation;
 
     @BeforeEach
@@ -88,7 +88,7 @@ class RedisReplayAuthorityIT {
         generation = UUID.randomUUID();
         DefaultRedisScript<String> script = VerifiedAuthorityScript.load(
                 "redis/replay_reserve.lua", SCRIPT_SHA256);
-        adapter = new RedisReplayProtectionAdapter(redis, replayKeys, generationKeys, script);
+        adapter = new RedisReplayProtection(redis, replayKeys, generationKeys, script);
     }
 
     @AfterEach
@@ -102,7 +102,7 @@ class RedisReplayAuthorityIT {
         ReplayAttempt attempt = attempt();
         DefaultRedisScript<String> script = VerifiedAuthorityScript.load(
                 "redis/replay_reserve.lua", SCRIPT_SHA256);
-        var secondReplica = new RedisReplayProtectionAdapter(redis, replayKeys, generationKeys, script);
+        var secondReplica = new RedisReplayProtection(redis, replayKeys, generationKeys, script);
 
         assertThat(adapter.reserve(attempt)).isEqualTo(ReplayReservation.RESERVED);
         assertThat(secondReplica.reserve(attempt)).isEqualTo(ReplayReservation.REPLAYED);
@@ -197,7 +197,7 @@ class RedisReplayAuthorityIT {
             }
         };
         uncertainTransport.afterPropertiesSet();
-        var uncertainReplica = new RedisReplayProtectionAdapter(uncertainTransport,
+        var uncertainReplica = new RedisReplayProtection(uncertainTransport,
                 replayKeys, generationKeys,
                 VerifiedAuthorityScript.load("redis/replay_reserve.lua", SCRIPT_SHA256));
         ReplayAttempt proof = attempt();
@@ -220,7 +220,7 @@ class RedisReplayAuthorityIT {
 
         RequestKeyThumbprint key = new RequestKeyThumbprint(Digest32.fromBase64Url(
                 vectors.path("keys").path("Kreq").path("jkt").asText()));
-        Digest32 proofId = new ProofDigests().ofProofId("proof-test-vector-00000002");
+        Digest32 proofId = new Sha256Digests().ofProofId("proof-test-vector-00000002");
         assertThat(replayKeys.forDpop(key, proofId))
                 .isEqualTo(authority.path("replayKey").asText());
     }
@@ -346,18 +346,18 @@ class RedisReplayAuthorityIT {
 
     private PasswordReplayAttempt passwordAttempt() {
         ReplayAttempt dpop = attempt();
-        Digest32 deviceKey = new ProofDigests().ofProofId("fixture-device-thumbprint");
+        Digest32 deviceKey = new Sha256Digests().ofProofId("fixture-device-thumbprint");
         return new PasswordReplayAttempt(dpop.requestKey(), deviceKey,
                 new PasswordProofIds(dpop.proofIdDigest(),
-                        new ProofDigests().ofProofId("fixture-request-proof"),
-                        new ProofDigests().ofProofId("fixture-device-proof")));
+                        new Sha256Digests().ofProofId("fixture-request-proof"),
+                        new Sha256Digests().ofProofId("fixture-device-proof")));
     }
 
     private ReplayAttempt attempt() {
         byte[] digest = new byte[32];
         digest[0] = 7;
         return new ReplayAttempt(new RequestKeyThumbprint(Digest32.fromBytes(digest)),
-                new ProofDigests().ofProofId("unique-proof-for-this-test"), generation);
+                new Sha256Digests().ofProofId("unique-proof-for-this-test"), generation);
     }
 
     private void setReady(Instant deadline) {

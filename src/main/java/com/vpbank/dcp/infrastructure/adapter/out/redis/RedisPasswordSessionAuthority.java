@@ -3,7 +3,7 @@ package com.vpbank.dcp.infrastructure.adapter.out.redis;
 import com.vpbank.dcp.core.port.out.session.PasswordSessionAuthority;
 import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ProofDigests;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingControlCodec;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.codec.ServingState;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ApplyReceiptKeys;
@@ -38,7 +38,7 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
     private final String feedSource;
     private final Duration nonceValidity;
     private final Clock clock;
-    private final ProofDigests digests = new ProofDigests();
+    private final Sha256Digests digests = new Sha256Digests();
 
     public RedisPasswordSessionAuthority(StringRedisTemplate redis,
                                          RedisServerIdentity identity, AuthorityScope scope,

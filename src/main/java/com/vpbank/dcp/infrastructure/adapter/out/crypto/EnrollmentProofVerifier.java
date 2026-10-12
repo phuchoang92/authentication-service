@@ -20,9 +20,9 @@ public final class EnrollmentProofVerifier {
             "inputDigest", "newKeyJkt", "commandDigest", "jti", "iat", "exp");
 
     private final StrictJoseJson strictJson;
-    private final ProofDigests digests;
+    private final Sha256Digests digests;
 
-    public EnrollmentProofVerifier(StrictJoseJson strictJson, ProofDigests digests) {
+    public EnrollmentProofVerifier(StrictJoseJson strictJson, Sha256Digests digests) {
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
         this.digests = Objects.requireNonNull(digests, "digests");
     }

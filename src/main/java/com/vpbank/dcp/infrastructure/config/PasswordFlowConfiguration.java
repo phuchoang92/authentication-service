@@ -1,66 +1,33 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.application.password.CustomerAcceptanceService;
-import com.vpbank.dcp.core.application.password.CustomerSnapshotCheckService;
-import com.vpbank.dcp.core.application.password.PasswordAdmissionService;
-import com.vpbank.dcp.core.application.password.PasswordAuthenticationService;
-import com.vpbank.dcp.core.application.password.PasswordAvailabilityPolicy;
-import com.vpbank.dcp.core.application.password.PasswordCredentialCheckService;
-import com.vpbank.dcp.core.application.password.PasswordDeviceRouteService;
-import com.vpbank.dcp.core.application.password.PasswordLoginRouteService;
-import com.vpbank.dcp.core.application.password.PasswordSessionService;
-import com.vpbank.dcp.core.application.session.BankingAdmissionService;
+import com.nimbusds.jose.jwk.ECKey;
+import com.vpbank.dcp.core.application.password.*;
+import com.vpbank.dcp.core.application.session.BankingRequestAdmissionService;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRouting;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
-import com.vpbank.dcp.core.port.in.password.AuthenticateWithPassword;
-import com.vpbank.dcp.core.port.in.session.AdmitBankingRequest;
+import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
+import com.vpbank.dcp.core.port.in.session.BankingRequestAdmissionUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerStore;
 import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
-import com.vpbank.dcp.core.port.out.password.PasswordCommandHasher;
-import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyStore;
-import com.vpbank.dcp.core.port.out.password.PasswordDeviceRouteStore;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationStore;
-import com.vpbank.dcp.core.port.out.password.PasswordProofReplay;
-import com.vpbank.dcp.core.port.out.password.PasswordProofVerifier;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionAuthority;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionCryptography;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionStore;
-import com.vpbank.dcp.core.port.out.session.BankingSessionAdmissionStore;
-import com.vpbank.dcp.core.port.out.session.SessionProofVerifier;
-import com.vpbank.dcp.core.port.out.session.CustomerContextSigner;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenIssuer;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ChallengeSigningInput;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.PasswordCommandHmac;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.PasswordSessionCryptoAdapter;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ProofDigests;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.TokenLookupHasher;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.DpopProofVerifier;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.DpopSessionProofVerifier;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.JwtCustomerContextSigner;
+import com.vpbank.dcp.core.port.out.password.*;
+import com.vpbank.dcp.core.port.out.session.*;
+import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginRequestMapper;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
+import com.vpbank.dcp.infrastructure.adapter.in.web.session.BankingRequestAdmissionRequestMapper;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.*;
 import com.vpbank.dcp.infrastructure.adapter.out.persistence.session.JpaPasswordSessionStore;
 import com.vpbank.dcp.infrastructure.adapter.out.persistence.session.PasswordSessionRepository;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisBankingSessionAdmissionStore;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisPasswordSessionAuthority;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisBankingSessionAdmission;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.VerifiedAuthorityScript;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
-import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.ForwardPasswordRequestMapper;
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordHttpResponseMapper;
-import com.vpbank.dcp.infrastructure.adapter.in.web.session.ForwardAdmissionMapper;
-import com.vpbank.dcp.infrastructure.config.properties.NativeSessionProperties;
 import com.vpbank.dcp.infrastructure.config.properties.CustomerContextSigningProperties;
+import com.vpbank.dcp.infrastructure.config.properties.NativeSessionProperties;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
 import jakarta.persistence.EntityManager;
-import java.security.SecureRandom;
-import java.time.Clock;
-import java.time.Duration;
-import java.util.Base64;
-import java.util.Map;
-import java.text.ParseException;
-import com.nimbusds.jose.jwk.ECKey;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -71,7 +38,16 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
-/** Assembles focused use cases; integration activation cannot be enabled in production. */
+import java.security.SecureRandom;
+import java.text.ParseException;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.Base64;
+import java.util.Map;
+
+/**
+ * Assembles focused use cases; integration activation cannot be enabled in production.
+ */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication
 @EnableConfigurationProperties({PasswordFlowProperties.class, NativeSessionProperties.class,
@@ -83,23 +59,25 @@ public class PasswordFlowConfiguration {
             "55305f7da8345d32d39b0dcee8e7917cbccfaa64f808dc482bbfb95f19123979";
 
     @Bean
-    Clock authenticationClock() { return Clock.systemUTC(); }
-
-    @Bean
-    ForwardPasswordRequestMapper forwardPasswordRequestMapper(ExternalUriPolicy uri,
-                                                               PasswordFlowProperties policy,
-                                                               JsonMapper json, Clock clock) {
-        return new ForwardPasswordRequestMapper(uri, policy, json, clock);
+    Clock authenticationClock() {
+        return Clock.systemUTC();
     }
 
     @Bean
-    PasswordHttpResponseMapper passwordHttpResponseMapper(Clock clock) {
-        return new PasswordHttpResponseMapper(clock);
+    PasswordLoginRequestMapper passwordLoginRequestMapper(ExternalUriPolicy uri,
+                                                              PasswordFlowProperties policy,
+                                                              JsonMapper json, Clock clock) {
+        return new PasswordLoginRequestMapper(uri, policy, json, clock);
     }
 
     @Bean
-    ForwardAdmissionMapper forwardAdmissionMapper(ExternalUriPolicy uri) {
-        return new ForwardAdmissionMapper(uri);
+    PasswordLoginResponseMapper passwordLoginResponseMapper(Clock clock) {
+        return new PasswordLoginResponseMapper(clock);
+    }
+
+    @Bean
+    BankingRequestAdmissionRequestMapper bankingRequestAdmissionRequestMapper(ExternalUriPolicy uri) {
+        return new BankingRequestAdmissionRequestMapper(uri);
     }
 
     @Bean
@@ -114,50 +92,50 @@ public class PasswordFlowConfiguration {
 
     @Bean
     PasswordCommandHasher passwordCommandHasher(PasswordFlowProperties properties,
-                                                ChallengeSigningInput encoding) {
+                                                LengthPrefixedSigningInputEncoder encoding) {
         return new PasswordCommandHmac(properties.commandKeyId(),
                 Map.of(properties.commandKeyId(), secret(properties.commandHmacBase64())), encoding);
     }
 
     @Bean
-    CustomerSnapshotCheckService customerSnapshotCheck(CustomerDirectory customers,
+    CheckCustomerLoginEligibilityService checkCustomerLoginEligibility(CustomerDirectory customers,
                                                        PasswordFlowProperties properties) {
-        return new CustomerSnapshotCheckService(customers,
+        return new CheckCustomerLoginEligibilityService(customers,
                 Duration.ofMillis(properties.customerStatusMaxAgeMs()));
     }
 
     @Bean
-    CustomerAcceptanceService customerAcceptance(CustomerSnapshotCheckService snapshots,
-                                                  CustomerOwnerStore owners,
-                                                  PasswordFlowProperties properties) {
-        return new CustomerAcceptanceService(snapshots, owners,
+    ConfirmPasswordLoginOwnerService confirmPasswordLoginOwner(CheckCustomerLoginEligibilityService snapshots,
+                                                 CustomerOwnerStore owners,
+                                                 PasswordFlowProperties properties) {
+        return new ConfirmPasswordLoginOwnerService(snapshots, owners,
                 properties.customerPolicyVersion());
     }
 
     @Bean
-    PasswordAdmissionService passwordAdmission(PasswordDeviceKeyStore keys,
-                                                PasswordProofVerifier proofs,
-                                                PasswordProofReplay replay,
-                                                PasswordCommandHasher commands,
-                                                PasswordOperationStore operations) {
-        return new PasswordAdmissionService(keys, proofs, replay, commands, operations);
+    ReservePasswordLoginService reservePasswordLogin(PasswordDeviceKeyStore keys,
+                                               PasswordProofVerifier proofs,
+                                               PasswordProofReplay replay,
+                                               PasswordCommandHasher commands,
+                                               PasswordOperationStore operations) {
+        return new ReservePasswordLoginService(keys, proofs, replay, commands, operations);
     }
 
     @Bean
-    PasswordCredentialCheckService passwordCredentials(PasswordAdmissionService admission,
+    VerifyPasswordLoginIdentityService verifyPasswordLoginIdentity(ReservePasswordLoginService admission,
                                                        PasswordOperationStore operations,
                                                        DirectGrantPasswordVerifier keycloak,
-                                                       CustomerAcceptanceService customers,
+                                                       ConfirmPasswordLoginOwnerService customers,
                                                        Clock clock) {
-        return new PasswordCredentialCheckService(admission, operations, keycloak, customers, clock);
+        return new VerifyPasswordLoginIdentityService(admission, operations, keycloak, customers, clock);
     }
 
     @Bean
-    PasswordLoginRouteService passwordRoutes(PasswordCredentialCheckService credentials,
+    PasswordLoginRouteService passwordRoutes(VerifyPasswordLoginIdentityService credentials,
                                              PasswordDeviceRouteStore deviceRoutes,
                                              PasswordOperationStore operations) {
         return new PasswordLoginRouteService(credentials,
-                new PasswordDeviceRouteService(deviceRoutes, new TrustedDeviceRouting()), operations);
+                new ResolveTrustedDeviceRouteService(deviceRoutes, new TrustedDeviceRouting()), operations);
     }
 
     @Bean
@@ -172,13 +150,15 @@ public class PasswordFlowConfiguration {
     }
 
     @Bean
-    SecureRandom authenticationRandom() { return new SecureRandom(); }
+    SecureRandom authenticationRandom() {
+        return new SecureRandom();
+    }
 
     @Bean
     PasswordSessionCryptography passwordSessionCryptography(NativeSessionProperties properties,
                                                             BankingTokenEnvelopeIssuer envelopes,
-                                                            ChallengeSigningInput encoding,
-                                                            ProofDigests digests,
+                                                            LengthPrefixedSigningInputEncoder encoding,
+                                                            Sha256Digests digests,
                                                             LookupKeyVersion version,
                                                             TokenLookupHasher lookup,
                                                             SecureRandom random) {
@@ -188,7 +168,7 @@ public class PasswordFlowConfiguration {
 
     @Bean
     PasswordSessionRepository passwordSessionRepository(EntityManager sql, JsonMapper json,
-                                                       PasswordFlowProperties properties) {
+                                                        PasswordFlowProperties properties) {
         return new PasswordSessionRepository(sql, json,
                 Duration.ofMillis(properties.customerStatusMaxAgeMs()));
     }
@@ -201,10 +181,10 @@ public class PasswordFlowConfiguration {
 
     @Bean
     PasswordSessionAuthority passwordSessionAuthority(StringRedisTemplate redis,
-                                                       RedisServerIdentity identity,
-                                                       AuthorityScope scope,
-                                                       NativeSessionProperties properties,
-                                                       Clock clock) {
+                                                      RedisServerIdentity identity,
+                                                      AuthorityScope scope,
+                                                      NativeSessionProperties properties,
+                                                      Clock clock) {
         return new RedisPasswordSessionAuthority(redis, identity, scope,
                 VerifiedAuthorityScript.load("redis/password_session_apply.lua", APPLY_SHA256),
                 VerifiedAuthorityScript.load("redis/password_session_deliver.lua", DELIVER_SHA256),
@@ -213,14 +193,14 @@ public class PasswordFlowConfiguration {
     }
 
     @Bean
-    PasswordSessionService passwordSessions(PasswordSessionStore store,
+    ActivatePasswordSessionService activatePasswordSession(PasswordSessionStore store,
                                             PasswordSessionCryptography cryptography,
                                             PasswordSessionAuthority authority, Clock clock) {
-        return new PasswordSessionService(store, cryptography, authority, clock);
+        return new ActivatePasswordSessionService(store, cryptography, authority, clock);
     }
 
     @Bean
-    SessionProofVerifier sessionProofVerifier(DpopProofVerifier dpop, ProofDigests digests) {
+    SessionProofVerifier sessionProofVerifier(DpopProofVerifier dpop, Sha256Digests digests) {
         return new DpopSessionProofVerifier(dpop, digests);
     }
 
@@ -237,30 +217,30 @@ public class PasswordFlowConfiguration {
 
     @Bean
     BankingSessionAdmissionStore bankingSessionAdmissionStore(StringRedisTemplate redis,
-                                                               RedisServerIdentity identity,
-                                                               TokenLookupHasher lookup,
-                                                               LookupKeyVersion version,
-                                                               AuthorityScope scope,
-                                                               NativeSessionProperties properties,
-                                                               SecureRandom random) {
-        return new RedisBankingSessionAdmission(redis, identity, lookup, version, scope,
+                                                              RedisServerIdentity identity,
+                                                              TokenLookupHasher lookup,
+                                                              LookupKeyVersion version,
+                                                              AuthorityScope scope,
+                                                              NativeSessionProperties properties,
+                                                              SecureRandom random) {
+        return new RedisBankingSessionAdmissionStore(redis, identity, lookup, version, scope,
                 VerifiedAuthorityScript.load("redis/password_session_deliver.lua", DELIVER_SHA256),
                 properties.customerFeedSource(), Duration.ofMillis(properties.nonceValidityMs()),
                 Duration.ofMillis(properties.nonceOverlapMs()), random);
     }
 
     @Bean
-    AdmitBankingRequest admitBankingRequest(BankingSessionAdmissionStore store,
+    BankingRequestAdmissionUseCase bankingRequestAdmissionUseCase(BankingSessionAdmissionStore store,
                                             SessionProofVerifier proofs,
                                             CustomerContextSigner contexts, Clock clock) {
-        return new BankingAdmissionService(store, proofs, contexts, clock);
+        return new BankingRequestAdmissionService(store, proofs, contexts, clock);
     }
 
     @Bean
-    AuthenticateWithPassword authenticateWithPassword(PasswordLoginRouteService routes,
-                                                      PasswordSessionService sessions,
+    PasswordLoginUseCase passwordLoginUseCase(PasswordLoginRouteService routes,
+                                                      ActivatePasswordSessionService sessions,
                                                       PasswordAvailabilityPolicy availability) {
-        return new PasswordAuthenticationService(routes, sessions, availability);
+        return new PasswordLoginService(routes, sessions, availability);
     }
 
     private byte[] secret(String encoded) {

@@ -29,7 +29,7 @@ import tools.jackson.databind.JsonNode;
 class JosePasswordProofVerifierTest {
 
     private final StrictJoseJson json = new StrictJoseJson();
-    private final ProofDigests digests = new ProofDigests();
+    private final Sha256Digests digests = new Sha256Digests();
     private final JosePasswordProofVerifier verifier = new JosePasswordProofVerifier(
             new DpopProofVerifier(digests, json), json, digests);
 

@@ -19,11 +19,11 @@ public final class PasswordCommandHmac implements PasswordCommandHasher {
 
     private final String activeKeyId;
     private final Map<String, byte[]> keys;
-    private final ChallengeSigningInput lengthPrefixEncoder;
-    private final ProofDigests digests = new ProofDigests();
+    private final LengthPrefixedSigningInputEncoder lengthPrefixEncoder;
+    private final Sha256Digests digests = new Sha256Digests();
 
     public PasswordCommandHmac(String activeKeyId, Map<String, byte[]> keys,
-                               ChallengeSigningInput lengthPrefixEncoder) {
+                               LengthPrefixedSigningInputEncoder lengthPrefixEncoder) {
         this.activeKeyId = Objects.requireNonNull(activeKeyId, "activeKeyId");
         Objects.requireNonNull(keys, "keys");
         this.lengthPrefixEncoder = Objects.requireNonNull(lengthPrefixEncoder,

@@ -7,7 +7,7 @@ import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.DirectGrantTokenClient;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.InvalidKeycloakClientConfigurationException;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakIdTokenVerifier;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakPasswordVerifierAdapter;
+import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakDirectGrantPasswordVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakTokenEndpoints;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.PrivateKeyJwtFactory;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalEndpoint;
@@ -63,7 +63,7 @@ public class KeycloakPrivateClientConfiguration {
                     new ExternalHttpClient(workloadHttpClient, settings), tokenEndpoint, assertions, clock);
             KeycloakIdTokenVerifier idTokens = new KeycloakIdTokenVerifier(trust.issuer(),
                     trust.keyId(), JWK.parse(trust.publicJwk()), strictJson, clock);
-            return new KeycloakPasswordVerifierAdapter(transport, idTokens);
+            return new KeycloakDirectGrantPasswordVerifier(transport, idTokens);
         } catch (IllegalArgumentException | ParseException failure) {
             throw new InvalidKeycloakClientConfigurationException(failure);
         }

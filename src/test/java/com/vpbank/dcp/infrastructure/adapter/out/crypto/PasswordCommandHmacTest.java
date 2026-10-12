@@ -25,7 +25,7 @@ class PasswordCommandHmacTest {
         JsonNode hmac = vector.path("commandHmac");
         var hasher = new PasswordCommandHmac("h1", Map.of("h1",
                 HexFormat.of().parseHex(hmac.path("testKeyHex").asText())),
-                new ChallengeSigningInput());
+                new LengthPrefixedSigningInputEncoder());
 
         assertThat(hasher.digest(command(vector, "fixture-password-ONLY",
                 vector.path("responseKeyJkt").asText()), "h1").base64Url())
@@ -47,7 +47,7 @@ class PasswordCommandHmacTest {
                 UUID.fromString(vector.path("operationId").asText()), "neo-mobile", "ANDROID",
                 vector.path("installationId").asText(), "alice",
                 UUID.fromString("22222222-2222-4222-8222-222222222222"));
-        Digest32 proofId = new ProofDigests().ofProofId("fixture-proof-id");
+        Digest32 proofId = new Sha256Digests().ofProofId("fixture-proof-id");
         var proofs = new VerifiedPasswordProofs(
                 new RequestKeyThumbprint(Digest32.fromBase64Url(
                         vector.path("requestKeyJkt").asText())),

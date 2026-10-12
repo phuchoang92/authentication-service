@@ -10,7 +10,7 @@ import com.vpbank.dcp.infrastructure.adapter.out.redis.key.GuardKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.InvalidAuthorityScopeException;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.InvalidCryptographicInputException;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ProofDigests;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -42,9 +42,9 @@ class AuthorityKeyFactoryTest {
 
     @Test
     void malformedUnicodeProofIdsCannotCollapseToTheSameDigest() {
-        assertThatThrownBy(() -> new ProofDigests().ofProofId("\uD800"))
+        assertThatThrownBy(() -> new Sha256Digests().ofProofId("\uD800"))
                 .isInstanceOf(InvalidCryptographicInputException.class);
-        assertThat(new ProofDigests().ofProofId("a:b"))
-                .isNotEqualTo(new ProofDigests().ofProofId("a%3Ab"));
+        assertThat(new Sha256Digests().ofProofId("a:b"))
+                .isNotEqualTo(new Sha256Digests().ofProofId("a%3Ab"));
     }
 }

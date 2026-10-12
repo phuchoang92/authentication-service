@@ -70,7 +70,7 @@ class PasswordOneShotVectorsTest {
     private String hmac(List<String> fields, byte[] key) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
-        byte[] input = new ChallengeSigningInput().encode(fields);
+        byte[] input = new LengthPrefixedSigningInputEncoder().encode(fields);
         String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(input));
         java.util.Arrays.fill(input, (byte) 0);
         return encoded;

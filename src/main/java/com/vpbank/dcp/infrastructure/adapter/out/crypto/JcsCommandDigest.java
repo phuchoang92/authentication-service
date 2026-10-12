@@ -9,9 +9,9 @@ import org.erdtman.jcs.JsonCanonicalizer;
 public final class JcsCommandDigest {
 
     private final StrictJoseJson strictJson;
-    private final ProofDigests digests;
+    private final Sha256Digests digests;
 
-    public JcsCommandDigest(StrictJoseJson strictJson, ProofDigests digests) {
+    public JcsCommandDigest(StrictJoseJson strictJson, Sha256Digests digests) {
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
         this.digests = Objects.requireNonNull(digests, "digests");
     }

@@ -41,10 +41,10 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
 
     private final DpopProofVerifier dpopVerifier;
     private final StrictJoseJson strictJson;
-    private final ProofDigests digests;
+    private final Sha256Digests digests;
 
     public JosePasswordProofVerifier(DpopProofVerifier dpopVerifier,
-                                     StrictJoseJson strictJson, ProofDigests digests) {
+                                     StrictJoseJson strictJson, Sha256Digests digests) {
         this.dpopVerifier = Objects.requireNonNull(dpopVerifier, "dpopVerifier");
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
         this.digests = Objects.requireNonNull(digests, "digests");

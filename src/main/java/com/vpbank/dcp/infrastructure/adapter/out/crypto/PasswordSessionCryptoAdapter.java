@@ -22,14 +22,14 @@ public final class PasswordSessionCryptoAdapter implements PasswordSessionCrypto
     private final TokenLookupHasher lookup;
     private final BankingTokenEnvelopeIssuer envelopes;
     private final LookupKeyVersion lookupVersion;
-    private final ChallengeSigningInput encoding;
-    private final ProofDigests digests;
+    private final LengthPrefixedSigningInputEncoder encoding;
+    private final Sha256Digests digests;
     private final SecureRandom random;
 
     public PasswordSessionCryptoAdapter(BankingTokenIssuer tokens, TokenLookupHasher lookup,
                                         BankingTokenEnvelopeIssuer envelopes,
                                         LookupKeyVersion lookupVersion,
-                                        ChallengeSigningInput encoding, ProofDigests digests,
+                                        LengthPrefixedSigningInputEncoder encoding, Sha256Digests digests,
                                         SecureRandom random) {
         this.tokens = Objects.requireNonNull(tokens);
         this.lookup = Objects.requireNonNull(lookup);

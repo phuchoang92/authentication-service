@@ -14,10 +14,10 @@ import java.util.Objects;
  */
 public final class JweEnvelopeInspector {
 
-    private final ProofDigests digests;
+    private final Sha256Digests digests;
     private final StrictJoseJson strictJson;
 
-    public JweEnvelopeInspector(ProofDigests digests, StrictJoseJson strictJson) {
+    public JweEnvelopeInspector(Sha256Digests digests, StrictJoseJson strictJson) {
         this.digests = Objects.requireNonNull(digests, "digests");
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
     }

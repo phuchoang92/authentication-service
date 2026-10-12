@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.CustomerStatus;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
-import com.vpbank.dcp.core.application.password.PasswordDeviceRouteService;
+import com.vpbank.dcp.core.application.password.ResolveTrustedDeviceRouteService;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRoute;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRouting;
 import com.vpbank.dcp.core.domain.security.Digest32;
@@ -266,13 +266,13 @@ class JpaCustomerOwnerStoreIT {
         assertThat(owners.accept(current, "neo-mobile", identity("kc-a"),
                 customer("CUST-1", 1, 0), "test-policy"))
                 .isInstanceOf(CustomerOwnerAcceptance.Accepted.class);
-        PasswordDeviceRouteService routing = new PasswordDeviceRouteService(
+        ResolveTrustedDeviceRouteService routing = new ResolveTrustedDeviceRouteService(
                 deviceRoutes, new TrustedDeviceRouting());
-        assertThat(routing.route(current, subjectId, "neo-mobile", Instant.now()))
+        assertThat(routing.resolve(current, subjectId, "neo-mobile", Instant.now()))
                 .isEqualTo(TrustedDeviceRoute.LAST_TRUSTED);
         jdbc.update("UPDATE auth_device_key SET status = 'REVOKED' WHERE binding_id = UUID_TO_BIN(?)",
                 bindingId.toString());
-        assertThat(routing.route(current, subjectId, "neo-mobile", Instant.now()))
+        assertThat(routing.resolve(current, subjectId, "neo-mobile", Instant.now()))
                 .isEqualTo(TrustedDeviceRoute.REJECTED);
     }
 

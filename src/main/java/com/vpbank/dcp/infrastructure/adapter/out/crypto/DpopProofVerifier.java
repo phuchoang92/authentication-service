@@ -25,10 +25,10 @@ public final class DpopProofVerifier {
     private static final Set<String> ALLOWED_CLAIMS = Set.of(
             "jti", "htm", "htu", "iat", "nonce", "ath");
 
-    private final ProofDigests digests;
+    private final Sha256Digests digests;
     private final StrictJoseJson strictJson;
 
-    public DpopProofVerifier(ProofDigests digests, StrictJoseJson strictJson) {
+    public DpopProofVerifier(Sha256Digests digests, StrictJoseJson strictJson) {
         this.digests = Objects.requireNonNull(digests, "digests");
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
     }

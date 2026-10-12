@@ -15,9 +15,9 @@ import java.util.Objects;
 /** DPoP signature/ath/JKT is checked before Redis compares the nonce digest. */
 public final class DpopSessionProofVerifier implements SessionProofVerifier {
     private final DpopProofVerifier dpop;
-    private final ProofDigests digests;
+    private final Sha256Digests digests;
 
-    public DpopSessionProofVerifier(DpopProofVerifier dpop, ProofDigests digests) {
+    public DpopSessionProofVerifier(DpopProofVerifier dpop, Sha256Digests digests) {
         this.dpop = Objects.requireNonNull(dpop);
         this.digests = Objects.requireNonNull(digests);
     }

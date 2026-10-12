@@ -9,7 +9,7 @@ import com.vpbank.dcp.infrastructure.adapter.out.redis.AuthorityRedisPreflight;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisAuthorityControl;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisGenerationInstaller;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisPasswordProofReplay;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisReplayProtectionAdapter;
+import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisReplayProtection;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisSubjectBlockStore;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.VerifiedAuthorityScript;
@@ -50,7 +50,7 @@ public class AuthorityConfiguration {
     ReplayProtection replayProtection(StringRedisTemplate redis, AuthorityScope scope) {
         DefaultRedisScript<String> script = VerifiedAuthorityScript.load(
                 "redis/replay_reserve.lua", REPLAY_SCRIPT_SHA256);
-        return new RedisReplayProtectionAdapter(
+        return new RedisReplayProtection(
                 redis, new ReplayKeys(scope), new GenerationKeys(scope), script);
     }
 

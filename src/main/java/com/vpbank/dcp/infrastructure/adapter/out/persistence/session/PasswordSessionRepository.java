@@ -5,7 +5,7 @@ import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.port.out.session.PasswordSessionFacts;
 import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ProofDigests;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import jakarta.persistence.EntityManager;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -24,7 +24,7 @@ public final class PasswordSessionRepository {
     private final EntityManager sql;
     private final JsonMapper json;
     private final Duration customerMaxAge;
-    private final ProofDigests digests = new ProofDigests();
+    private final Sha256Digests digests = new Sha256Digests();
 
     public PasswordSessionRepository(EntityManager sql, JsonMapper json,
                               Duration customerMaxAge) {

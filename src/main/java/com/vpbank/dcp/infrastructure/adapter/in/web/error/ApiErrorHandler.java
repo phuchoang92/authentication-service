@@ -1,8 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.error;
 
 import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.InvalidForwardPasswordRequestException;
-import com.vpbank.dcp.infrastructure.adapter.in.web.session.InvalidForwardAdmissionException;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.InvalidPasswordLoginRequestException;
+import com.vpbank.dcp.infrastructure.adapter.in.web.session.InvalidBankingAdmissionRequestException;
 import com.vpbank.dcp.core.port.out.session.SessionAuthorityUnavailableException;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -25,13 +25,13 @@ public class ApiErrorHandler {
         return safe(HttpStatus.BAD_REQUEST, "REQUEST_REJECTED", "The request was rejected", ignored);
     }
 
-    @ExceptionHandler(InvalidForwardPasswordRequestException.class)
-    public ResponseEntity<ApiError> invalidPasswordRequest(InvalidForwardPasswordRequestException ignored) {
+    @ExceptionHandler(InvalidPasswordLoginRequestException.class)
+    public ResponseEntity<ApiError> invalidPasswordRequest(InvalidPasswordLoginRequestException ignored) {
         return safe(HttpStatus.BAD_REQUEST, "REQUEST_REJECTED", "The request was rejected", ignored);
     }
 
-    @ExceptionHandler(InvalidForwardAdmissionException.class)
-    public ResponseEntity<ApiError> invalidAdmission(InvalidForwardAdmissionException ignored) {
+    @ExceptionHandler(InvalidBankingAdmissionRequestException.class)
+    public ResponseEntity<ApiError> invalidAdmission(InvalidBankingAdmissionRequestException ignored) {
         return safe(HttpStatus.BAD_REQUEST, "REQUEST_REJECTED", "The request was rejected", ignored);
     }
 

@@ -23,7 +23,7 @@ import tools.jackson.databind.JsonNode;
 class CryptoVectorsTest {
 
     private final StrictJoseJson strictJson = new StrictJoseJson();
-    private final ProofDigests digests = new ProofDigests();
+    private final Sha256Digests digests = new Sha256Digests();
 
     @Test
     void dpopProofBindsMethodUriTokenNonceAndKreq() throws Exception {
@@ -97,7 +97,7 @@ class CryptoVectorsTest {
         var input = vectors.path("inputs").path("deviceLogin");
         List<String> fields = new java.util.ArrayList<>();
         input.path("fields").forEach(value -> fields.add(value.asText()));
-        byte[] encoded = new ChallengeSigningInput().encode(fields);
+        byte[] encoded = new LengthPrefixedSigningInputEncoder().encode(fields);
         assertThat(Base64.getUrlEncoder().withoutPadding().encodeToString(encoded))
                 .isEqualTo(input.path("bytes").asText());
         assertThat(digests.sha256(encoded).base64Url()).isEqualTo(input.path("sha256").asText());
