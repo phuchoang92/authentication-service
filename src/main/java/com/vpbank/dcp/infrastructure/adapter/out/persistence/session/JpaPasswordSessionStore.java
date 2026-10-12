@@ -4,13 +4,16 @@ import com.vpbank.dcp.core.port.out.session.PasswordSessionFacts;
 import com.vpbank.dcp.core.port.out.session.PasswordSessionStore;
 import com.vpbank.dcp.core.port.out.session.PrepareSessionResult;
 import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import java.time.Clock;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.transaction.support.TransactionTemplate;
 
-/** Subject-first short transactions; no Redis or network call is made under SQL locks. */
+/**
+ * Subject-first short transactions; no Redis or network call is made under SQL locks.
+ */
 public final class JpaPasswordSessionStore implements PasswordSessionStore {
     private final PasswordSessionRepository repository;
     private final TransactionTemplate transactions;

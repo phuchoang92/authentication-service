@@ -1,6 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.out.persistence.session;
 
-/** Complete statements for the password-session capability; no query assembly in methods. */
+/**
+ * Complete statements for the password-session capability; no query assembly in methods.
+ */
 final class PasswordSessionSql {
     static final String OPERATION_SUBJECT = """
             SELECT BIN_TO_UUID(subject_id) FROM auth_operation
@@ -148,5 +150,6 @@ final class PasswordSessionSql {
              WHERE id = UUID_TO_BIN(:intentId) AND operation_id = UUID_TO_BIN(:operationId)
             """;
 
-    private PasswordSessionSql() { }
+    private PasswordSessionSql() {
+    }
 }
