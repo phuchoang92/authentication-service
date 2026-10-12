@@ -33,6 +33,15 @@ The G2 contract and reservation gate have advanced:
 
 Password ingress uses a direct typed JSON body with username/password unchanged; `DPoP` and `Idempotency-Key` are separate HTTP headers. BFF forwards body bytes directly without a Base64 or `original` envelope. Auth bounds the body to 64 KiB, rejects duplicate/unknown JSON fields, validates headers separately and derives the public DPoP target from trusted configuration.
 
+The password HTTP boundary keeps request and response DTOs in
+`infrastructure.adapter.in.web.password.dto`. `PasswordLoginRequest` retains the direct
+validated JSON body and input-only password; `PasswordLoginResponse` is the typed union
+of ACTIVE, PROCESSING and error DTOs. The controller and response mapper return
+`ResponseEntity<PasswordLoginResponse>` rather than untyped response maps. The existing
+JSON names, response statuses, UUID strings, date-time strings and response headers stay
+unchanged. `DpopProofFilter` and its verified-proof attribute constants live in
+`infrastructure.adapter.in.web.security` (with constants under `security.constant`).
+
 Spring Security owns the stateless inbound security chain. X.509 authenticates the TLS workload certificate against the exact configured URI-SAN allowlist. The password DPoP filter runs after workload authorization and before MVC reads the JSON body; `DPoPProofJwtDecoderFactory` verifies signature/type, and Spring claim validators enforce the server-pinned method/URI, required JTI and 30-second age/5-second future bounds. Auth additionally enforces its ES256/P-256, nonce and token-hash profile. The filter passes a core-owned `VerifiedDpopProof` request attribute containing the verified public JWK, thumbprint and proof-ID digest. The controller/body mapper never forwards raw DPoP into the use case, and Kreq verification no longer reparses or re-verifies it. Shared replay remains in the existing Redis password-proof reservation before provider dispatch; Spring's default in-memory DPoP replay cache is not used. Form login, HTTP Basic, browser sessions and request caching are disabled on this private workload boundary. Core has no Spring dependencies.
 
 The one-request password route exists at BFF `POST /api/v1/authentications/password` and private Auth `POST /internal/v1/authentications/password`. The BFF route is enabled only with the `integration` profile and explicit mTLS settings. Auth reserves and verifies the one-shot command, checks the current Customer/device route, and can issue an encrypted ACTIVE banking token only for `LAST_TRUSTED` while `AUTH_INTEGRATION_ACTIVE_ENABLED=true` under the `integration` profile. `OTHER_TRUSTED` and `NEW_DEVICE` return safe 503 without a fabricated MFA challenge or token. MFA is an external HTTP service, but the G3 integration is not implemented here. Auth publishes session and nonce records to Redis; its former private banking-request admission endpoint and its dedicated proof/context adapters have been removed. BFF-side Redis admission is a separate implementation task and is not verified by Auth tests.
@@ -132,6 +141,12 @@ worktree also contained concurrent Spring Security/crypto changes; the increase 
 baseline is not solely attributable to persistence. Tests used UTC JVMs and isolated
 Testcontainers storage. SQL query bodies, migrations, Redis and the five core Repository
 ports were preserved. Historical verification results above remain unchanged.
+
+The subsequent HTTP DTO and filter-package refactor passed `test` with 180
+unit/architecture tests, zero failures/errors/skips. New serialization regressions check
+ACTIVE metadata, PROCESSING, errors, expiry bounds and date-time strings; the existing
+request-validation and Spring Security filter-chain tests also pass. Storage/provider
+integration tests were not rerun for this HTTP-only change.
 
 On the current Mac, the verified command is:
 

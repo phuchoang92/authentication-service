@@ -1,4 +1,4 @@
-package com.vpbank.dcp.infrastructure.adapter.in.web.password;
+package com.vpbank.dcp.infrastructure.adapter.in.web.password.dto;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -8,24 +8,33 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** Direct JSON body. Credentials are input-only and absent from diagnostic output. */
+/**
+ * Direct JSON body. Credentials are input-only and absent from diagnostic output.
+ */
 public final class PasswordLoginRequest {
-    @NotNull @Pattern(regexp = "neo-mobile")
+    @NotNull
+    @Pattern(regexp = "neo-mobile")
     private final String appId;
-    @NotNull @Pattern(regexp = "ANDROID|IOS")
+    @NotNull
+    @Pattern(regexp = "ANDROID|IOS")
     private final String platform;
-    @NotNull @Size(min = 16, max = 300)
+    @NotNull
+    @Size(min = 16, max = 300)
     private final String installationId;
-    @NotBlank @Size(max = 320)
+    @NotBlank
+    @Size(max = 320)
     private final String username;
-    @NotNull @Size(min = 1, max = 1024)
+    @NotNull
+    @Size(min = 1, max = 1024)
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private final String password;
     @Pattern(regexp = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
     private final String deviceBindingId;
-    @NotNull @Valid
+    @NotNull
+    @Valid
     private final ResponseEncryptionKeyRequest responseKey;
-    @NotNull @Size(min = 64, max = 8192)
+    @NotNull
+    @Size(min = 64, max = 8192)
     private final String requestKeyProof;
     @Size(min = 64, max = 8192)
     private final String deviceProof;
@@ -52,15 +61,41 @@ public final class PasswordLoginRequest {
         this.deviceProof = deviceProof;
     }
 
-    public String appId() { return appId; }
-    public String platform() { return platform; }
-    public String installationId() { return installationId; }
-    public String username() { return username; }
-    public String password() { return password; }
-    public String deviceBindingId() { return deviceBindingId; }
-    public ResponseEncryptionKeyRequest responseKey() { return responseKey; }
-    public String requestKeyProof() { return requestKeyProof; }
-    public String deviceProof() { return deviceProof; }
+    public String appId() {
+        return appId;
+    }
+
+    public String platform() {
+        return platform;
+    }
+
+    public String installationId() {
+        return installationId;
+    }
+
+    public String username() {
+        return username;
+    }
+
+    public String password() {
+        return password;
+    }
+
+    public String deviceBindingId() {
+        return deviceBindingId;
+    }
+
+    public ResponseEncryptionKeyRequest responseKey() {
+        return responseKey;
+    }
+
+    public String requestKeyProof() {
+        return requestKeyProof;
+    }
+
+    public String deviceProof() {
+        return deviceProof;
+    }
 
     @Override
     public String toString() {

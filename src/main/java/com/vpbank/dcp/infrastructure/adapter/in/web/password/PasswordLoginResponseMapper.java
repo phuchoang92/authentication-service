@@ -2,10 +2,15 @@ package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
 import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginProcessingResponse;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginResponse;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.Map;
 import java.util.UUID;
+
+import org.jspecify.annotations.NonNull;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,29 +23,14 @@ public final class PasswordLoginResponseMapper {
         this.clock = clock;
     }
 
-    public ResponseEntity<?> map(UUID operationId, PasswordLoginResult result) {
-        if (result instanceof PasswordLoginResult.Active active) {
-            PreparedPasswordSession session = active.session();
+    public ResponseEntity<PasswordLoginResponse> map(UUID operationId, PasswordLoginResult result) {
+        if (result instanceof PasswordLoginResult.Active(PreparedPasswordSession session)) {
             if (!clock.instant().isBefore(session.deadlines().idleExpiresAt())) {
                 return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
             }
             long seconds = Math.max(1, Duration.between(clock.instant(),
                     session.deadlines().absoluteExpiresAt()).toSeconds());
-            var facts = session.facts();
-            Map<String, Object> body = Map.of(
-                    "status", "ACTIVE",
-                    "tokenEnvelope", session.tokenEnvelope(),
-                    "receipt", session.receipt(),
-                    "expires_in", Math.min(seconds, 3600),
-                    "scope", "banking",
-                    "session", Map.of("idleExpiresAt", session.deadlines().idleExpiresAt().toString(),
-                            "absoluteExpiresAt", session.deadlines().absoluteExpiresAt().toString()),
-                    "security", Map.of("deviceTrusted", true,
-                            "deviceBindingId", facts.bindingId().toString(),
-                            "biometricLoginEnabled", facts.biometricLoginEnabled(),
-                            "assurance", Map.of("devicePossession", "MFA_KEY_POSSESSION",
-                                    "platformEvidence", facts.platformAssurance(),
-                                    "biometricEnforcement", "NOT_APPLICABLE")));
+            PasswordLoginResponse body = getLoginResponse(session, seconds);
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                     .header("DPoP-Nonce", session.dpopNonce()).body(body);
         }
@@ -52,16 +42,26 @@ public final class PasswordLoginResponseMapper {
         }
         if (result instanceof PasswordLoginResult.Processing) {
             return ResponseEntity.status(HttpStatus.ACCEPTED).cacheControl(CacheControl.noStore())
-                    .body(Map.of("status", "PROCESSING", "operationId", operationId.toString(),
-                            "nextAction", "POLL_RESULT", "correlationId", UUID.randomUUID().toString()));
+                    .body(new PasswordLoginProcessingResponse("PROCESSING", operationId,
+                            "POLL_RESULT", UUID.randomUUID()));
         }
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
     }
 
-    private ResponseEntity<?> problem(HttpStatus status, String code) {
+    private static @NonNull PasswordLoginResponse getLoginResponse(PreparedPasswordSession session, long seconds) {
+        var facts = session.facts();
+        return new PasswordLoginActiveResponse("ACTIVE",
+                session.tokenEnvelope(), session.receipt(), Math.min(seconds, 3600), "banking",
+                new PasswordLoginActiveResponse.Session(session.deadlines().idleExpiresAt(),
+                        session.deadlines().absoluteExpiresAt()),
+                new PasswordLoginActiveResponse.Security(true, facts.bindingId(),
+                        facts.biometricLoginEnabled(), new PasswordLoginActiveResponse.Assurance(
+                        "MFA_KEY_POSSESSION", facts.platformAssurance(), "NOT_APPLICABLE")));
+    }
+
+    private ResponseEntity<PasswordLoginResponse> problem(HttpStatus status, String code) {
         return ResponseEntity.status(status).cacheControl(CacheControl.noStore())
-                .body(Map.of("code", code, "message", "The request was rejected",
-                        "correlationId", UUID.randomUUID().toString(),
-                        "nextAction", "RETRY_LATER"));
+                .body(new PasswordLoginErrorResponse(code, "The request was rejected",
+                        UUID.randomUUID(), "RETRY_LATER"));
     }
 }

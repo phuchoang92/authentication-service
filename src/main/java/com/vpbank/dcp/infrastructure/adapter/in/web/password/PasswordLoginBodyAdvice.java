@@ -1,5 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginRequest;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,7 +12,9 @@ import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.RequestBodyAdviceAdapter;
 
-/** Bounds direct JSON input before parsing, including chunked requests. */
+/**
+ * Bounds direct JSON input before parsing, including chunked requests.
+ */
 @ControllerAdvice(assignableTypes = PasswordLoginController.class)
 public final class PasswordLoginBodyAdvice extends RequestBodyAdviceAdapter {
     private static final int MAX_BODY_BYTES = 65_536;
@@ -24,8 +27,8 @@ public final class PasswordLoginBodyAdvice extends RequestBodyAdviceAdapter {
 
     @Override
     public HttpInputMessage beforeBodyRead(HttpInputMessage input, MethodParameter parameter,
-                                          Type targetType,
-                                          Class<? extends HttpMessageConverter<?>> converterType) throws IOException {
+                                           Type targetType,
+                                           Class<? extends HttpMessageConverter<?>> converterType) throws IOException {
         if (input.getHeaders().getContentLength() > MAX_BODY_BYTES
                 || input.getHeaders().containsHeader(HttpHeaders.CONTENT_ENCODING)) {
             throw new InvalidPasswordLoginRequestException();

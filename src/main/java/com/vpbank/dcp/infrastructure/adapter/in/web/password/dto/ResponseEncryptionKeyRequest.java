@@ -1,4 +1,4 @@
-package com.vpbank.dcp.infrastructure.adapter.in.web.password;
+package com.vpbank.dcp.infrastructure.adapter.in.web.password.dto;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;

@@ -1,15 +1,15 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.security;
 
 import com.vpbank.dcp.infrastructure.adapter.in.web.error.ApiError;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.http.MediaType;
-import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import tools.jackson.databind.json.JsonMapper;
@@ -39,8 +39,8 @@ public final class SecurityErrorResponse implements AuthenticationEntryPoint, Ac
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setHeader("Cache-Control", "no-store");
         Object body = status == HttpServletResponse.SC_UNAUTHORIZED
-                ? Map.of("code", "REQUEST_REJECTED", "message", "The request was rejected",
-                        "correlationId", UUID.randomUUID(), "nextAction", "RETRY_LATER")
+                ? new PasswordLoginErrorResponse("REQUEST_REJECTED", "The request was rejected",
+                        UUID.randomUUID(), "RETRY_LATER")
                 : new ApiError("REQUEST_REJECTED", "The request was rejected", UUID.randomUUID());
         json.writeValue(response.getOutputStream(), body);
     }

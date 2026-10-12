@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.constant.PasswordRequestAttributes;
+import com.vpbank.dcp.infrastructure.adapter.in.web.security.constant.DpopRequestAttributes;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -21,7 +21,7 @@ import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
 import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.DpopProofFilter;
+import com.vpbank.dcp.infrastructure.adapter.in.web.security.DpopProofFilter;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.SpringDpopProofDecoder;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
@@ -120,7 +120,7 @@ class SecurityConfigurationTest {
     void invalidDpopIsRejectedBeforeBodyParsingAndCannotBeSuppliedAsARequestAttribute() throws Exception {
         for (String dpop : List.of("p".repeat(64), proof("https://attacker.example/api/v1/authentications/password"))) {
             var response = mvc.perform(request().header("DPoP", dpop).content("invalid-json")
-                            .requestAttr(PasswordRequestAttributes.VERIFIED_DPOP_PROOF, mock(VerifiedDpopProof.class)))
+                            .requestAttr(DpopRequestAttributes.VERIFIED_DPOP_PROOF, mock(VerifiedDpopProof.class)))
                     .andExpect(status().isUnauthorized()).andReturn().getResponse();
             assertThat(response.getContentAsString()).contains("REQUEST_REJECTED").doesNotContain(dpop);
             assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
@@ -184,7 +184,7 @@ class SecurityConfigurationTest {
         private String workload;
 
         @PostMapping(PATH)
-        Map<String, String> password(@RequestAttribute(PasswordRequestAttributes.VERIFIED_DPOP_PROOF) VerifiedDpopProof proof,
+        Map<String, String> password(@RequestAttribute(DpopRequestAttributes.VERIFIED_DPOP_PROOF) VerifiedDpopProof proof,
                                      @RequestBody Map<String, Object> body, Authentication authentication) {
             calls.incrementAndGet();
             verified = proof;

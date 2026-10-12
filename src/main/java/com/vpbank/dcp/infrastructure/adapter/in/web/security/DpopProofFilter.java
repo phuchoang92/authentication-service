@@ -1,11 +1,10 @@
-package com.vpbank.dcp.infrastructure.adapter.in.web.password;
+package com.vpbank.dcp.infrastructure.adapter.in.web.security;
 
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.constant.PasswordRequestAttributes;
 import com.vpbank.dcp.core.port.out.security.DpopExpectation;
 import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
 import com.vpbank.dcp.core.port.out.security.InvalidDpopProofException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
-import com.vpbank.dcp.infrastructure.adapter.in.web.security.SecurityErrorResponse;
+import com.vpbank.dcp.infrastructure.adapter.in.web.security.constant.DpopRequestAttributes;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,18 +45,16 @@ public final class DpopProofFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        try {
-            var proofs = Collections.list(request.getHeaders("DPoP"));
-            if (proofs.size() != 1 || proofs.getFirst().length() < 64
-                    || proofs.getFirst().length() > 4096 || proofs.getFirst().isBlank()) {
-                throw new InvalidPasswordLoginRequestException();
-            }
-            // Always derive htu from trusted server configuration, never forwarded headers.
-            request.setAttribute(PasswordRequestAttributes.VERIFIED_DPOP_PROOF, decoder.verify(proofs.getFirst(),
-                    DpopExpectation.forInitial(request.getMethod(), publicUri, clock.instant())));
-        } catch (InvalidPasswordLoginRequestException invalid) {
+        var proofs = Collections.list(request.getHeaders("DPoP"));
+        if (proofs.size() != 1 || proofs.getFirst().length() < 64
+                || proofs.getFirst().length() > 4096 || proofs.getFirst().isBlank()) {
             errors.reject(response, HttpServletResponse.SC_BAD_REQUEST);
             return;
+        }
+        try {
+            // Always derive htu from trusted server configuration, never forwarded headers.
+            request.setAttribute(DpopRequestAttributes.VERIFIED_DPOP_PROOF, decoder.verify(proofs.getFirst(),
+                    DpopExpectation.forInitial(request.getMethod(), publicUri, clock.instant())));
         } catch (InvalidDpopProofException invalid) {
             errors.reject(response, HttpServletResponse.SC_UNAUTHORIZED);
             return;

@@ -5,6 +5,7 @@ import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
 import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginRequest;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
 import java.time.Clock;
 import java.time.Duration;

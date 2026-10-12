@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginRequest;
+import com.vpbank.dcp.infrastructure.adapter.in.web.security.DpopProofFilter;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -9,6 +11,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 import com.vpbank.dcp.core.port.in.password.PasswordLoginCommand;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
@@ -86,7 +89,9 @@ class PasswordLoginRequestMapperTest {
         mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON)
                         .header("DPoP", DPOP).header("Idempotency-Key", OPERATION)
                         .header("X-Forwarded-Host", "attacker.example").content(body))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("REQUEST_REJECTED"))
+                .andExpect(jsonPath("$.nextAction").value("RETRY_LATER"));
 
         var command = ArgumentCaptor.forClass(PasswordLoginCommand.class);
         verify(passwords).login(command.capture());
