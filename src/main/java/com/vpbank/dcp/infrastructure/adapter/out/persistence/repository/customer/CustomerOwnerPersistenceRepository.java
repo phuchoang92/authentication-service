@@ -28,43 +28,43 @@ public class CustomerOwnerPersistenceRepository {
         return rows.isEmpty() ? null : UUID.fromString((String) exactlyOne(rows));
     }
 
-    public SubjectRow lockSubject(String customerId) {
+    public CustomerOwnerView lockSubject(String customerId) {
         List<?> rows = entityManager.createNativeQuery(CustomerOwnerSql.LOCK_SUBJECT)
                 .setParameter("customerId", customerId).getResultList();
-    public     if (rows.isEmpty()) {
+        if (rows.isEmpty()) {
             return null;
         }
         Object[] values = (Object[]) exactlyOne(rows);
-        return new SubjectRow(UUID.fromString((String) values[0]),
+        return new CustomerOwnerView(UUID.fromString((String) values[0]),
                 new CustomerAuthenticationState(customerId, CustomerStatus.valueOf((String) values[4]),
                         ((Number) values[1]).longValue(), ((Number) values[2]).longValue(),
                         ((LocalDateTime) values[3]).toInstant(ZoneOffset.UTC)));
     }
 
     public void insertSubject(UUID subjectId, CustomerAuthenticationState snapshot, String policyVersion) {
-        entityManager.createNativeQuery(CustomerOwnerSql.INSERT_SUBJECT)
+        exactlyOne(entityManager.createNativeQuery(CustomerOwnerSql.INSERT_SUBJECT)
                 .setParameter("subjectId", subjectId.toString())
                 .setParameter("customerId", snapshot.customerId())
                 .setParameter("statusVersion", snapshot.statusVersion())
                 .setParameter("blockVersion", snapshot.lastAccessBlockVersion())
                 .setParameter("checkedAt", Timestamp.from(snapshot.checkedAt()))
-                .setParameter("policyVersion", policyVersion).executeUpdate();
+                .setParameter("policyVersion", policyVersion).executeUpdate());
     }
 
-    public int updateSnapshot(UUID subjectId, CustomerAuthenticationState snapshot) {
-        return entityManager.createNativeQuery(CustomerOwnerSql.UPDATE_SNAPSHOT)
+    public void updateSnapshot(UUID subjectId, CustomerAuthenticationState snapshot) {
+        exactlyOne(entityManager.createNativeQuery(CustomerOwnerSql.UPDATE_SNAPSHOT)
                 .setParameter("subjectId", subjectId.toString())
                 .setParameter("statusVersion", snapshot.statusVersion())
                 .setParameter("blockVersion", snapshot.lastAccessBlockVersion())
                 .setParameter("checkedAt", Timestamp.from(snapshot.checkedAt()))
-                .executeUpdate();
+                .executeUpdate());
     }
 
     public String identityStatus(UUID subjectId, VerifiedProviderIdentity identity) {
         List<?> rows = entityManager.createNativeQuery(CustomerOwnerSql.LOCK_IDENTITY)
                 .setParameter("subjectId", subjectId.toString())
                 .setParameter("issuer", identity.issuer()).getResultList();
-    public     if (rows.isEmpty()) {
+        if (rows.isEmpty()) {
             return null;
         }
         Object[] values = (Object[]) exactlyOne(rows);
@@ -72,11 +72,11 @@ public class CustomerOwnerPersistenceRepository {
     }
 
     public void insertIdentity(UUID subjectId, VerifiedProviderIdentity identity) {
-        entityManager.createNativeQuery(CustomerOwnerSql.INSERT_IDENTITY)
+        exactlyOne(entityManager.createNativeQuery(CustomerOwnerSql.INSERT_IDENTITY)
                 .setParameter("linkId", UUID.randomUUID().toString())
                 .setParameter("subjectId", subjectId.toString())
                 .setParameter("issuer", identity.issuer())
-                .setParameter("providerSubject", identity.subject()).executeUpdate();
+                .setParameter("providerSubject", identity.subject()).executeUpdate());
     }
 
     public String appStatus(UUID subjectId, String appId) {
@@ -87,9 +87,9 @@ public class CustomerOwnerPersistenceRepository {
     }
 
     public void insertApp(UUID subjectId, String appId) {
-        entityManager.createNativeQuery(CustomerOwnerSql.INSERT_APP)
+        exactlyOne(entityManager.createNativeQuery(CustomerOwnerSql.INSERT_APP)
                 .setParameter("subjectId", subjectId.toString())
-                .setParameter("appId", appId).executeUpdate();
+                .setParameter("appId", appId).executeUpdate());
     }
 
     public boolean subjectGuardDenies(UUID subjectId) {
@@ -99,26 +99,38 @@ public class CustomerOwnerPersistenceRepository {
     }
 
     public int attachJourney(UUID journeyId, UUID subjectId, String appId) {
-        return entityManager.createNativeQuery(CustomerOwnerSql.ATTACH_JOURNEY)
+        return exactlyZeroOrOne(entityManager.createNativeQuery(CustomerOwnerSql.ATTACH_JOURNEY)
                 .setParameter("journeyId", journeyId.toString())
                 .setParameter("subjectId", subjectId.toString())
-                .setParameter("appId", appId).executeUpdate();
+                .setParameter("appId", appId).executeUpdate());
     }
 
     public int confirmOperation(UUID operationId, UUID journeyId, UUID subjectId, String appId) {
-        return entityManager.createNativeQuery(CustomerOwnerSql.CONFIRM_OPERATION)
+        return exactlyZeroOrOne(entityManager.createNativeQuery(CustomerOwnerSql.CONFIRM_OPERATION)
                 .setParameter("operationId", operationId.toString())
                 .setParameter("journeyId", journeyId.toString())
                 .setParameter("subjectId", subjectId.toString())
-                .setParameter("appId", appId).executeUpdate();
+                .setParameter("appId", appId).executeUpdate());
+    }
+
+    private int exactlyZeroOrOne(int rows) {
+        if (rows < 0 || rows > 1) {
+            throw new UnexpectedCustomerOwnerUpdateException();
+        }
+        return rows;
+    }
+
+    private void exactlyOne(int rows) {
+        if (rows != 1) {
+            throw new UnexpectedCustomerOwnerUpdateException();
+        }
     }
 
     private Object exactlyOne(List<?> rows) {
-    public     if (rows.size() != 1) {
+        if (rows.size() != 1) {
             throw new UnexpectedCustomerOwnerUpdateException();
         }
         return rows.getFirst();
     }
 
-    public record SubjectRow(UUID id, CustomerAuthenticationState customer) { }
 }

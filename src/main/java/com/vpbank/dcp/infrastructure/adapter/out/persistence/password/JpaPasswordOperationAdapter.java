@@ -1,16 +1,17 @@
 package com.vpbank.dcp.infrastructure.adapter.out.persistence.password;
 
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.password.PasswordOperationPersistenceRepository;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRoute;
 import com.vpbank.dcp.core.port.out.password.ConfirmedPasswordOwner;
-import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
 import com.vpbank.dcp.core.port.out.password.InvalidPasswordOperationException;
+import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
 import com.vpbank.dcp.core.port.out.password.PasswordDispatchResult;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationProgress;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import com.vpbank.dcp.core.port.out.password.PasswordReservation;
 import com.vpbank.dcp.core.port.out.password.PasswordReservationResult;
+import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.password.PasswordOperationJpaRepository;
+import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.password.PasswordOperationPersistenceRepository;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,11 +26,13 @@ public class JpaPasswordOperationAdapter implements PasswordOperationRepository 
 
     private final PasswordOperationPersistenceRepository repository;
     private final TransactionTemplate transactions;
+    private final PasswordOperationJpaRepository queries;
 
     public JpaPasswordOperationAdapter(PasswordOperationPersistenceRepository repository,
-                                     TransactionTemplate transactions) {
+                                     TransactionTemplate transactions, PasswordOperationJpaRepository queries) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.transactions = Objects.requireNonNull(transactions, "transactions");
+        this.queries = Objects.requireNonNull(queries, "queries");
     }
 
     @Override
@@ -37,7 +40,10 @@ public class JpaPasswordOperationAdapter implements PasswordOperationRepository 
         Objects.requireNonNull(reservation, "reservation");
         UUID journeyId = UUID.randomUUID();
         try {
-            transactions.executeWithoutResult(status -> repository.insert(reservation, journeyId));
+            transactions.executeWithoutResult(status -> {
+                repository.insertJourney(reservation, journeyId);
+                repository.insertOperation(reservation, journeyId);
+            });
             return new PasswordReservationResult.Created(journeyId);
         } catch (DataIntegrityViolationException duplicate) {
             if (!isOperationDuplicate(duplicate)) {
@@ -71,7 +77,9 @@ public class JpaPasswordOperationAdapter implements PasswordOperationRepository 
     @Override
     public PasswordOperationProgress progress(UUID operationId) {
         Objects.requireNonNull(operationId, "operationId");
-        return repository.progress(operationId);
+        return queries.progress(operationId)
+                .map(view -> PasswordOperationProgress.valueOf(view.state()))
+                .orElse(PasswordOperationProgress.MISSING);
     }
 
     @Override
@@ -83,7 +91,7 @@ public class JpaPasswordOperationAdapter implements PasswordOperationRepository 
             if (repository.recordVerifiedIdentity(operationId, identity) == 1) {
                 return PasswordCredentialRecordResult.RECORDED;
             }
-            Optional<VerifiedProviderIdentity> recorded = repository.verifiedIdentity(operationId);
+            Optional<VerifiedProviderIdentity> recorded = repository.verifiedIdentityForReconciliation(operationId);
             return recorded.filter(identity::equals).isPresent()
                     ? PasswordCredentialRecordResult.ALREADY_RECORDED
                     : PasswordCredentialRecordResult.NOT_RECORDABLE;
@@ -94,7 +102,8 @@ public class JpaPasswordOperationAdapter implements PasswordOperationRepository 
     @Override
     public Optional<VerifiedProviderIdentity> verifiedIdentity(UUID operationId) {
         Objects.requireNonNull(operationId, "operationId");
-        return repository.verifiedIdentity(operationId);
+        return queries.verifiedIdentity(operationId)
+                .map(view -> new VerifiedProviderIdentity(view.issuer(), view.subject()));
     }
 
     @Override

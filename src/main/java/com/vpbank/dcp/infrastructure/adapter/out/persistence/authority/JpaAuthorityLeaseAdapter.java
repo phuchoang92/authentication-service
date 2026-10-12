@@ -3,11 +3,11 @@ package com.vpbank.dcp.infrastructure.adapter.out.persistence.authority;
 import com.vpbank.dcp.core.port.out.authority.AuthorityLeaseChange;
 import com.vpbank.dcp.core.port.out.authority.AuthorityLeaseRepository;
 import com.vpbank.dcp.core.port.out.authority.LeaseChangeResult;
+import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.authority.AuthorityLeasePersistenceRepository;
 import java.util.Objects;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.authority.AuthorityLeasePersistenceRepository;
 
 /** Delegates SQL binding and mapping to the persistence repository. */
 @Repository

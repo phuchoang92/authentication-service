@@ -5,3 +5,26 @@ Read the workspace-root `AGENTS.md` and the documentation it requires before cha
 This is the new `authentication-service` source tree, renamed from `authentication-service-rebuild` after the user removed the old project. Continue building from approved DD target contracts, not from any historical backup of the old source, tests, configuration or migrations. Use isolated test dependencies. The directory rename is not a deployment cutover; do not connect this build to running storage or deployment without a separate decision.
 
 Core is JDK-only and owns ports. Infrastructure owns Spring, HTTP, JPA, Redis and JOSE. Apply RK01–RK12 to Redis key construction and authority operations. Report implemented and actually executed tests separately.
+
+## Persistence conventions
+
+The approved persistence refactor uses core `...Repository` ports and `Jpa...Adapter`
+implementations, overriding the older Store naming examples in the shared design rules.
+Keep adapters in `infrastructure.adapter.out.persistence.<capability>` and internal
+repositories, entities, projections, codecs and SQL in
+`infrastructure.adapter.out.persistence.repository.<capability>`. Custom EntityManager
+repositories use `...PersistenceRepository`; Spring Data interfaces use `...JpaRepository`.
+Do not introduce classes with the Reader suffix or aliases for the replaced SQL ports.
+
+Adapters own transaction boundaries, lock order and multi-statement transitions.
+Repositories only bind/execute SQL, map typed projections and check affected rows.
+`PasswordOperationJpaRepository` exposes read projections for progress and verified
+identity only. Guarded reads, joins, locks and mutations use EntityManager repositories;
+never use a previously loaded entity for a decision after acquiring locks. No JPA caches,
+relationships, cascades or generic base repository. Customer freshness belongs to the
+JDK-only `CustomerFreshnessPolicy`; protected delivery serialization and digest checking
+belong to `PasswordDeliveryEscrowCodec`.
+
+Keep the current expanded schema and migrations. The DD three-table password-first
+schema is a separate change. Preserve Redis/BFF work in progress and historical test
+reports; this refactor does not authorize deployment, storage cutover or Git push.

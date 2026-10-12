@@ -31,11 +31,61 @@ The G2 contract and reservation gate have advanced:
 - Verified `issuer/sub` is now persisted before Customer resolution. If Customer is temporarily unavailable, the same command can resume from that durable identity without resending the password. The original confirmed owner can also be read after a lost reply.
 - The device route uses the current owner, installation, active binding and exact pinned Kdev thumbprint. An invalid claimed binding is rejected, not downgraded to `NEW_DEVICE`. Until G3 provides real MFA challenges, `OTHER_TRUSTED`/`NEW_DEVICE` can be durably frozen as `MFA_UNAVAILABLE`; retry cannot redispatch the password or issue a token. The matching design/OpenAPI response is 503 `TEMPORARILY_UNAVAILABLE`, with no challenge or pending session.
 
+Password ingress uses a direct typed JSON body with username/password unchanged; `DPoP` and `Idempotency-Key` are separate HTTP headers. BFF forwards body bytes directly without a Base64 or `original` envelope. Auth bounds the body to 64 KiB, rejects duplicate/unknown JSON fields, validates headers separately and derives the public DPoP target from trusted configuration.
+
 The one-request password route exists at BFF `POST /api/v1/authentications/password` and private Auth `POST /internal/v1/authentications/password`. The BFF route is enabled only with the `integration` profile and explicit mTLS settings. Auth reserves and verifies the one-shot command, checks the current Customer/device route, and can issue an encrypted ACTIVE banking token only for `LAST_TRUSTED` while `AUTH_INTEGRATION_ACTIVE_ENABLED=true` under the `integration` profile. `OTHER_TRUSTED` and `NEW_DEVICE` return safe 503 without a fabricated MFA challenge or token. MFA is an external HTTP service, but the G3 integration is not implemented here. Auth publishes session and nonce records to Redis; its former private banking-request admission endpoint and its dedicated proof/context adapters have been removed. BFF-side Redis admission is a separate implementation task and is not verified by Auth tests.
 
 This is **not** an accepted end-to-end login service. Guarded result retrieval after a lost reply, lock/logout/rotation, Customer event/guard application, full App→BFF→Auth→Keycloak→ACTIVE integration, and the two-second Customer revocation guarantee remain incomplete. A crash after Keycloak acceptance but before the verified identity is persisted still leaves an uncertain operation; the original cannot redispatch the password. Production activation remains fail-closed, and this artifact must not replace the running service. Password no longer requires a custom Keycloak SPI; biometric still does.
 
+## Persistence structure
+
+```text
+core.port.out.<capability>.<Capability>Repository
+    ↑ implements
+infrastructure.adapter.out.persistence.<capability>.Jpa<Capability>Adapter
+    ├── repository.<capability>.<Capability>PersistenceRepository (EntityManager)
+    └── repository.password.PasswordOperationJpaRepository (Spring Data read projections)
+```
+
+The six SQL capabilities are CustomerOwner, PasswordOperation, PasswordDeviceKey,
+PasswordDeviceRoute, PasswordSession and AuthorityLease. Redis ports retain their
+existing names. There are no compatibility aliases for the replaced SQL ports.
+
+Adapters own short transactions, lock ordering, multi-table updates and recovery after
+rollback. Internal repositories bind and execute SQL, map typed views and check affected
+rows. SQL holders, entities, views and the escrow codec stay in the repository packages.
+Spring Data reads operation progress and verified identity through JPQL scalar projections
+of an immutable entity mapped to the existing `auth_operation` table, including BINARY(16)
+UUIDs. It exposes no save/delete methods. Native SQL handles locked reads, joins and CAS;
+no loaded entity is used to decide a mutation. Both JPA query and second-level caches are
+disabled.
+
+Customer freshness uses the configured maximum age through `CustomerFreshnessPolicy`;
+a snapshot expires exactly at `checkedAt + maxAge`. `PasswordDeliveryEscrowCodec` preserves
+the existing JsonMapper encoding and checks SHA-256 using the JDK before decoding stored
+bytes. This refactor keeps the existing expanded schema, migrations, API and transaction
+boundaries. The separate three-table target is not implemented by this change.
+
+Architecture tests enforce the dependency boundaries, including negative fixtures.
+Real MySQL tests cover reservation/duplicate recovery, concurrent dispatch, owner conflict
+and watermark ordering, read projections after native updates, session preparation,
+completion and rollback after a partial multi-table transition. Freshness boundary and
+escrow byte/digest regression tests run with the unit suite. These test descriptions are
+coverage scope; only an actually completed build establishes verification.
+
+The new session regressions exposed an existing timezone limitation in the unchanged
+`LocalDateTime` native-SQL binding: with the JVM in UTC+7, a UTC deadline can be stored
+seven hours earlier. Maven test JVMs explicitly use UTC for reproducible storage checks.
+This refactor does not repair that runtime binding or claim support for a non-UTC JVM;
+that issue requires a separate change and validation.
+
 ## Build and test
+
+Persistence refactor verification on 2026-10-12: the initial worktree baseline passed
+154 tests. The final `clean verify` passed 144 unit/architecture tests and 45 integration
+tests, with zero failures, errors or skips, using UTC test JVMs and isolated Testcontainers
+storage. These totals describe the complete worktree, which also contained independent
+HTTP/Redis work in progress; they are not a count of tests added solely by this refactor.
 
 On the current Mac, the verified command is:
 

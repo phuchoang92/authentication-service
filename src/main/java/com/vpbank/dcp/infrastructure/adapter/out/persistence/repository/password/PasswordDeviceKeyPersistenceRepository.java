@@ -1,6 +1,5 @@
 package com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.password;
 
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.password.UnexpectedPasswordOperationUpdateException;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.StoredDeviceKey;

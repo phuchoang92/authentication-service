@@ -30,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
@@ -72,6 +73,9 @@ class JpaPasswordOperationAdapterIT {
 
     @Autowired
     private PasswordDeviceKeyRepository deviceKeys;
+
+    @Autowired
+    private TransactionTemplate transactions;
 
     @BeforeEach
     void clearPasswordOperations() {
@@ -351,6 +355,75 @@ class JpaPasswordOperationAdapterIT {
         jdbc.update("UPDATE auth_device_binding SET status = 'REVOKED' WHERE id = UUID_TO_BIN(?)",
                 bindingId.toString());
         assertThat(deviceKeys.findActive(matching)).isEmpty();
+    }
+
+    @Test
+    void readProjectionsRespectMissingRecordsKindsAndIdentityStates() {
+        UUID missing = UUID.randomUUID();
+        assertThat(store.progress(missing)).isEqualTo(PasswordOperationProgress.MISSING);
+        assertThat(store.verifiedIdentity(missing)).isEmpty();
+        UUID operationId = UUID.fromString("00112233-4455-6677-8899-aabbccddeeff");
+        store.reserve(reservation(operationId, digest(4)));
+        assertThat(store.progress(operationId)).isEqualTo(PasswordOperationProgress.RESERVED);
+        assertThat(store.verifiedIdentity(operationId)).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT HEX(id) FROM auth_operation WHERE id = UUID_TO_BIN(?)",
+                String.class, operationId.toString())).isEqualTo("00112233445566778899AABBCCDDEEFF");
+        store.claimDispatch(operationId);
+        assertThat(store.verifiedIdentity(operationId)).isEmpty();
+        var identity = new VerifiedProviderIdentity("https://auth.bank.test/realms/mobile", "kc-user-case");
+        store.recordVerifiedIdentity(operationId, identity);
+        for (String state : new String[]{"VERIFIED", "CONFIRMED", "COMPLETED"}) {
+            jdbc.update("UPDATE auth_operation SET state = ? WHERE id = UUID_TO_BIN(?)",
+                    state, operationId.toString());
+            assertThat(store.verifiedIdentity(operationId)).contains(identity);
+            assertThat(store.progress(operationId)).isEqualTo(PasswordOperationProgress.valueOf(state));
+        }
+        for (String state : new String[]{"RESERVED", "DISPATCHED", "REJECTED", "UNCERTAIN", "MFA_UNAVAILABLE"}) {
+            jdbc.update("UPDATE auth_operation SET state = ? WHERE id = UUID_TO_BIN(?)",
+                    state, operationId.toString());
+            assertThat(store.verifiedIdentity(operationId)).isEmpty();
+        }
+        jdbc.update("UPDATE auth_operation SET kind = 'BIOMETRIC_LOGIN', state = 'VERIFIED' WHERE id = UUID_TO_BIN(?)",
+                operationId.toString());
+        try {
+            assertThat(store.progress(operationId)).isEqualTo(PasswordOperationProgress.MISSING);
+            assertThat(store.verifiedIdentity(operationId)).isEmpty();
+        } finally {
+            jdbc.update("UPDATE auth_operation SET kind = 'PASSWORD_LOGIN' WHERE id = UUID_TO_BIN(?)",
+                    operationId.toString());
+        }
+    }
+
+    @Test
+    void projectionsObserveNativeUpdatesInTheSamePersistenceContext() {
+        UUID operationId = UUID.randomUUID();
+        store.reserve(reservation(operationId, digest(4)));
+        var identity = new VerifiedProviderIdentity("https://auth.bank.test/realms/mobile", "kc-native-update");
+        transactions.executeWithoutResult(status -> {
+            assertThat(store.progress(operationId)).isEqualTo(PasswordOperationProgress.RESERVED);
+            assertThat(store.verifiedIdentity(operationId)).isEmpty();
+            assertThat(store.claimDispatch(operationId)).isEqualTo(PasswordDispatchResult.CLAIMED);
+            assertThat(store.progress(operationId)).isEqualTo(PasswordOperationProgress.DISPATCHED);
+            store.recordVerifiedIdentity(operationId, identity);
+            assertThat(store.progress(operationId)).isEqualTo(PasswordOperationProgress.VERIFIED);
+            assertThat(store.verifiedIdentity(operationId)).contains(identity);
+            jdbc.update("UPDATE auth_operation SET state = 'REJECTED' WHERE id = UUID_TO_BIN(?)",
+                    operationId.toString());
+            assertThat(store.progress(operationId)).isEqualTo(PasswordOperationProgress.REJECTED);
+            assertThat(store.verifiedIdentity(operationId)).isEmpty();
+        });
+    }
+
+    @Test
+    void failedOperationClaimRollsBackAnAlreadyUpdatedJourney() {
+        var request = reservation(UUID.randomUUID(), digest(4));
+        var created = (PasswordReservationResult.Created) store.reserve(request);
+        jdbc.update("UPDATE auth_operation SET state = 'REJECTED' WHERE id = UUID_TO_BIN(?)",
+                request.operation().operationId().toString());
+        assertThat(store.claimDispatch(request.operation().operationId()))
+                .isEqualTo(PasswordDispatchResult.NOT_CLAIMABLE);
+        assertThat(journeyState(created.journeyId())).isEqualTo("INITIALIZED");
+        assertThat(operationState(request.operation().operationId())).isEqualTo("REJECTED");
     }
 
     private PasswordReservationResult reserveTogether(PasswordReservation reservation,

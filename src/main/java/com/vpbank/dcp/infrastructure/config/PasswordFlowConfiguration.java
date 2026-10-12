@@ -15,6 +15,8 @@ import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginRespon
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.*;
 import com.vpbank.dcp.infrastructure.adapter.out.persistence.session.JpaPasswordSessionAdapter;
 import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.session.PasswordSessionPersistenceRepository;
+import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.session.PasswordDeliveryEscrowCodec;
+import com.vpbank.dcp.core.domain.customer.CustomerFreshnessPolicy;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisPasswordSessionAuthority;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
@@ -149,16 +151,25 @@ public class PasswordFlowConfiguration {
     }
 
     @Bean
-    PasswordSessionPersistenceRepository passwordSessionRepository(EntityManager sql, JsonMapper json,
-                                                        PasswordFlowProperties properties) {
-        return new PasswordSessionPersistenceRepository(sql, json,
-                Duration.ofMillis(properties.customerStatusMaxAgeMs()));
+    PasswordSessionPersistenceRepository passwordSessionPersistenceRepository(EntityManager sql) {
+        return new PasswordSessionPersistenceRepository(sql);
     }
 
     @Bean
-    PasswordSessionRepository passwordSessionStore(PasswordSessionPersistenceRepository repository,
-                                              TransactionTemplate transactions, Clock clock) {
-        return new JpaPasswordSessionAdapter(repository, transactions, clock);
+    PasswordDeliveryEscrowCodec passwordDeliveryEscrowCodec(JsonMapper json) {
+        return new PasswordDeliveryEscrowCodec(json);
+    }
+
+    @Bean
+    CustomerFreshnessPolicy customerFreshnessPolicy(PasswordFlowProperties properties) {
+        return new CustomerFreshnessPolicy(Duration.ofMillis(properties.customerStatusMaxAgeMs()));
+    }
+
+    @Bean
+    PasswordSessionRepository passwordSessionRepository(PasswordSessionPersistenceRepository repository,
+            TransactionTemplate transactions, Clock clock, CustomerFreshnessPolicy freshness,
+            PasswordDeliveryEscrowCodec escrow) {
+        return new JpaPasswordSessionAdapter(repository, transactions, clock, freshness, escrow);
     }
 
     @Bean

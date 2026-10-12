@@ -5,52 +5,38 @@ import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.port.out.session.PasswordSessionFacts;
 import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import jakarta.persistence.EntityManager;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import tools.jackson.databind.json.JsonMapper;
 
-/** Parameter binding and row mapping only; transaction order is owned by its store. */
+/** Parameter binding and row mapping only; transaction order is owned by its adapter. */
 public final class PasswordSessionPersistenceRepository {
     private final EntityManager sql;
-    private final JsonMapper json;
-    private final Duration customerMaxAge;
-    private final Sha256Digests digests = new Sha256Digests();
 
-    public PasswordSessionPersistenceRepository(EntityManager sql, JsonMapper json,
-                              Duration customerMaxAge) {
+    public PasswordSessionPersistenceRepository(EntityManager sql) {
         this.sql = Objects.requireNonNull(sql);
-        this.json = Objects.requireNonNull(json);
-        this.customerMaxAge = Objects.requireNonNull(customerMaxAge);
-    public     if (customerMaxAge.isZero() || customerMaxAge.isNegative()) {
-            throw new InvalidPasswordSessionStoreException();
-        }
     }
 
-    public Optional<PasswordSessionFacts> currentFacts(UUID operationId, UUID subjectId) {
+    public Optional<PasswordSessionFactsView> currentFacts(UUID operationId, UUID subjectId) {
         List<?> rows = sql.createNativeQuery(PasswordSessionSql.CURRENT_FACTS)
                 .setParameter("operationId", operationId.toString())
                 .setParameter("subjectId", subjectId.toString()).getResultList();
-    public     if (rows.isEmpty()) {
+        if (rows.isEmpty()) {
             return Optional.empty();
         }
-    public     if (rows.size() != 1) {
-            throw new InvalidPasswordSessionStoreException();
+        if (rows.size() != 1) {
+            throw new InvalidPasswordSessionPersistenceException();
         }
         Object[] row = (Object[]) rows.getFirst();
-        return Optional.of(new PasswordSessionFacts(uuid(row[0]), uuid(row[1]), uuid(row[2]),
+        return Optional.of(new PasswordSessionFactsView(uuid(row[0]), uuid(row[1]), uuid(row[2]),
                 (String) row[3], uuid(row[4]), digest(row[5]), (String) row[6],
                 (String) row[7], digest(row[8]), number(row[9]), number(row[10]),
-                number(row[11]), number(row[12]), utc(row[13]).plus(customerMaxAge),
+                number(row[11]), number(row[12]), utc(row[13]),
                 (String) row[14], ((Number) row[15]).intValue() == 1));
     }
 
@@ -60,31 +46,45 @@ public final class PasswordSessionPersistenceRepository {
         return rows.size() == 1 && rows.getFirst() != null ? uuid(rows.getFirst()) : null;
     }
 
-    public void lock(PasswordSessionFacts facts) {
-        requiredLock(PasswordSessionSql.LOCK_SUBJECT, "subjectId", facts.subjectId());
-        requiredLock(PasswordSessionSql.LOCK_SUBJECT_APP, "subjectId", facts.subjectId(),
-                "appId", facts.appId());
-        requiredLock(PasswordSessionSql.LOCK_BINDING, "bindingId", facts.bindingId(),
-                "subjectId", facts.subjectId(), "appId", facts.appId());
-        requiredLock(PasswordSessionSql.LOCK_JOURNEY, "journeyId", facts.journeyId());
-        requiredLock(PasswordSessionSql.LOCK_OPERATION, "operationId", facts.operationId());
+    public void lockSubject(UUID subjectId) {
+        requiredLock(PasswordSessionSql.LOCK_SUBJECT, "subjectId", subjectId);
+    }
+
+    public void lockSubjectApp(UUID subjectId, String appId) {
+        requiredLock(PasswordSessionSql.LOCK_SUBJECT_APP, "subjectId", subjectId, "appId", appId);
+    }
+
+    public void lockBinding(UUID bindingId, UUID subjectId, String appId) {
+        requiredLock(PasswordSessionSql.LOCK_BINDING, "bindingId", bindingId,
+                "subjectId", subjectId, "appId", appId);
+    }
+
+    public void lockJourney(UUID journeyId) {
+        requiredLock(PasswordSessionSql.LOCK_JOURNEY, "journeyId", journeyId);
+    }
+
+    public void lockOperation(UUID operationId) {
+        requiredLock(PasswordSessionSql.LOCK_OPERATION, "operationId", operationId);
     }
 
     public boolean hasIntent(UUID operationId) {
         List<?> rows = sql.createNativeQuery(PasswordSessionSql.EXISTING_INTENT)
                 .setParameter("operationId", operationId.toString()).getResultList();
-    public     if (rows.size() > 1) {
-            throw new InvalidPasswordSessionStoreException();
+        if (rows.size() > 1) {
+            throw new InvalidPasswordSessionPersistenceException();
         }
         return !rows.isEmpty();
     }
 
-    public void insert(PreparedPasswordSession candidate) {
-        PasswordSessionFacts facts = candidate.facts();
+    public void finalizeJourney(PasswordSessionFacts facts) {
         int journey = sql.createNativeQuery(PasswordSessionSql.FINALIZING_JOURNEY)
                 .setParameter("journeyId", facts.journeyId().toString())
                 .setParameter("bindingId", facts.bindingId().toString()).executeUpdate();
         exactlyOne(journey);
+    }
+
+    public void insertIntent(PreparedPasswordSession candidate) {
+        PasswordSessionFacts facts = candidate.facts();
         int intent = sql.createNativeQuery(PasswordSessionSql.INSERT_INTENT)
                 .setParameter("intentId", candidate.intentId().toString())
                 .setParameter("subjectId", facts.subjectId().toString())
@@ -105,72 +105,60 @@ public final class PasswordSessionPersistenceRepository {
                 .setParameter("absoluteExpiry", local(candidate.deadlines().absoluteExpiresAt()))
                 .executeUpdate();
         exactlyOne(intent);
-        byte[] protectedResult = json.writeValueAsBytes(new EscrowedPasswordDelivery(
-                candidate.tokenEnvelope(), candidate.receipt(), candidate.dpopNonce()));
+    }
+
+    public void insertEscrow(PreparedPasswordSession candidate, byte[] protectedResult,
+                             Digest32 resultDigest) {
+        PasswordSessionFacts facts = candidate.facts();
         int escrow = sql.createNativeQuery(PasswordSessionSql.INSERT_ESCROW)
                 .setParameter("escrowId", UUID.randomUUID().toString())
                 .setParameter("intentId", candidate.intentId().toString())
                 .setParameter("operationId", facts.operationId().toString())
                 .setParameter("protectedResult", protectedResult)
-                .setParameter("resultDigest", digests.sha256(protectedResult).bytes())
+                .setParameter("resultDigest", resultDigest.bytes())
                 .setParameter("deliveryDeadline", local(candidate.deliveryDeadline()))
                 .executeUpdate();
         exactlyOne(escrow);
     }
 
-    public Optional<PreparedPasswordSession> prepared(UUID operationId, PasswordSessionFacts facts) {
+    public Optional<PreparedPasswordSessionView> prepared(UUID operationId) {
         List<?> rows = sql.createNativeQuery(PasswordSessionSql.PREPARED)
                 .setParameter("operationId", operationId.toString()).getResultList();
-    public     if (rows.isEmpty() || facts == null) {
+        if (rows.isEmpty()) {
             return Optional.empty();
         }
-    public     if (rows.size() != 1) {
-            throw new InvalidPasswordSessionStoreException();
+        if (rows.size() != 1) {
+            throw new InvalidPasswordSessionPersistenceException();
         }
         Object[] row = (Object[]) rows.getFirst();
-    public     if (number(row[11]) != facts.customerSecurityVersion()
-                || number(row[12]) != facts.credentialSecurityVersion()
-                || number(row[13]) != facts.deviceSecurityVersion()
-                || !Arrays.equals((byte[]) row[14], facts.requestKey().bytes())
-                || !uuid(row[15]).equals(facts.bindingId())
-                || !uuid(row[16]).equals(facts.subjectId())) {
-            return Optional.empty();
-        }
-        byte[] protectedResult = (byte[]) row[9];
-    public     if (protectedResult == null || !digests.sha256(protectedResult).equals(digest(row[10]))) {
-            throw new InvalidPasswordSessionStoreException();
-        }
-        EscrowedPasswordDelivery envelope = json.readValue(protectedResult,
-                EscrowedPasswordDelivery.class);
-        return Optional.of(new PreparedPasswordSession(facts, uuid(row[0]), uuid(row[1]),
-                uuid(row[2]), new LookupKeyVersion((String) row[3]), digest(row[4]),
-                digest(row[5]), envelope.tokenEnvelope(), envelope.receipt(),
-                envelope.dpopNonce(),
-                new SessionDeadlines(utc(row[6]), utc(row[7])), utc(row[8])));
+        return Optional.of(new PreparedPasswordSessionView(uuid(row[0]), uuid(row[1]),
+                uuid(row[2]), new LookupKeyVersion((String) row[3]), digest(row[4]), digest(row[5]),
+                new SessionDeadlines(utc(row[6]), utc(row[7])), utc(row[8]), (byte[]) row[9],
+                digest(row[10]), number(row[11]), number(row[12]), number(row[13]),
+                digest(row[14]), uuid(row[15]), uuid(row[16])));
     }
 
-    public boolean markApplied(PreparedPasswordSession candidate) {
-        UUID operationId = candidate.facts().operationId();
+    public Optional<String> intentState(UUID operationId, UUID intentId) {
         List<?> states = sql.createNativeQuery(PasswordSessionSql.COMPLETED)
-                .setParameter("intentId", candidate.intentId().toString())
+                .setParameter("intentId", intentId.toString())
                 .setParameter("operationId", operationId.toString()).getResultList();
-    public     if (states.size() != 1) {
-            return false;
-        }
-    public     if ("COMPLETED".equals(states.getFirst())) {
-            return true;
-        }
-    public     if (!"READY".equals(states.getFirst())) {
-            return false;
-        }
+        return states.size() == 1 ? Optional.of((String) states.getFirst()) : Optional.empty();
+    }
+
+    public void markIntentApplied(UUID operationId, UUID intentId) {
         exactlyOne(sql.createNativeQuery(PasswordSessionSql.MARK_INTENT_APPLIED)
-                .setParameter("intentId", candidate.intentId().toString())
+                .setParameter("intentId", intentId.toString())
                 .setParameter("operationId", operationId.toString()).executeUpdate());
+    }
+
+    public void completeJourney(UUID journeyId) {
         exactlyOne(sql.createNativeQuery(PasswordSessionSql.COMPLETE_JOURNEY)
-                .setParameter("journeyId", candidate.facts().journeyId().toString()).executeUpdate());
+                .setParameter("journeyId", journeyId.toString()).executeUpdate());
+    }
+
+    public void completeOperation(UUID operationId) {
         exactlyOne(sql.createNativeQuery(PasswordSessionSql.COMPLETE_OPERATION)
                 .setParameter("operationId", operationId.toString()).executeUpdate());
-        return true;
     }
 
     private void requiredLock(String query, Object... parameters) {
@@ -179,14 +167,14 @@ public final class PasswordSessionPersistenceRepository {
             Object value = parameters[i + 1];
             statement.setParameter((String) parameters[i], value instanceof UUID id ? id.toString() : value);
         }
-    public     if (statement.getResultList().size() != 1) {
-            throw new InvalidPasswordSessionStoreException();
+        if (statement.getResultList().size() != 1) {
+            throw new InvalidPasswordSessionPersistenceException();
         }
     }
 
     private void exactlyOne(int rows) {
-    public     if (rows != 1) {
-            throw new InvalidPasswordSessionStoreException();
+        if (rows != 1) {
+            throw new InvalidPasswordSessionPersistenceException();
         }
     }
 

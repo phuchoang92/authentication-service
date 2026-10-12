@@ -71,11 +71,6 @@ final class PasswordOperationSql {
              WHERE id = UUID_TO_BIN(:operationId) AND kind = 'PASSWORD_LOGIN' FOR UPDATE
             """;
 
-    static final String READ_PROGRESS = """
-            SELECT state FROM auth_operation
-             WHERE id = UUID_TO_BIN(:operationId) AND kind = 'PASSWORD_LOGIN'
-            """;
-
     static final String RECORD_VERIFIED_IDENTITY = """
             UPDATE auth_operation o
               JOIN auth_login_journey j ON j.id = o.journey_id
@@ -149,5 +144,6 @@ final class PasswordOperationSql {
                AND version < 9007199254740991
             """;
 
-    private PasswordOperationSql() { }
+    private PasswordOperationSql() {
+    }
 }

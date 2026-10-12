@@ -2,11 +2,11 @@ package com.vpbank.dcp.infrastructure.adapter.out.persistence.password;
 
 import com.vpbank.dcp.core.port.out.password.PasswordDeviceRouteEvidence;
 import com.vpbank.dcp.core.port.out.password.PasswordDeviceRouteRepository;
+import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.password.PasswordDeviceRoutePersistenceRepository;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.password.PasswordDeviceRoutePersistenceRepository;
 
 /** Delegates SQL binding and mapping to the persistence repository. */
 @Repository

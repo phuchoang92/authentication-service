@@ -1,13 +1,12 @@
 package com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.password;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.CustomerStatus;
+import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.port.out.password.ConfirmedPasswordOwner;
-import com.vpbank.dcp.core.port.out.password.PasswordReservation;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationProgress;
+import com.vpbank.dcp.core.port.out.password.PasswordReservation;
 import com.vpbank.dcp.core.port.out.password.PasswordReservationFingerprints;
 import com.vpbank.dcp.core.port.out.password.PasswordReservationResult;
 import com.vpbank.dcp.core.port.out.password.VerifiedPasswordProofs;
@@ -32,13 +31,13 @@ public class PasswordOperationPersistenceRepository {
         this.entityManager = Objects.requireNonNull(entityManager, "entityManager");
     }
 
-    public void insert(PasswordReservation reservation, UUID journeyId) {
+    public void insertJourney(PasswordReservation reservation, UUID journeyId) {
         PasswordOperationContext operation = reservation.operation();
         VerifiedPasswordProofs proofs = reservation.proofs();
         PasswordReservationFingerprints fingerprints = reservation.fingerprints();
         String bindingId = operation.claimedBindingId() == null ? null
                 : operation.claimedBindingId().toString();
-        entityManager.createNativeQuery(PasswordOperationSql.INSERT_JOURNEY)
+        exactlyOne(entityManager.createNativeQuery(PasswordOperationSql.INSERT_JOURNEY)
                 .setParameter("journeyId", journeyId.toString())
                 .setParameter("appId", operation.appId())
                 .setParameter("installationHash", fingerprints.installation().bytes())
@@ -52,8 +51,14 @@ public class PasswordOperationPersistenceRepository {
                 .setParameter("credentialDeadline", utc(reservation.credentialDeadline()))
                 .setParameter("journeyDeadline", utc(reservation.journeyDeadline()))
                 .setParameter("now", utc(reservation.now()))
-                .executeUpdate();
-        entityManager.createNativeQuery(PasswordOperationSql.INSERT_OPERATION)
+                .executeUpdate());
+    }
+
+    public void insertOperation(PasswordReservation reservation, UUID journeyId) {
+        PasswordOperationContext operation = reservation.operation();
+        VerifiedPasswordProofs proofs = reservation.proofs();
+        PasswordReservationFingerprints fingerprints = reservation.fingerprints();
+        exactlyOne(entityManager.createNativeQuery(PasswordOperationSql.INSERT_OPERATION)
                 .setParameter("operationId", operation.operationId().toString())
                 .setParameter("journeyId", journeyId.toString())
                 .setParameter("appId", operation.appId())
@@ -64,7 +69,7 @@ public class PasswordOperationPersistenceRepository {
                 .setParameter("requestJkt", proofs.requestKey().digest().bytes())
                 .setParameter("deadline", utc(reservation.credentialDeadline()))
                 .setParameter("now", utc(reservation.now()))
-                .executeUpdate();
+                .executeUpdate());
     }
 
     public PasswordReservationResult findExisting(PasswordReservation reservation) {
@@ -73,10 +78,10 @@ public class PasswordOperationPersistenceRepository {
                 .setParameter("ownerScope", fingerprints.ownerScope().bytes())
                 .setParameter("idempotency", fingerprints.idempotency().bytes())
                 .getResultList();
-    public     if (rows.isEmpty()) {
+        if (rows.isEmpty()) {
             return new PasswordReservationResult.Conflict();
         }
-    public     if (rows.size() != 1) {
+        if (rows.size() != 1) {
             throw new UnexpectedPasswordOperationUpdateException();
         }
         Object[] row = (Object[]) rows.getFirst();
@@ -88,7 +93,7 @@ public class PasswordOperationPersistenceRepository {
     public UUID findJourneyId(UUID operationId) {
         List<?> rows = entityManager.createNativeQuery(PasswordOperationSql.FIND_JOURNEY_ID)
                 .setParameter("operationId", operationId.toString()).getResultList();
-    public     if (rows.size() > 1) {
+        if (rows.size() > 1) {
             throw new UnexpectedPasswordOperationUpdateException();
         }
         return rows.isEmpty() ? null : UUID.fromString((String) rows.getFirst());
@@ -97,7 +102,7 @@ public class PasswordOperationPersistenceRepository {
     public void lockJourney(UUID journeyId) {
         List<?> rows = entityManager.createNativeQuery(PasswordOperationSql.LOCK_JOURNEY)
                 .setParameter("journeyId", journeyId.toString()).getResultList();
-    public     if (rows.size() != 1) {
+        if (rows.size() != 1) {
             throw new UnexpectedPasswordOperationUpdateException();
         }
     }
@@ -143,13 +148,13 @@ public class PasswordOperationPersistenceRepository {
         return exactlyZeroOrOne(updated);
     }
 
-    public Optional<VerifiedProviderIdentity> verifiedIdentity(UUID operationId) {
+    public Optional<VerifiedProviderIdentity> verifiedIdentityForReconciliation(UUID operationId) {
         List<?> rows = entityManager.createNativeQuery(PasswordOperationSql.READ_VERIFIED_IDENTITY)
                 .setParameter("operationId", operationId.toString()).getResultList();
-    public     if (rows.isEmpty()) {
+        if (rows.isEmpty()) {
             return Optional.empty();
         }
-    public     if (rows.size() != 1) {
+        if (rows.size() != 1) {
             throw new UnexpectedPasswordOperationUpdateException();
         }
         Object[] row = (Object[]) rows.getFirst();
@@ -159,10 +164,10 @@ public class PasswordOperationPersistenceRepository {
     public Optional<ConfirmedPasswordOwner> confirmedOwner(UUID operationId) {
         List<?> rows = entityManager.createNativeQuery(PasswordOperationSql.READ_CONFIRMED_OWNER)
                 .setParameter("operationId", operationId.toString()).getResultList();
-    public     if (rows.isEmpty()) {
+        if (rows.isEmpty()) {
             return Optional.empty();
         }
-    public     if (rows.size() != 1) {
+        if (rows.size() != 1) {
             throw new UnexpectedPasswordOperationUpdateException();
         }
         Object[] row = (Object[]) rows.getFirst();
@@ -178,20 +183,10 @@ public class PasswordOperationPersistenceRepository {
     public String operationState(UUID operationId) {
         List<?> rows = entityManager.createNativeQuery(PasswordOperationSql.LOCK_DISPATCH_STATE)
                 .setParameter("operationId", operationId.toString()).getResultList();
-    public     if (rows.size() > 1) {
+        if (rows.size() > 1) {
             throw new UnexpectedPasswordOperationUpdateException();
         }
         return rows.isEmpty() ? null : (String) rows.getFirst();
-    }
-
-    public PasswordOperationProgress progress(UUID operationId) {
-        List<?> rows = entityManager.createNativeQuery(PasswordOperationSql.READ_PROGRESS)
-                .setParameter("operationId", operationId.toString()).getResultList();
-    public     if (rows.size() > 1) {
-            throw new UnexpectedPasswordOperationUpdateException();
-        }
-        return rows.isEmpty() ? PasswordOperationProgress.MISSING
-                : PasswordOperationProgress.valueOf((String) rows.getFirst());
     }
 
     private int updateJourney(String sql, UUID journeyId) {
@@ -206,8 +201,14 @@ public class PasswordOperationPersistenceRepository {
         return exactlyZeroOrOne(updated);
     }
 
+    private void exactlyOne(int updated) {
+        if (updated != 1) {
+            throw new UnexpectedPasswordOperationUpdateException();
+        }
+    }
+
     private int exactlyZeroOrOne(int updated) {
-    public     if (updated > 1) {
+        if (updated > 1) {
             throw new UnexpectedPasswordOperationUpdateException();
         }
         return updated;

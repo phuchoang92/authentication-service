@@ -1,6 +1,9 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
 import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -32,8 +35,9 @@ public final class PasswordLoginController {
 
     @PostMapping(path = "/password", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> login(@RequestBody PasswordLoginRequest forwarded) {
-        var command = requests.map(forwarded);
+    public ResponseEntity<?> login(@RequestHeader HttpHeaders headers,
+                                   @Valid @RequestBody PasswordLoginRequest body) {
+        var command = requests.map(PasswordLoginHeaders.from(headers), body);
         return responses.map(command.operation().operationId(), passwords.login(command));
     }
 }

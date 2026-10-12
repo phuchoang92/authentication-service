@@ -1,7 +1,5 @@
 package com.vpbank.dcp.infrastructure.adapter.out.persistence.customer;
 
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.customer.UnexpectedCustomerOwnerUpdateException;
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.customer.CustomerOwnerPersistenceRepository;
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.CustomerOwnerDecision;
 import com.vpbank.dcp.core.domain.customer.CustomerOwnerPolicy;
@@ -9,6 +7,8 @@ import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerAcceptance;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
 import com.vpbank.dcp.core.port.out.customer.InvalidCustomerOwnerCommandException;
+import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.customer.CustomerOwnerPersistenceRepository;
+import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.customer.CustomerOwnerView;
 import java.util.Objects;
 import java.util.UUID;
 import org.hibernate.exception.ConstraintViolationException;
@@ -71,7 +71,7 @@ public class JpaCustomerOwnerAdapter implements CustomerOwnerRepository {
         if (journeyId == null) {
             return new CustomerOwnerAcceptance.NotClaimable();
         }
-        CustomerOwnerPersistenceRepository.SubjectRow current = repository.lockSubject(snapshot.customerId());
+        CustomerOwnerView current = repository.lockSubject(snapshot.customerId());
         UUID subjectId = current == null ? UUID.randomUUID() : current.id();
         if (current != null) {
             CustomerOwnerDecision decision = policy.decide(current.customer(), snapshot);
@@ -107,9 +107,7 @@ public class JpaCustomerOwnerAdapter implements CustomerOwnerRepository {
         }
         if (current != null && (snapshot.statusVersion() > current.customer().statusVersion()
                 || snapshot.checkedAt().isAfter(current.customer().checkedAt()))) {
-            if (repository.updateSnapshot(subjectId, snapshot) != 1) {
-                throw new UnexpectedCustomerOwnerUpdateException();
-            }
+            repository.updateSnapshot(subjectId, snapshot);
         }
         if (repository.attachJourney(journeyId, subjectId, appId) != 1
                 || repository.confirmOperation(operationId, journeyId, subjectId, appId) != 1) {

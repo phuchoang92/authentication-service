@@ -1,6 +1,5 @@
 package com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.authority;
 
-import com.vpbank.dcp.infrastructure.adapter.out.persistence.repository.authority.UnexpectedLeaseUpdateCountException;
 import com.vpbank.dcp.core.port.out.authority.AuthorityLeaseChange;
 import com.vpbank.dcp.core.port.out.authority.LeaseChangeResult;
 import jakarta.persistence.EntityManager;
