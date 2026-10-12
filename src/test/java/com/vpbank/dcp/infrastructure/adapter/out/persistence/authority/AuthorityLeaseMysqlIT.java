@@ -78,6 +78,20 @@ class AuthorityLeaseMysqlIT {
                 SELECT COUNT(*) FROM information_schema.TABLES
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME REGEXP '^auth_'
                 """, Integer.class)).isEqualTo(21);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_customer'
+                """, Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_subject'
+                """, Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE
+                 WHERE CONSTRAINT_SCHEMA = DATABASE()
+                   AND CONSTRAINT_NAME = 'fk_identity_subject'
+                   AND REFERENCED_TABLE_NAME = 'auth_customer'
+                """, Integer.class)).isEqualTo(1);
         var change = change(0, 7, 8);
         LeaseChangeResult first = transactions.execute(status -> store.closeWithNewFence(change));
         LeaseChangeResult retry = transactions.execute(status -> store.closeWithNewFence(change));
@@ -278,7 +292,7 @@ class AuthorityLeaseMysqlIT {
 
     private void insertSubject(UUID id, String customerId) {
         jdbc.update("""
-                INSERT INTO auth_subject
+                INSERT INTO auth_customer
                 (id, customer_id, customer_status_version, customer_last_block_version,
                  customer_status_checked_at, status, customer_security_version,
                  credential_security_version, policy_version, version, created_at, updated_at)

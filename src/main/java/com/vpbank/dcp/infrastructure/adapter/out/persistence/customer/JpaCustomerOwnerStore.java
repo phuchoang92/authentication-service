@@ -122,7 +122,7 @@ public class JpaCustomerOwnerStore implements CustomerOwnerStore {
             return false;
         }
         String name = constraint.getConstraintName();
-        return "auth_subject.uq_subject_customer".equals(name)
+        return "auth_customer.uq_subject_customer".equals(name)
                 || "auth_identity_link.uq_identity_provider".equals(name)
                 || "auth_identity_link.uq_identity_subject_issuer".equals(name);
     }

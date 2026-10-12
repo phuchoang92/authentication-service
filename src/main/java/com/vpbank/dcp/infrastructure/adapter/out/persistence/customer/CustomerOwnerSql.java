@@ -10,11 +10,11 @@ final class CustomerOwnerSql {
     static final String LOCK_SUBJECT = """
             SELECT BIN_TO_UUID(id), customer_status_version, customer_last_block_version,
                    customer_status_checked_at, status
-              FROM auth_subject WHERE customer_id = :customerId FOR UPDATE
+              FROM auth_customer WHERE customer_id = :customerId FOR UPDATE
             """;
 
     static final String INSERT_SUBJECT = """
-            INSERT INTO auth_subject
+            INSERT INTO auth_customer
               (id, customer_id, customer_status_version, customer_last_block_version,
                customer_status_checked_at, status, policy_version, created_at, updated_at)
             VALUES (UUID_TO_BIN(:subjectId), :customerId, :statusVersion, :blockVersion,
@@ -22,7 +22,7 @@ final class CustomerOwnerSql {
             """;
 
     static final String UPDATE_SNAPSHOT = """
-            UPDATE auth_subject
+            UPDATE auth_customer
                SET customer_status_version = :statusVersion,
                    customer_status_checked_at = GREATEST(customer_status_checked_at, :checkedAt),
                    version = version + 1, updated_at = UTC_TIMESTAMP(6)
@@ -58,7 +58,7 @@ final class CustomerOwnerSql {
 
     static final String SUBJECT_GUARD_DENIES = """
             SELECT COUNT(*) FROM auth_security_guard g
-              JOIN auth_subject s ON s.id = g.subject_id
+              JOIN auth_customer s ON s.id = g.subject_id
              WHERE g.scope = 'SUBJECT' AND g.scope_id = UUID_TO_BIN(:subjectId)
                AND (g.deny = 1
                     OR g.min_customer_security_version > s.customer_security_version

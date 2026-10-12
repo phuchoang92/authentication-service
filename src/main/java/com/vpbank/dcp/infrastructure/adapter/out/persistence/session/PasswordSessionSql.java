@@ -10,7 +10,7 @@ final class PasswordSessionSql {
             """;
 
     static final String LOCK_SUBJECT = """
-            SELECT id FROM auth_subject WHERE id = UUID_TO_BIN(:subjectId) FOR UPDATE
+            SELECT id FROM auth_customer WHERE id = UUID_TO_BIN(:subjectId) FOR UPDATE
             """;
 
     static final String LOCK_SUBJECT_APP = """
@@ -47,7 +47,7 @@ final class PasswordSessionSql {
                              AND cr.expires_at > UTC_TIMESTAMP(6))
               FROM auth_operation o
               JOIN auth_login_journey j ON j.id = o.journey_id
-              JOIN auth_subject s ON s.id = o.subject_id
+              JOIN auth_customer s ON s.id = o.subject_id
               JOIN auth_subject_app a ON a.subject_id = s.id AND a.app_id = o.app_id
               JOIN auth_device_binding b ON b.id = j.candidate_binding_id
                    AND b.subject_id = s.id AND b.app_id = o.app_id

@@ -99,7 +99,7 @@ final class PasswordOperationSql {
             SELECT o.verified_issuer, o.verified_subject, BIN_TO_UUID(o.subject_id),
                    s.customer_id, s.status, s.customer_status_version,
                    s.customer_last_block_version, s.customer_status_checked_at
-              FROM auth_operation o JOIN auth_subject s ON s.id = o.subject_id
+              FROM auth_operation o JOIN auth_customer s ON s.id = o.subject_id
              WHERE o.id = UUID_TO_BIN(:operationId) AND o.kind = 'PASSWORD_LOGIN'
                AND o.state IN ('CONFIRMED','COMPLETED')
             """;

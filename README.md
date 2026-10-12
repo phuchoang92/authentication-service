@@ -8,7 +8,7 @@ This is the isolated, clean-build G1 source tree, renamed from `authentication-s
 - JDK-only `core` ports and values; Spring/HTTP/JPA/Redis/JOSE implementations in `infrastructure`.
 - Strict JSON parsing, safe public errors, redacted secret-bearing values, configured public URI, inbound mTLS URI-SAN filter, outbound TLS 1.3 client identity/trust factory.
 - Pinned biometric Keycloak context verifier, DPoP verifier, typed enrollment JWS verifier, JWE envelope inspector, JCS command digest and signing-input codec. Password now travels through authenticated TLS to standard Keycloak Direct Grant; OTP remains an MFA-recipient JWE. Auth never decrypts OTP JWE.
-- Fresh MySQL 8.4 Flyway schema (21 `auth_` tables), a focused EntityManager CAS adapter for the authority-control fence, and short transaction tests.
+- Fresh MySQL 8.4 Flyway schema (21 `auth_` tables), a focused EntityManager CAS adapter for the authority-control fence, and short transaction tests. Additive V8 renames `auth_subject` to `auth_customer` without changing child `subject_id` columns or previously applied migrations.
 - Dedicated Redis authority key factories, strict versioned control/subject-guard codecs, checked Lua scripts for replay, subject block, fenced CLOSED generation installation and control close. Unknown state, wrong type, connection failure and uncertain script reply do not grant authority.
 
 ## G2 implementation status

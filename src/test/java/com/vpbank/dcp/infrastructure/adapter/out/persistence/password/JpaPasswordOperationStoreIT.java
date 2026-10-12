@@ -309,7 +309,7 @@ class JpaPasswordOperationStoreIT {
         UUID bindingId = UUID.randomUUID();
         UUID keyId = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO auth_subject
+                INSERT INTO auth_customer
                 (id, customer_id, customer_status_version, customer_status_checked_at,
                  status, policy_version, created_at, updated_at)
                 VALUES (UUID_TO_BIN(?), ?, 1, UTC_TIMESTAMP(6), 'ELIGIBLE',

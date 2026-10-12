@@ -86,7 +86,7 @@ class JpaCustomerOwnerStoreIT {
         jdbc.update("DELETE FROM auth_device_binding");
         jdbc.update("DELETE FROM auth_identity_link");
         jdbc.update("DELETE FROM auth_subject_app");
-        jdbc.update("DELETE FROM auth_subject");
+        jdbc.update("DELETE FROM auth_customer");
     }
 
     @Test
@@ -167,7 +167,7 @@ class JpaCustomerOwnerStoreIT {
                 customer("CUST-1", 3, 2), "test-policy"))
                 .isInstanceOf(CustomerOwnerAcceptance.ReconciliationRequired.class);
         assertThat(operationState(second)).isEqualTo("VERIFIED");
-        assertThat(jdbc.queryForObject("SELECT customer_last_block_version FROM auth_subject",
+        assertThat(jdbc.queryForObject("SELECT customer_last_block_version FROM auth_customer",
                 Long.class)).isZero();
     }
 
@@ -178,7 +178,7 @@ class JpaCustomerOwnerStoreIT {
                 customer("CUST-1", 1, 0), "test-policy"))
                 .isInstanceOf(CustomerOwnerAcceptance.Accepted.class);
         jdbc.update("""
-                UPDATE auth_subject SET status = 'BLOCKED', customer_status_version = 2,
+                UPDATE auth_customer SET status = 'BLOCKED', customer_status_version = 2,
                    customer_last_block_version = 2
                 """);
         UUID second = verifiedOperation(7, "kc-a");
@@ -224,7 +224,7 @@ class JpaCustomerOwnerStoreIT {
         assertThat(owners.accept(second, "neo-mobile", identity("kc-a"),
                 customer("CUST-2", 1, 0), "test-policy"))
                 .isInstanceOf(CustomerOwnerAcceptance.Conflict.class);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auth_subject", Integer.class))
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auth_customer", Integer.class))
                 .isEqualTo(1);
         assertThat(operationState(second)).isEqualTo("VERIFIED");
     }
