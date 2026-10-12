@@ -3,9 +3,11 @@ package com.vpbank.dcp.core.port.in.session;
 import java.net.URI;
 import java.util.Objects;
 
-/** BFF-provided original request and server-mapped action, with token and proof redacted. */
+/**
+ * BFF-provided original request and server-mapped action, with token and proof redacted.
+ */
 public record BankingRequestAdmissionCommand(String exactToken, String dpopProof, String method,
-                                      URI externalUri, String targetAction, String audience) {
+                                             URI externalUri, String targetAction, String audience) {
     public BankingRequestAdmissionCommand {
         Objects.requireNonNull(exactToken);
         Objects.requireNonNull(dpopProof);
@@ -15,5 +17,8 @@ public record BankingRequestAdmissionCommand(String exactToken, String dpopProof
         Objects.requireNonNull(audience);
     }
 
-    @Override public String toString() { return "BankingRequestAdmissionCommand[redacted]"; }
+    @Override
+    public String toString() {
+        return "BankingRequestAdmissionCommand[redacted]";
+    }
 }
