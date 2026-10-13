@@ -74,7 +74,7 @@ public final class JpaPasswordSessionAdapter implements SessionRepository {
             repository.finalizeJourney(snapshot);
             sessions.insertIntent(candidate);
             byte[] protectedResult = escrow.encode(new EscrowedSessionDelivery(
-                    candidate.tokenEnvelope(), candidate.receipt(), candidate.dpopNonce()));
+                    candidate.delivery().tokenEnvelope(), candidate.delivery().receipt(), candidate.delivery().dpopNonce()));
             sessions.insertEscrow(candidate, protectedResult, escrow.digest(protectedResult));
             return new PrepareSessionResult.Prepared(candidate);
         }));
@@ -94,7 +94,7 @@ public final class JpaPasswordSessionAdapter implements SessionRepository {
     public boolean markApplied(UUID operationId, UUID intentId) {
         return Boolean.TRUE.equals(transactions.execute(status -> {
             PreparedSession candidate = prepared(operationId).orElse(null);
-            if (candidate == null || !candidate.intentId().equals(intentId)) {
+            if (candidate == null || !candidate.candidate().intentId().equals(intentId)) {
                 return false;
             }
             lock(candidate.snapshot());

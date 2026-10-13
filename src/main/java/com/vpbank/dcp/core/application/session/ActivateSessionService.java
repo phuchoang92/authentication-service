@@ -61,14 +61,14 @@ public final class ActivateSessionService implements ActivateSessionUseCase {
                     ? session : ((PrepareSessionResult.Prepared) prepared).session();
         }
         if (!candidate.snapshot().context().subjectId().equals(subjectId)
-                || !clock.instant().isBefore(candidate.deliveryDeadline())) {
+                || !clock.instant().isBefore(candidate.delivery().deliveryDeadline())) {
             return new SessionActivationResult.Rejected();
         }
         SessionApplyResult applied = authority.apply(candidate);
         if (applied != SessionApplyResult.APPLIED && applied != SessionApplyResult.ALREADY_APPLIED) {
             return new SessionActivationResult.Processing();
         }
-        if (!store.markApplied(operationId, candidate.intentId()) || !authority.deliverable(candidate)) {
+        if (!store.markApplied(operationId, candidate.candidate().intentId()) || !authority.deliverable(candidate)) {
             return new SessionActivationResult.Processing();
         }
         return new SessionActivationResult.Active(candidate);

@@ -33,7 +33,7 @@ public final class PasswordLoginResponseMapper {
                     session.deadlines().absoluteExpiresAt()).toSeconds());
             PasswordLoginResponse body = getLoginResponse(session, seconds);
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                    .header("DPoP-Nonce", session.dpopNonce()).body(body);
+                    .header("DPoP-Nonce", session.delivery().dpopNonce()).body(body);
         }
         if (result instanceof PasswordLoginResult.Rejected) {
             return problem(HttpStatus.UNAUTHORIZED, "REQUEST_REJECTED");
@@ -52,7 +52,7 @@ public final class PasswordLoginResponseMapper {
     private static @NonNull PasswordLoginResponse getLoginResponse(PreparedSession session, long seconds) {
         SessionActivationSnapshot snapshot = session.snapshot();
         return new PasswordLoginActiveResponse("ACTIVE",
-                session.tokenEnvelope(), session.receipt(), Math.min(seconds, 3600), "banking",
+                session.delivery().tokenEnvelope(), session.delivery().receipt(), Math.min(seconds, 3600), "banking",
                 new PasswordLoginActiveResponse.Session(session.deadlines().idleExpiresAt(),
                         session.deadlines().absoluteExpiresAt()),
                 new PasswordLoginActiveResponse.Security(true, snapshot.context().bindingId(),

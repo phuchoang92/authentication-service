@@ -4,8 +4,10 @@ import com.vpbank.dcp.core.domain.security.Digest32;
 import java.util.Objects;
 
 /** Frozen request/delivery keys and registered device-possession binding. */
-public record SessionKeyBindings(Digest32 requestKey, String requestPublicJwk,
-                                 String responsePublicJwk, Digest32 deviceKey) {
+public record SessionKeyBindings(Digest32 requestKey,
+                                 String requestPublicJwk,
+                                 String responsePublicJwk,
+                                 Digest32 deviceKey) {
     public SessionKeyBindings {
         Objects.requireNonNull(requestKey, "requestKey");
         Objects.requireNonNull(requestPublicJwk, "requestPublicJwk");

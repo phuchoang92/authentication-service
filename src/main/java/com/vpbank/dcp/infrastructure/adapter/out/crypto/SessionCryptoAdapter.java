@@ -9,6 +9,9 @@ import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
+import com.vpbank.dcp.core.port.out.session.SessionDelivery;
+import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
+import com.vpbank.dcp.core.port.out.session.SessionCandidate;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.text.ParseException;
@@ -71,10 +74,11 @@ public final class SessionCryptoAdapter implements SessionCryptography {
                     Long.toString(deadlines.absoluteExpiresAt().toEpochMilli()),
                     envelopeDigest.base64Url(), dpopNonce));
             Digest32 candidateDigest = digests.sha256(candidateBytes);
-            return new PreparedSession(snapshot, intentId, sessionId, generation,
-                    lookupVersion, lookupDigest, candidateDigest,
-                    encrypted.tokenEnvelope(), encrypted.receipt(), dpopNonce,
-                    deadlines, deliveryDeadline);
+            var candidate = new SessionCandidate(intentId, sessionId, generation,
+                    new SessionTokenLookup(lookupVersion, lookupDigest), candidateDigest);
+            var delivery = new SessionDelivery(encrypted.tokenEnvelope(), encrypted.receipt(),
+                    dpopNonce, deliveryDeadline);
+            return new PreparedSession(snapshot, candidate, delivery, deadlines);
         } catch (ParseException failure) {
             throw new InvalidCryptographicInputException(failure);
         }

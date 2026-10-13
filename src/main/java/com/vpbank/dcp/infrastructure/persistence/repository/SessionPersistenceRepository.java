@@ -3,6 +3,7 @@ package com.vpbank.dcp.infrastructure.persistence.repository;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
+import com.vpbank.dcp.core.port.out.session.SessionCandidate;
 import com.vpbank.dcp.infrastructure.persistence.projection.PreparedSessionView;
 import jakarta.persistence.EntityManager;
 import java.sql.Timestamp;
@@ -30,8 +31,9 @@ public final class SessionPersistenceRepository {
         return !rows.isEmpty();
     }
 
-    public void insertIntent(PreparedSession candidate) {
-        SessionActivationSnapshot snapshot = candidate.snapshot();
+    public void insertIntent(PreparedSession session) {
+        SessionActivationSnapshot snapshot = session.snapshot();
+        SessionCandidate candidate = session.candidate();
         int intent = sql.createNativeQuery(SessionSql.INSERT_INTENT)
                 .setParameter("intentId", candidate.intentId().toString())
                 .setParameter("subjectId", snapshot.context().subjectId().toString())
@@ -42,28 +44,29 @@ public final class SessionPersistenceRepository {
                 .setParameter("requestJkt", snapshot.keys().requestKey().bytes())
                 .setParameter("generation", candidate.generation().toString())
                 .setParameter("sessionId", candidate.sessionId().toString())
-                .setParameter("lookupDigest", candidate.lookupDigest().bytes())
-                .setParameter("lookupVersion", candidate.lookupVersion().value())
+                .setParameter("lookupDigest", candidate.lookup().digest().bytes())
+                .setParameter("lookupVersion", candidate.lookup().version().value())
                 .setParameter("customerVersion", snapshot.securityVersions().customerSecurityVersion())
                 .setParameter("credentialVersion", snapshot.securityVersions().credentialSecurityVersion())
                 .setParameter("deviceVersion", snapshot.securityVersions().deviceSecurityVersion())
                 .setParameter("candidateDigest", candidate.candidateDigest().bytes())
-                .setParameter("idleExpiry", Timestamp.from(candidate.deadlines().idleExpiresAt()))
-                .setParameter("absoluteExpiry", Timestamp.from(candidate.deadlines().absoluteExpiresAt()))
+                .setParameter("idleExpiry", Timestamp.from(session.deadlines().idleExpiresAt()))
+                .setParameter("absoluteExpiry", Timestamp.from(session.deadlines().absoluteExpiresAt()))
                 .executeUpdate();
         exactlyOne(intent);
     }
 
-    public void insertEscrow(PreparedSession candidate, byte[] protectedResult,
+    public void insertEscrow(PreparedSession session, byte[] protectedResult,
                              Digest32 resultDigest) {
-        SessionActivationSnapshot snapshot = candidate.snapshot();
+        SessionActivationSnapshot snapshot = session.snapshot();
+        SessionCandidate candidate = session.candidate();
         int escrow = sql.createNativeQuery(SessionSql.INSERT_ESCROW)
                 .setParameter("escrowId", UUID.randomUUID().toString())
                 .setParameter("intentId", candidate.intentId().toString())
                 .setParameter("operationId", snapshot.context().operationId().toString())
                 .setParameter("protectedResult", protectedResult)
                 .setParameter("resultDigest", resultDigest.bytes())
-                .setParameter("deliveryDeadline", Timestamp.from(candidate.deliveryDeadline()))
+                .setParameter("deliveryDeadline", Timestamp.from(session.delivery().deliveryDeadline()))
                 .executeUpdate();
         exactlyOne(escrow);
     }

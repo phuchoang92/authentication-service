@@ -145,6 +145,14 @@ value equality, so SQL preparation compares the complete snapshot after acquirin
 publication/recovery. Database projections remain flat database values; the persistence
 mapper assembles the grouped core snapshot. Snapshot/key output is redacted.
 
+`PreparedSession` has four immutable components: the confirmed snapshot, `SessionCandidate`,
+`SessionDelivery` and `SessionDeadlines`. The candidate groups the intent/session IDs,
+generation, versioned `SessionTokenLookup` and exact candidate digest. Delivery groups
+the encrypted envelope, signed receipt, DPoP nonce and fixed recovery deadline; idle and
+absolute session expiry stay in `SessionDeadlines`. All nested values preserve value
+equality and redact output. Persistence mapping still uses the existing flat projections
+and explicit three-field escrow codec; the grouped core values are not a new wire format.
+
 `JpaPasswordSessionAdapter` implements the shared repository as the current password
 source bridge. It coordinates `PasswordSessionPersistenceRepository` (current password
 eligibility, locks and journey/operation transitions) and `SessionPersistenceRepository`

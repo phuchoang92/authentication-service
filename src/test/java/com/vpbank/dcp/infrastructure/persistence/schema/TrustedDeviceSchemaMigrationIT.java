@@ -49,6 +49,11 @@ class TrustedDeviceSchemaMigrationIT {
                    AND COLUMN_NAME IN ('device_id_lookup', 'device_id_ciphertext',
                                        'device_public_key', 'device_public_key_hash')
                 """, Integer.class)).isEqualTo(4);
+        assertThat(jdbc.queryForObject("""
+                SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_trusted_device'
+                   AND COLUMN_NAME = 'device_id_ciphertext'
+                """, Long.class)).isEqualTo(2048L);
         UUID customerA = UUID.randomUUID();
         UUID customerB = UUID.randomUUID();
         UUID deviceA = UUID.randomUUID();
@@ -93,7 +98,8 @@ class TrustedDeviceSchemaMigrationIT {
                 """, customerId.toString());
 
         assertThatThrownBy(() -> flyway(POPULATED).migrate())
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(RuntimeException.class)
+                .hasStackTraceContaining("ck_v10_empty_source");
         assertThat(jdbc(POPULATED).queryForObject("""
                 SELECT COUNT(*) FROM auth_customer WHERE id = UUID_TO_BIN(?)
                 """, Integer.class, customerId.toString())).isEqualTo(1);

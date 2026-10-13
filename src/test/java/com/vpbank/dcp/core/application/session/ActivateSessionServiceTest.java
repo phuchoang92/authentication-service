@@ -17,6 +17,9 @@ import com.vpbank.dcp.core.port.in.session.ActivateSessionCommand;
 import com.vpbank.dcp.core.port.in.session.SessionActivationResult;
 import com.vpbank.dcp.core.port.out.session.PrepareSessionResult;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
+import com.vpbank.dcp.core.port.out.session.SessionDelivery;
+import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
+import com.vpbank.dcp.core.port.out.session.SessionCandidate;
 import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.core.port.out.session.CustomerStatusFreshness;
 import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
@@ -65,7 +68,7 @@ class ActivateSessionServiceTest {
         order.verify(cryptography).prepare(snapshot, generation, SessionDeadlines.createdAt(NOW), NOW.plusSeconds(120));
         order.verify(repository).prepare(candidate);
         order.verify(authority).apply(candidate);
-        order.verify(repository).markApplied(command.operationId(), candidate.intentId());
+        order.verify(repository).markApplied(command.operationId(), candidate.candidate().intentId());
         order.verify(authority).deliverable(candidate);
     }
 
@@ -168,14 +171,14 @@ class ActivateSessionServiceTest {
     void lostLiveAuthorityAfterSqlCompletionCannotDeliver() {
         when(repository.prepared(command.operationId())).thenReturn(Optional.of(candidate));
         when(authority.apply(candidate)).thenReturn(SessionApplyResult.APPLIED);
-        when(repository.markApplied(command.operationId(), candidate.intentId())).thenReturn(true);
+        when(repository.markApplied(command.operationId(), candidate.candidate().intentId())).thenReturn(true);
         assertThat(service.activate(command)).isInstanceOf(SessionActivationResult.Processing.class);
         verify(authority).deliverable(candidate);
     }
 
     private void deliverable(PreparedSession session, SessionApplyResult applied) {
         when(authority.apply(session)).thenReturn(applied);
-        when(repository.markApplied(command.operationId(), session.intentId())).thenReturn(true);
+        when(repository.markApplied(command.operationId(), session.candidate().intentId())).thenReturn(true);
         when(authority.deliverable(session)).thenReturn(true);
     }
 
@@ -192,9 +195,11 @@ class ActivateSessionServiceTest {
     }
 
     private PreparedSession candidate(SessionActivationSnapshot snapshot, Instant deadline) {
-        return new PreparedSession(snapshot, UUID.randomUUID(), UUID.randomUUID(), generation,
-                new LookupKeyVersion("k1"), digest(3), digest(4), "encrypted-only",
-                "signed-receipt", UUID.randomUUID().toString(), SessionDeadlines.createdAt(NOW), deadline);
+        return new PreparedSession(snapshot,
+                new SessionCandidate(UUID.randomUUID(), UUID.randomUUID(), generation,
+                        new SessionTokenLookup(new LookupKeyVersion("k1"), digest(3)), digest(4)),
+                new SessionDelivery("encrypted-only", "signed-receipt", UUID.randomUUID().toString(), deadline),
+                SessionDeadlines.createdAt(NOW));
     }
 
     private Digest32 digest(int marker) {

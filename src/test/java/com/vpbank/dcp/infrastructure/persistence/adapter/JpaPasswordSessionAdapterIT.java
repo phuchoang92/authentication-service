@@ -166,7 +166,7 @@ class JpaPasswordSessionAdapterIT {
 
             var first = (SessionActivationResult.Active) useCase.activate(command);
             var original = first.session();
-            String key = new SessionKeys().forLookup(original.lookupVersion(), original.lookupDigest());
+            String key = new SessionKeys().forLookup(original.candidate().lookup().version(), original.candidate().lookup().digest());
             var originalRedis = redis.opsForHash().entries(key);
             var retry = (SessionActivationResult.Active) useCase.activate(command);
 
@@ -242,10 +242,7 @@ class JpaPasswordSessionAdapterIT {
                                 SessionAssurance.BiometricEnforcement.CLIENT_ENFORCED) : original.assurance(),
                 change == SnapshotChange.BIOMETRIC_AVAILABILITY
                         ? !original.biometricLoginEnabled() : original.biometricLoginEnabled());
-        var stale = new PreparedSession(changed, candidate.intentId(), candidate.sessionId(),
-                candidate.generation(), candidate.lookupVersion(), candidate.lookupDigest(),
-                candidate.candidateDigest(), candidate.tokenEnvelope(), candidate.receipt(),
-                candidate.dpopNonce(), candidate.deadlines(), candidate.deliveryDeadline());
+        var stale = new PreparedSession(changed, candidate.candidate(), candidate.delivery(), candidate.deadlines());
 
         assertThat(sessions.prepare(stale)).isInstanceOf(PrepareSessionResult.Rejected.class);
         assertThat(count("auth_authority_intent", original.context().operationId())).isZero();
@@ -266,8 +263,8 @@ class JpaPasswordSessionAdapterIT {
         assertThat(sessions.prepared(operationId)).contains(candidate);
         assertThat(sessions.prepare(candidate)).isEqualTo(new PrepareSessionResult.Existing(candidate));
         assertThat(sessions.markApplied(operationId, UUID.randomUUID())).isFalse();
-        assertThat(sessions.markApplied(operationId, candidate.intentId())).isTrue();
-        assertThat(sessions.markApplied(operationId, candidate.intentId())).isTrue();
+        assertThat(sessions.markApplied(operationId, candidate.candidate().intentId())).isTrue();
+        assertThat(sessions.markApplied(operationId, candidate.candidate().intentId())).isTrue();
         assertThat(operationState(operationId)).isEqualTo("COMPLETED");
         assertThat(journeyState(candidate)).isEqualTo("COMPLETED");
         assertThat(intentState(candidate)).isEqualTo("COMPLETED");
@@ -313,7 +310,7 @@ class JpaPasswordSessionAdapterIT {
         sessions.prepare(candidate);
         jdbc.update("UPDATE auth_operation SET version = 9007199254740991 WHERE id = UUID_TO_BIN(?)",
                 operationId.toString());
-        assertThatThrownBy(() -> sessions.markApplied(operationId, candidate.intentId()))
+        assertThatThrownBy(() -> sessions.markApplied(operationId, candidate.candidate().intentId()))
                 .isInstanceOf(InvalidSessionPersistenceException.class);
         assertThat(intentState(candidate)).isEqualTo("READY");
         assertThat(journeyState(candidate)).isEqualTo("FINALIZING");
@@ -381,10 +378,10 @@ class JpaPasswordSessionAdapterIT {
         UUID operationId = candidate.snapshot().context().operationId();
         assertThat(sessions.prepare(candidate)).isInstanceOf(PrepareSessionResult.Prepared.class);
 
-        assertThat(storedWallClock("auth_authority_intent", "idle_expires_at", "id", candidate.intentId()))
+        assertThat(storedWallClock("auth_authority_intent", "idle_expires_at", "id", candidate.candidate().intentId()))
                 .as("auth_authority_intent.idle_expires_at (Timestamp.from binding)")
                 .isEqualTo(utc(NOW.plusSeconds(120)));
-        assertThat(storedWallClock("auth_authority_intent", "absolute_expires_at", "id", candidate.intentId()))
+        assertThat(storedWallClock("auth_authority_intent", "absolute_expires_at", "id", candidate.candidate().intentId()))
                 .as("auth_authority_intent.absolute_expires_at (Timestamp.from binding)")
                 .isEqualTo(utc(NOW.plusSeconds(600)));
         assertThat(storedWallClock("auth_result_escrow", "delivery_deadline", "operation_id", operationId))
@@ -454,10 +451,11 @@ class JpaPasswordSessionAdapterIT {
                 new CustomerAuthenticationState(customerId, CustomerStatus.ELIGIBLE, 1, 0, NOW), "test-policy"))
                 .isEqualTo(new CustomerOwnerAcceptance.Accepted(subjectId));
         var snapshot = sessions.currentSnapshot(operationId, subjectId).orElseThrow();
-        return new PreparedSession(snapshot, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
-                new LookupKeyVersion("v1"), digest(UUID.randomUUID().toString()), digest("candidate"),
-                "encrypted-token", "signed-receipt", "nonce",
-                new SessionDeadlines(NOW.plusSeconds(120), NOW.plusSeconds(600)), NOW.plusSeconds(120));
+        return new PreparedSession(snapshot,
+                new SessionCandidate(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                        new SessionTokenLookup(new LookupKeyVersion("v1"), digest(UUID.randomUUID().toString())), digest("candidate")),
+                new SessionDelivery("encrypted-token", "signed-receipt", "nonce", NOW.plusSeconds(120)),
+                new SessionDeadlines(NOW.plusSeconds(120), NOW.plusSeconds(600)));
     }
 
     private Digest32 digest(String value) throws Exception {
@@ -476,7 +474,7 @@ class JpaPasswordSessionAdapterIT {
 
     private String intentState(PreparedSession candidate) {
         return jdbc.queryForObject("SELECT state FROM auth_authority_intent WHERE id = UUID_TO_BIN(?)",
-                String.class, candidate.intentId().toString());
+                String.class, candidate.candidate().intentId().toString());
     }
 
     private int count(String table, UUID operationId) {

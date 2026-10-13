@@ -14,6 +14,9 @@ import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
 import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
 import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
+import com.vpbank.dcp.core.port.out.session.SessionDelivery;
+import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
+import com.vpbank.dcp.core.port.out.session.SessionCandidate;
 import com.vpbank.dcp.infrastructure.persistence.codec.EscrowedSessionDelivery;
 import com.vpbank.dcp.infrastructure.persistence.projection.PasswordSessionSnapshotView;
 import com.vpbank.dcp.infrastructure.persistence.projection.PreparedSessionView;
@@ -79,13 +82,17 @@ class PasswordSessionPersistenceMapperTest {
         var snapshot = PasswordSessionPersistenceMapper.toSnapshot(snapshotView(), validUntil);
         var view = preparedView("lookup_k2", bytes(3), checkedAt.plusSeconds(900), checkedAt.plusSeconds(3600));
         var restored = SessionPersistenceMapper.toPreparedSession(snapshot, view, delivery);
-        assertThat(restored).isEqualTo(new PreparedSession(snapshot, intentId, sessionId, generation,
-                new LookupKeyVersion("lookup_k2"), Digest32.fromBytes(bytes(3)), Digest32.fromBytes(bytes(4)),
-                "exact-envelope", "exact-receipt", "exact-nonce",
-                new SessionDeadlines(checkedAt.plusSeconds(900), checkedAt.plusSeconds(3600)),
-                checkedAt.plusSeconds(120)));
+        assertThat(restored).isEqualTo(new PreparedSession(snapshot,
+                new SessionCandidate(intentId, sessionId, generation,
+                        new SessionTokenLookup(new LookupKeyVersion("lookup_k2"), Digest32.fromBytes(bytes(3))), Digest32.fromBytes(bytes(4))),
+                new SessionDelivery("exact-envelope", "exact-receipt", "exact-nonce", checkedAt.plusSeconds(120)),
+                new SessionDeadlines(checkedAt.plusSeconds(900), checkedAt.plusSeconds(3600))));
         assertThat(SessionPersistenceMapper.toRequestKey(view)).isEqualTo(snapshot.keys().requestKey());
         assertThat(SessionPersistenceMapper.toResultDigest(view)).isEqualTo(Digest32.fromBytes(bytes(5)));
+        assertThat(restored.toString()).isEqualTo("PreparedSession[redacted]");
+        assertThat(restored.candidate().toString()).isEqualTo("SessionCandidate[redacted]");
+        assertThat(restored.candidate().lookup().toString()).isEqualTo("SessionTokenLookup[redacted]");
+        assertThat(restored.delivery().toString()).isEqualTo("SessionDelivery[redacted]");
     }
 
     @Test

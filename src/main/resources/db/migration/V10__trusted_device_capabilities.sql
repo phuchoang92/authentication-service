@@ -3,9 +3,12 @@
 -- installation_hash cannot recover the App installation ID or its AEAD ciphertext.
 -- A populated V9 database requires a separately approved identity/device transition.
 -- Fail instead of silently creating a second source of security authority.
-CREATE TEMPORARY TABLE auth_v10_requires_empty_source (value TINYINT NOT NULL);
-INSERT INTO auth_v10_requires_empty_source (value)
-    SELECT NULL FROM (
+CREATE TEMPORARY TABLE auth_v10_requires_empty_source (
+    source_must_be_empty TINYINT NOT NULL,
+    CONSTRAINT ck_v10_empty_source CHECK (source_must_be_empty = 0)
+);
+INSERT INTO auth_v10_requires_empty_source (source_must_be_empty)
+    SELECT 1 FROM (
         SELECT id FROM auth_customer
         UNION ALL
         SELECT id FROM auth_device_binding

@@ -73,7 +73,7 @@ public final class RedisSessionAuthority implements SessionAuthority {
                     Date.from(session.deadlines().idleExpiresAt())))) {
                 return SessionApplyResult.AUTHORITY_CLOSED;
             }
-            String nonceKey = nonces.forFamily(session.sessionId());
+            String nonceKey = nonces.forFamily(session.candidate().sessionId());
             redis.opsForHash().putAll(nonceKey, nonceFields(session));
             if (!Boolean.TRUE.equals(redis.expireAt(nonceKey,
                     Date.from(session.deadlines().absoluteExpiresAt())))) {
@@ -95,22 +95,22 @@ public final class RedisSessionAuthority implements SessionAuthority {
             }
             Map<Object, Object> stored = redis.opsForHash().entries(sessionKey(session));
             Map<Object, Object> nonce = redis.opsForHash().entries(
-                    nonces.forFamily(session.sessionId()));
+                    nonces.forFamily(session.candidate().sessionId()));
             Long sessionTtl = redis.getExpire(sessionKey(session), TimeUnit.MILLISECONDS);
-            Long nonceTtl = redis.getExpire(nonces.forFamily(session.sessionId()),
+            Long nonceTtl = redis.getExpire(nonces.forFamily(session.candidate().sessionId()),
                     TimeUnit.MILLISECONDS);
             return sessionTtl != null && sessionTtl > 0
                     && nonceTtl != null && nonceTtl > 0
                     && stored.size() == 23 && nonce.size() == 9
                     && "1".equals(stored.get("schemaVersion"))
                     && "ACTIVE".equals(stored.get("state"))
-                    && session.sessionId().toString().equals(stored.get("sessionId"))
-                    && session.generation().toString().equals(stored.get("generation"))
+                    && session.candidate().sessionId().toString().equals(stored.get("sessionId"))
+                    && session.candidate().generation().toString().equals(stored.get("generation"))
                     && session.snapshot().context().subjectId().toString().equals(stored.get("subjectId"))
                     && session.snapshot().context().bindingId().toString().equals(stored.get("deviceBindingId"))
                     && session.snapshot().keys().requestKey().base64Url().equals(stored.get("requestKeyJkt"))
                     && "1".equals(nonce.get("schemaVersion"))
-                    && session.sessionId().toString().equals(nonce.get("familyId"));
+                    && session.candidate().sessionId().toString().equals(nonce.get("familyId"));
         } catch (RuntimeException failure) {
             return false;
         }
@@ -118,15 +118,15 @@ public final class RedisSessionAuthority implements SessionAuthority {
 
     private boolean isCurrent(PreparedSession session) {
         Instant now = clock.instant();
-        return !session.generation().equals(identity.currentGeneration().orElse(null))
+        return !session.candidate().generation().equals(identity.currentGeneration().orElse(null))
                 || !now.isBefore(session.deadlines().idleExpiresAt())
                 || !now.isBefore(session.deadlines().absoluteExpiresAt())
-                || !now.isBefore(session.deliveryDeadline())
+                || !now.isBefore(session.delivery().deliveryDeadline())
                 || !now.isBefore(session.snapshot().customerStatus().validUntil());
     }
 
     private String sessionKey(PreparedSession session) {
-        return sessions.forLookup(session.lookupVersion(), session.lookupDigest());
+        return sessions.forLookup(session.candidate().lookup().version(), session.candidate().lookup().digest());
     }
 
     private Map<String, String> sessionFields(PreparedSession session) {
@@ -138,7 +138,7 @@ public final class RedisSessionAuthority implements SessionAuthority {
         Map<String, String> fields = new HashMap<>();
         fields.put("schemaVersion", "1");
         fields.put("state", "ACTIVE");
-        fields.put("sessionId", session.sessionId().toString());
+        fields.put("sessionId", session.candidate().sessionId().toString());
         fields.put("subjectId", context.subjectId().toString());
         fields.put("appId", context.appId());
         fields.put("audience", context.appId());
@@ -147,7 +147,7 @@ public final class RedisSessionAuthority implements SessionAuthority {
         fields.put("deviceBindingId", context.bindingId().toString());
         fields.put("requestKeyJkt", keys.requestKey().base64Url());
         fields.put("requestPublicJwk", keys.requestPublicJwk());
-        fields.put("generation", session.generation().toString());
+        fields.put("generation", session.candidate().generation().toString());
         fields.put("customerSecurityVersion", Long.toString(versions.customerSecurityVersion()));
         fields.put("credentialSecurityVersion", Long.toString(versions.credentialSecurityVersion()));
         fields.put("deviceSecurityVersion", Long.toString(versions.deviceSecurityVersion()));
@@ -158,7 +158,7 @@ public final class RedisSessionAuthority implements SessionAuthority {
         fields.put("createdAtMs", Long.toString(clock.millis()));
         fields.put("idleExpiresAtMs", Long.toString(session.deadlines().idleExpiresAt().toEpochMilli()));
         fields.put("absoluteExpiresAtMs", Long.toString(session.deadlines().absoluteExpiresAt().toEpochMilli()));
-        fields.put("nonceFamilyId", session.sessionId().toString());
+        fields.put("nonceFamilyId", session.candidate().sessionId().toString());
         SessionAssurance assurance = snapshot.assurance();
         fields.put("assurance", "{\"biometricEnforcement\":\"" + assurance.biometricEnforcement().code()
                 + "\",\"devicePossession\":\"" + assurance.devicePossession().code()
@@ -167,13 +167,13 @@ public final class RedisSessionAuthority implements SessionAuthority {
     }
 
     private Map<String, String> nonceFields(PreparedSession session) {
-        String digest = digests.sha256(session.dpopNonce().getBytes(StandardCharsets.US_ASCII))
+        String digest = digests.sha256(session.delivery().dpopNonce().getBytes(StandardCharsets.US_ASCII))
                 .base64Url();
         Instant expiry = clock.instant().plus(nonceValidity);
         if (expiry.isAfter(session.deadlines().absoluteExpiresAt())) {
             expiry = session.deadlines().absoluteExpiresAt();
         }
-        return Map.of("schemaVersion", "1", "familyId", session.sessionId().toString(),
+        return Map.of("schemaVersion", "1", "familyId", session.candidate().sessionId().toString(),
                 "requestKeyJkt", session.snapshot().keys().requestKey().base64Url(),
                 "familyVersion", "0", "currentDigest", digest,
                 "currentExpiresAtMs", Long.toString(expiry.toEpochMilli()),

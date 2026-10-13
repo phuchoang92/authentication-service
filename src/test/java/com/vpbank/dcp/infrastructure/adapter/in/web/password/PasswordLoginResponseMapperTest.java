@@ -8,6 +8,7 @@ import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
 import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
+import com.vpbank.dcp.core.port.out.session.SessionDelivery;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.domain.session.SessionAssurance;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
@@ -110,9 +111,8 @@ class PasswordLoginResponseMapperTest {
         var session = mock(PreparedSession.class);
         when(session.snapshot()).thenReturn(snapshot);
         when(session.deadlines()).thenReturn(new SessionDeadlines(idle, absolute));
-        when(session.tokenEnvelope()).thenReturn("encrypted-envelope-test-only");
-        when(session.receipt()).thenReturn("signed-receipt-test-only");
-        when(session.dpopNonce()).thenReturn("nonce-test-only");
+        when(session.delivery()).thenReturn(new SessionDelivery("encrypted-envelope-test-only",
+                "signed-receipt-test-only", "nonce-test-only", absolute));
         return session;
     }
 
