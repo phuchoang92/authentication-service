@@ -11,8 +11,13 @@ import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionDelivery;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.domain.session.SessionAssurance;
+import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
+import com.vpbank.dcp.core.port.out.pending.PreparedPendingToken;
+import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordTotpRequiredResponse;
 import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
 import java.time.Clock;
 import java.time.Instant;
@@ -62,6 +67,23 @@ class PasswordLoginResponseMapperTest {
         problem(new PasswordLoginResult.TemporarilyUnavailable(), 503, "TEMPORARILY_UNAVAILABLE");
         problem(new PasswordLoginResult.Active(session(NOW, NOW.plusSeconds(3600))),
                 503, "TEMPORARILY_UNAVAILABLE");
+    }
+
+    @Test
+    void restrictedTotpResponseContainsNoPlaintextTokenOrSessionId() {
+        var token = new PreparedPendingToken(new SessionTokenLookup(new LookupKeyVersion("v1"),
+                Digest32.fromBytes(new byte[32])), "encrypted-pending-token", "signed-pending-receipt");
+        var response = mapper.map(OPERATION, new PasswordLoginResult.TotpRequired(
+                "authentication-opaque", "challenge-opaque", NOW.plusSeconds(120), token));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(202);
+        assertThat(response.getBody()).isInstanceOf(PasswordTotpRequiredResponse.class);
+        JsonNode body = json.readTree(json.writeValueAsString(response.getBody()));
+        assertThat(body.path("status").asText()).isEqualTo("MFA_REQUIRED");
+        assertThat(body.path("scope").asText()).isEqualTo("authentication:mfa");
+        assertThat(body.path("challenge").path("method").asText()).isEqualTo("TOTP");
+        assertThat(body.toString()).doesNotContain("sessionId", "lookupDigest", "secret", "password");
+        assertThat(response.getBody().toString()).doesNotContain("encrypted-pending-token");
     }
 
     @Test
