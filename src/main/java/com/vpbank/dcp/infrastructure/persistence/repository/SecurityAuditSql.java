@@ -11,15 +11,15 @@ final class SecurityAuditSql {
               FROM auth_security_audit_event r
              WHERE r.event_type = 'DEVICE_REVOKED'
                AND r.trusted_device_id = UUID_TO_BIN(:bindingId)
-               AND r.auth_customer_id = UUID_TO_BIN(:customerId) AND r.app_id = :appId
+               AND r.auth_customer_id = UUID_TO_BIN(:customerId) AND r.channel = :channel
             """;
 
     static final String INSERT_DEVICE_REVOKE = """
             INSERT INTO auth_security_audit_event
-              (id, auth_customer_id, app_id, operation_id, event_sequence, event_type,
+              (id, auth_customer_id, channel, operation_id, event_sequence, event_type,
                trusted_device_id, device_security_version, reason_code,
                actor_type, actor_id, occurred_at, recorded_at)
-            VALUES (UUID_TO_BIN(:eventId), UUID_TO_BIN(:customerId), :appId,
+            VALUES (UUID_TO_BIN(:eventId), UUID_TO_BIN(:customerId), :channel,
                     UUID_TO_BIN(:operationId), 1, 'DEVICE_REVOKED',
                     UUID_TO_BIN(:bindingId), :deviceSecurityVersion, :reasonCode,
                     :actorType, :actorId, :occurredAt, UTC_TIMESTAMP(6))
@@ -27,10 +27,10 @@ final class SecurityAuditSql {
 
     static final String INSERT_PRIMARY_CLEARED = """
             INSERT INTO auth_security_audit_event
-              (id, auth_customer_id, app_id, operation_id, event_sequence, event_type,
+              (id, auth_customer_id, channel, operation_id, event_sequence, event_type,
                previous_primary_device_id, new_primary_device_id,
                actor_type, actor_id, occurred_at, recorded_at)
-            VALUES (UUID_TO_BIN(:eventId), UUID_TO_BIN(:customerId), :appId,
+            VALUES (UUID_TO_BIN(:eventId), UUID_TO_BIN(:customerId), :channel,
                     UUID_TO_BIN(:operationId), 2, 'PRIMARY_DEVICE_CHANGED',
                     UUID_TO_BIN(:bindingId), NULL,
                     :actorType, :actorId, :occurredAt, UTC_TIMESTAMP(6))

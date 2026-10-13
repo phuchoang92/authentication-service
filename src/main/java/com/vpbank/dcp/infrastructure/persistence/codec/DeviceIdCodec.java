@@ -33,13 +33,13 @@ public final class DeviceIdCodec {
         this.random = Objects.requireNonNull(random);
     }
 
-    public ProtectedDeviceId protect(UUID customerId, String appId,
+    public ProtectedDeviceId protect(UUID customerId, String channel,
                                      UUID bindingId, String installationId) {
-        requireIdentity(customerId, appId, installationId);
+        requireIdentity(customerId, channel, installationId);
         Objects.requireNonNull(bindingId);
         String lookupKeyId = lookupKeys.activeKeyId();
         String encryptionKeyId = encryptionKeys.activeKeyId();
-        Digest32 lookup = lookup(customerId, appId, installationId, lookupKeyId);
+        Digest32 lookup = lookup(customerId, channel, installationId, lookupKeyId);
         byte[] nonce = new byte[NONCE_BYTES];
         random.nextBytes(nonce);
         try {
@@ -47,7 +47,7 @@ public final class DeviceIdCodec {
             cipher.init(Cipher.ENCRYPT_MODE,
                     new SecretKeySpec(encryptionKeys.key(encryptionKeyId), "AES"),
                     new GCMParameterSpec(TAG_BITS, nonce));
-            cipher.updateAAD(aad(customerId, appId, bindingId));
+            cipher.updateAAD(aad(customerId, channel, bindingId));
             byte[] encrypted = cipher.doFinal(utf8(installationId));
             byte[] envelope = ByteBuffer.allocate(1 + NONCE_BYTES + encrypted.length)
                     .put(FORMAT_VERSION).put(nonce).put(encrypted).array();
@@ -57,12 +57,12 @@ public final class DeviceIdCodec {
         }
     }
 
-    public String reveal(UUID customerId, String appId, UUID bindingId,
+    public String reveal(UUID customerId, String channel, UUID bindingId,
                          String encryptionKeyId, byte[] ciphertext) {
         Objects.requireNonNull(customerId);
         Objects.requireNonNull(bindingId);
         Objects.requireNonNull(ciphertext);
-        if (appId == null || appId.isBlank() || ciphertext.length < 1 + NONCE_BYTES + 16
+        if (channel == null || channel.isBlank() || ciphertext.length < 1 + NONCE_BYTES + 16
                 || ciphertext[0] != FORMAT_VERSION) {
             throw new InvalidDeviceIdProtectionException();
         }
@@ -73,7 +73,7 @@ public final class DeviceIdCodec {
             cipher.init(Cipher.DECRYPT_MODE,
                     new SecretKeySpec(encryptionKeys.key(encryptionKeyId), "AES"),
                     new GCMParameterSpec(TAG_BITS, nonce));
-            cipher.updateAAD(aad(customerId, appId, bindingId));
+            cipher.updateAAD(aad(customerId, channel, bindingId));
             byte[] plain = cipher.doFinal(ciphertext, 1 + NONCE_BYTES,
                     ciphertext.length - 1 - NONCE_BYTES);
             return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(plain)).toString();
@@ -82,32 +82,32 @@ public final class DeviceIdCodec {
         }
     }
 
-    public List<DeviceIdLookup> lookupCandidates(UUID customerId, String appId,
+    public List<DeviceIdLookup> lookupCandidates(UUID customerId, String channel,
                                                   String installationId) {
-        requireIdentity(customerId, appId, installationId);
+        requireIdentity(customerId, channel, installationId);
         List<DeviceIdLookup> candidates = new ArrayList<>();
         for (String keyId : lookupKeys.acceptedKeyIds()) {
             candidates.add(new DeviceIdLookup(keyId,
-                    lookup(customerId, appId, installationId, keyId)));
+                    lookup(customerId, channel, installationId, keyId)));
         }
         return List.copyOf(candidates);
     }
 
-    private Digest32 lookup(UUID customerId, String appId, String installationId,
+    private Digest32 lookup(UUID customerId, String channel, String installationId,
                             String keyId) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(lookupKeys.key(keyId), "HmacSHA256"));
             return Digest32.fromBytes(mac.doFinal(encode(
-                    "BANK_DEVICE_ID_LOOKUP_V1", customerId.toString(), appId, installationId)));
+                    "BANK_DEVICE_ID_LOOKUP_V1", customerId.toString(), channel, installationId)));
         } catch (GeneralSecurityException failure) {
             throw new InvalidDeviceIdProtectionException(failure);
         }
     }
 
-    private static byte[] aad(UUID customerId, String appId, UUID bindingId) {
+    private static byte[] aad(UUID customerId, String channel, UUID bindingId) {
         return encode("BANK_DEVICE_ID_CIPHERTEXT_V1", customerId.toString(),
-                appId, bindingId.toString());
+                channel, bindingId.toString());
     }
 
     private static byte[] encode(String... fields) {
@@ -128,14 +128,14 @@ public final class DeviceIdCodec {
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
-    private static void requireIdentity(UUID customerId, String appId, String installationId) {
+    private static void requireIdentity(UUID customerId, String channel, String installationId) {
         Objects.requireNonNull(customerId);
-        if (appId == null || appId.isBlank() || appId.length() > 64
+        if (channel == null || channel.isBlank() || channel.length() > 64
                 || installationId == null || installationId.length() < 16
                 || installationId.length() > 300) {
             throw new InvalidDeviceIdProtectionException();
         }
-        utf8(appId);
+        utf8(channel);
         utf8(installationId);
     }
 }

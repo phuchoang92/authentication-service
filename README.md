@@ -1,16 +1,23 @@
 # Authentication Service v1 — database simplification in progress
 
-**Current warning:** V11 retires the old journey/operation/device-key storage cluster
-on an empty isolated database. The password-operation entity, both persistence
-repositories, SQL holder, adapter, mapper and associated projections have been removed.
+**Current warning:** V11 retires the old journey/operation/device-key storage cluster;
+V12 removes `auth_customer_app` on an empty isolated device schema. Current device rows
+use `channel` instead of `app_id` and `is_primary` instead of a separate primary pointer.
+V13 adds an Auth-owned, encrypted TOTP credential for each trusted device. The verifier
+accepts six-digit SHA-1 codes at 30-second intervals with a ±1-step window, consumes
+each matched step once in MySQL, and refuses a revoked/expired binding. It is **not**
+an enabled login, trust, or transfer factor: no enrollment/provisioning API, challenge
+admission, attempt budget, or transfer-policy integration has been implemented. The
+the three-code acceptance window still requires server-side rate/attempt limits and a
+bound challenge before exposing the verifier through an API.
+The old password/device/session persistence path has been removed.
 The password endpoint now returns a safe
 `TEMPORARILY_UNAVAILABLE` response; it does not call Keycloak or issue a banking token.
 It does not write a failure row or lock an operation. This is **not** a working login flow.
 Do not deploy this build or use it for login until a replacement password flow and its
 tests are completed. V11 rejects populated old tables and is not a data migration.
-The V11 migration tests pass on isolated MySQL 8.4, and `./mvnw clean verify` passes
-after removing tests that targeted the retired password-operation/schema path. This
-does not prove a replacement password login; that flow remains unavailable.
+V11/V12 migration and DB-only revoke tests pass on isolated MySQL 8.4. This does not
+prove a replacement password login; that flow remains unavailable.
 
 This is the isolated, clean-build G1 source tree, renamed from `authentication-service-rebuild` after the old project was removed. It is not connected to the running database, Redis, deployment, or Maven reactor. The design input is `../docs/DD/target` and the coding authority is `../docs/authentication-documentation/docs/design-v1/code-design-rules-and-patterns.md`.
 
@@ -20,7 +27,7 @@ This is the isolated, clean-build G1 source tree, renamed from `authentication-s
 - JDK-only `core` ports and values; Spring/HTTP/JPA/Redis/JOSE implementations in `infrastructure`.
 - Strict JSON parsing, safe public errors, redacted secret-bearing values, configured public URI, stateless Spring Security X.509 with exact workload URI-SAN authorization, outbound TLS 1.3 client identity/trust factory.
 - Pinned biometric Keycloak context verifier, Spring Security DPoP decoder, typed enrollment JWS verifier, JWE envelope inspector, JCS command digest and signing-input codec. Password now travels through authenticated TLS to standard Keycloak Direct Grant; OTP remains an MFA-recipient JWE. Auth never decrypts OTP JWE.
-- Fresh MySQL 8.4 Flyway schema (6 current `auth_` tables after V11). Additive V8 renames `auth_subject` to `auth_customer`; V9 removes `auth_authority_control`; V10 adds current trusted-device tables; V11 retires empty old login/device storage. V1–V10 and their checksums are unchanged.
+- Fresh MySQL 8.4 Flyway schema (6 current `auth_` tables after V13). V10 adds the trusted-device foundation; V11 retires empty old login/device storage; V12 removes empty `auth_customer_app` and moves primary to `auth_trusted_device`; V13 adds the encrypted TOTP credential. V1–V12 and their checksums are unchanged.
 - Dedicated Redis key factories and a development/integration-only online session store. Replay uses native `SET NX` with expiry; session and nonce records use Redis hashes with TTL. There is no Lua or Redis Authority Control implementation. Redis run-ID changes close old sessions, but multi-key activation, touch and revocation are **not atomic**.
 
 ## G2 implementation status
@@ -64,12 +71,11 @@ The one-request password route exists at BFF `POST /api/v1/authentications/passw
 
 This is **not** an accepted end-to-end login service. Guarded result retrieval after a lost reply, lock/logout/rotation, Customer event/guard application, full App→BFF→Auth→Keycloak→ACTIVE integration, and the two-second Customer revocation guarantee remain incomplete. A crash after Keycloak acceptance but before the verified identity is persisted still leaves an uncertain operation; the original cannot redispatch the password. Production activation remains fail-closed, and this artifact must not replace the running service. Password no longer requires a custom Keycloak SPI; biometric still does.
 
-The V10 trusted-device schema is staged only on fresh isolated databases. The new
-`JpaDeviceRevocationAdapter` records the device status transition, primary-pointer clear and
+The V12 trusted-device schema is staged only on fresh isolated databases. The new
+`JpaDeviceRevocationAdapter` records the device status transition, primary-flag clear and
 security audit atomically in MySQL; its port result is explicitly **not** public revoke success.
 No online Redis denial/guard, Keycloak cleanup, MFA trust completion, biometric flow or runtime
-password routing has been switched to these tables. The existing password path still reads the
-pre-V10 device tables and must not be interpreted as validating the new trusted-device design.
+password routing has been switched to these tables. The public password endpoint remains closed.
 
 ## Password DPoP configuration
 
@@ -177,20 +183,13 @@ absolute session expiry stay in `SessionDeadlines`. All nested values preserve v
 equality and redact output. Persistence mapping still uses the existing flat projections
 and explicit three-field escrow codec; the grouped core values are not a new wire format.
 
-`JpaPasswordSessionAdapter` implements the shared repository as the current password
-source bridge. It coordinates `PasswordSessionPersistenceRepository` (current password
-eligibility, locks and journey/operation transitions) and `SessionPersistenceRepository`
-(activation intent and encrypted delivery escrow) in the same short transactions.
-Journey finalization, intent and escrow preparation roll back together; intent, journey
-and operation completion also roll back together. Redis calls remain outside SQL locks.
-Retries reuse the exact stored candidate, envelope, receipt and nonce, then check live
-authority before delivery. SQL guards/codes, migration checksums, Redis schema/key bytes,
-escrow JSON and the frozen `PASSWORD_ACTIVE_V1` candidate digest input are unchanged.
+The SQL bridge described above was removed with V11. Its core issuance types and crypto
+components are not wired into a working password login and must not be treated as proof
+of current recovery or activation behavior.
 
-`SessionConfiguration` assembles the shared crypto, Redis, delivery and activation use case;
-`PasswordFlowConfiguration` assembles password eligibility, the SQL bridge and its existing
-integration activation gate. Biometric/PIN and touch/lock/logout/revoke are future use cases
-in this capability; this extraction does not implement those flows or production authority.
+`SessionConfiguration` still assembles integration-only crypto/Redis components.
+`PasswordFlowConfiguration` wires a fail-closed unavailable result. Biometric/PIN and
+session lifecycle flows are not implemented by this device-schema change.
 
 ## Persistence structure
 
@@ -206,11 +205,11 @@ infrastructure.persistence
     └── codec         SessionDeliveryEscrowCodec / EscrowedSessionDelivery
 ```
 
-The retained SQL capabilities are CustomerOwner, PasswordDeviceKey,
-PasswordDeviceRoute, PasswordSession and shared Session activation storage. Persistence groups classes by technical role,
-without customer/password/session subpackages. Core still groups domain and ports by
-capability. Redis ports retain their existing names. There are no compatibility aliases
-for the replaced SQL ports.
+The active DB-only device capability uses `TrustedDeviceRevocationPersistenceRepository`,
+`SecurityAuditPersistenceRepository` and `JpaDeviceRevocationAdapter`. Old CustomerOwner,
+PasswordDeviceKey, PasswordDeviceRoute, PasswordSession and intent/escrow SQL repositories
+were removed because their tables no longer exist. Persistence groups classes by technical
+role; core still groups domain and ports by capability.
 
 Adapters own short transactions, lock ordering, multi-table updates and recovery after
 rollback. Internal repositories bind and execute SQL, extract typed database views and
@@ -226,13 +225,11 @@ redacted output. The retired `auth_operation` table has no entity, Spring Data r
 or active failure-recording adapter. Older password/session text below describes the
 pre-V11 path and is not evidence of current runtime behavior.
 
-Customer freshness uses the configured maximum age through `CustomerFreshnessPolicy`;
-a snapshot expires exactly at `checkedAt + maxAge`. `SessionDeliveryEscrowCodec` preserves
-the existing JsonMapper encoding and checks SHA-256 using the JDK before decoding stored
-bytes. The persistence refactor preserved the API and transaction boundaries; the later
-explicit Authority Control removal adds V9 and deletes its unused core port, adapter and
-internal SQL repository. It does not remove `auth_authority_intent` or other session data.
-The separate three-table target is not implemented by these changes.
+Customer freshness uses the configured maximum age through `CustomerFreshnessPolicy`.
+`SessionDeliveryEscrowCodec` remains a tested codec, not active result recovery. V11
+removed `auth_authority_intent` and related source tables. V12 has no customer-App row:
+the per-customer/channel primary flag is stored on the trusted binding. No code may use
+the removed SQL as current login authority.
 
 Architecture tests enforce the new persistence role boundaries, including negative
 fixtures: application/controllers use ports, adapters do not execute SQL, repositories do

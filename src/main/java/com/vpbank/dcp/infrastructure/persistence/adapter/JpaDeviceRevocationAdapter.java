@@ -5,11 +5,9 @@ import com.vpbank.dcp.core.port.out.device.DeviceRevocationRepository;
 import com.vpbank.dcp.core.port.out.device.RecordDeviceRevocation;
 import com.vpbank.dcp.infrastructure.persistence.mapper.DeviceRevocationPersistenceMapper;
 import com.vpbank.dcp.infrastructure.persistence.projection.DeviceRevocationAuditView;
-import com.vpbank.dcp.infrastructure.persistence.projection.TrustedDeviceAppView;
 import com.vpbank.dcp.infrastructure.persistence.projection.TrustedDeviceStateView;
 import com.vpbank.dcp.infrastructure.persistence.repository.SecurityAuditPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.TrustedDeviceRevocationPersistenceRepository;
-import com.vpbank.dcp.infrastructure.persistence.repository.UnexpectedDeviceRevocationStateException;
 import java.util.Objects;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -36,10 +34,10 @@ public class JpaDeviceRevocationAdapter implements DeviceRevocationRepository {
     }
 
     private DeviceRevocationRecordResult recordLocked(RecordDeviceRevocation command) {
-        TrustedDeviceAppView customerApp = devices.lockCustomerApp(command);
-        if (customerApp == null) {
+        if (!devices.lockCustomer(command)) {
             return new DeviceRevocationRecordResult.Conflict();
         }
+        boolean primaryTarget = command.bindingId().equals(devices.findPrimary(command));
         TrustedDeviceStateView device = devices.lockDevice(command);
         if (device == null) {
             return new DeviceRevocationRecordResult.Conflict();
@@ -55,16 +53,12 @@ public class JpaDeviceRevocationAdapter implements DeviceRevocationRepository {
         if (devices.markRevoked(command) != 1) {
             return new DeviceRevocationRecordResult.Conflict();
         }
-        boolean primaryCleared = command.bindingId().equals(customerApp.primaryBindingId());
-        if (primaryCleared && devices.clearPrimary(command, customerApp.version()) != 1) {
-            throw new UnexpectedDeviceRevocationStateException();
-        }
         long securityVersion = device.deviceSecurityVersion() + 1;
         audit.insertDeviceRevoked(command, securityVersion);
-        if (primaryCleared) {
+        if (primaryTarget) {
             audit.insertPrimaryCleared(command);
         }
-        return DeviceRevocationPersistenceMapper.recorded(securityVersion, primaryCleared);
+        return DeviceRevocationPersistenceMapper.recorded(securityVersion, primaryTarget);
     }
 
     private DeviceRevocationRecordResult alreadyRecorded(RecordDeviceRevocation command,

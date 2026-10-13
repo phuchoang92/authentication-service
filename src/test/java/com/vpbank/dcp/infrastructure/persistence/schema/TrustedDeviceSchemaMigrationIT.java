@@ -14,6 +14,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+/** Characterizes immutable V10; V12 tests assert the current schema without auth_customer_app. */
 @Testcontainers
 class TrustedDeviceSchemaMigrationIT {
     private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse(

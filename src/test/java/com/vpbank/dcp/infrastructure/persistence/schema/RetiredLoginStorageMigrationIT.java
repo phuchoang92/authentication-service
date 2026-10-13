@@ -29,10 +29,15 @@ class RetiredLoginStorageMigrationIT {
             .withDatabaseName("auth_retired_populated")
             .withUsername("auth_test").withPassword("test-only-password");
 
+    @Container
+    static final MySQLContainer<?> POPULATED_DEVICE = new MySQLContainer<>(MYSQL_IMAGE)
+            .withDatabaseName("auth_device_channel_populated")
+            .withUsername("auth_test").withPassword("test-only-password");
+
     @Test
     void freshDatabaseRetainsOnlyCurrentCustomerAndDeviceTables() {
         Flyway flyway = flyway(FRESH);
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(11);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(13);
 
         JdbcTemplate jdbc = jdbc(FRESH);
         Set<String> tables = Set.copyOf(jdbc.queryForList("""
@@ -40,10 +45,46 @@ class RetiredLoginStorageMigrationIT {
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'auth_%'
                 """, String.class));
         assertThat(tables).containsExactlyInAnyOrder(
-                "auth_customer", "auth_customer_app", "auth_trusted_device",
+                "auth_customer", "auth_trusted_device",
                 "auth_device_push_registration", "auth_biometric_login",
-                "auth_security_audit_event");
+                "auth_security_audit_event", "auth_device_totp_credential");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_trusted_device'
+                   AND COLUMN_NAME IN ('channel', 'is_primary', 'primary_slot')
+                """, Integer.class)).isEqualTo(3);
         flyway.validate();
+    }
+
+    @Test
+    void populatedCustomerAppStopsChannelMigrationBeforeSchemaChanges() {
+        Flyway before = Flyway.configure()
+                .dataSource(POPULATED_DEVICE.getJdbcUrl(), POPULATED_DEVICE.getUsername(),
+                        POPULATED_DEVICE.getPassword())
+                .target(MigrationVersion.fromVersion("11")).load();
+        assertThat(before.migrate().migrationsExecuted).isEqualTo(11);
+        JdbcTemplate jdbc = jdbc(POPULATED_DEVICE);
+        String customerId = "00000000-0000-0000-0000-000000000011";
+        jdbc.update("""
+                INSERT INTO auth_customer
+                    (id, customer_id, customer_status_version, customer_status_checked_at,
+                     status, policy_version, created_at, updated_at)
+                VALUES (UUID_TO_BIN(?), 'test-device-channel', 1, UTC_TIMESTAMP(6),
+                        'ELIGIBLE', 'test', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """, customerId);
+        jdbc.update("""
+                INSERT INTO auth_customer_app
+                    (auth_customer_id, app_id, status, created_at, updated_at)
+                VALUES (UUID_TO_BIN(?), 'neo-mobile', 'ACTIVE', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """, customerId);
+
+        assertThatThrownBy(() -> flyway(POPULATED_DEVICE).migrate())
+                .isInstanceOf(RuntimeException.class)
+                .hasStackTraceContaining("ck_v12_empty_device_state");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_customer_app'
+                """, Integer.class)).isEqualTo(1);
     }
 
     @Test

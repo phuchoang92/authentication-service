@@ -21,7 +21,7 @@ public class SecurityAuditPersistenceRepository {
         List<?> rows = entityManager.createNativeQuery(SecurityAuditSql.FIND_DEVICE_REVOKE)
                 .setParameter("bindingId", command.bindingId().toString())
                 .setParameter("customerId", command.owner().customerId().toString())
-                .setParameter("appId", command.owner().appId()).getResultList();
+                .setParameter("channel", command.owner().channel()).getResultList();
         if (rows.isEmpty()) {
             return null;
         }
@@ -37,7 +37,7 @@ public class SecurityAuditPersistenceRepository {
         int affected = entityManager.createNativeQuery(SecurityAuditSql.INSERT_DEVICE_REVOKE)
                 .setParameter("eventId", UUID.randomUUID().toString())
                 .setParameter("customerId", command.owner().customerId().toString())
-                .setParameter("appId", command.owner().appId())
+                .setParameter("channel", command.owner().channel())
                 .setParameter("operationId", command.operationId().toString())
                 .setParameter("bindingId", command.bindingId().toString())
                 .setParameter("deviceSecurityVersion", securityVersion)
@@ -53,7 +53,7 @@ public class SecurityAuditPersistenceRepository {
         int affected = entityManager.createNativeQuery(SecurityAuditSql.INSERT_PRIMARY_CLEARED)
                 .setParameter("eventId", UUID.randomUUID().toString())
                 .setParameter("customerId", command.owner().customerId().toString())
-                .setParameter("appId", command.owner().appId())
+                .setParameter("channel", command.owner().channel())
                 .setParameter("operationId", command.operationId().toString())
                 .setParameter("bindingId", command.bindingId().toString())
                 .setParameter("actorType", command.actor().type().code())

@@ -45,11 +45,8 @@ result until a replacement login flow has an approved contract and tests. Guarde
 joins, locks and mutations for capabilities that still exist use focused EntityManager
 repositories; never use a previously loaded entity for a decision after acquiring locks. No JPA caches,
 relationships, cascades or generic base repository. Customer freshness belongs to the
-JDK-only `CustomerFreshnessPolicy`; protected delivery serialization and digest checking
-belong to `SessionDeliveryEscrowCodec`. Shared intent/escrow SQL belongs to
-`SessionPersistenceRepository`; `JpaPasswordSessionAdapter` coordinates it with the
-password-source repository in the same transaction. Keep password eligibility and
-journey/operation transitions at that source boundary.
+JDK-only `CustomerFreshnessPolicy`. The old password-source/session persistence adapters
+were removed with the V11 tables; do not restore them against the V12 schema.
 
 Preserve applied migration files and checksums. The user explicitly retired SQL
 Authority Control: V9 removes `auth_authority_control`, and its lease port/adapter/repository
@@ -57,4 +54,7 @@ must not be restored. V11 retires the empty V1 login/device storage cluster; the
 password flow is disabled and must not be re-enabled against V11. Design and test its
 replacement against the current customer/device tables first. Preserve Redis/BFF work
 in progress and historical test reports; this does not authorize deployment, storage
-cutover or Git push.
+cutover or Git push. V12 removes `auth_customer_app`: current device ownership is
+`(auth_customer_id, channel)` on `auth_trusted_device`, and at most one ACTIVE row per
+owner/channel may have `is_primary=1`. Channel-level blocking independent of devices is
+not present; do not silently infer it from a device row.
