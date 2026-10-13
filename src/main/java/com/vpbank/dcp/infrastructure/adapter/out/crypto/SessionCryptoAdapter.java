@@ -5,7 +5,9 @@ import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.port.out.session.SessionCryptography;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
+import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -41,8 +43,10 @@ public final class SessionCryptoAdapter implements SessionCryptography {
     }
 
     @Override
-    public PreparedSession prepare(SessionActivationFacts facts, UUID generation,
+    public PreparedSession prepare(SessionActivationSnapshot snapshot, UUID generation,
                                            SessionDeadlines deadlines, Instant deliveryDeadline) {
+        SessionActivationContext context = snapshot.context();
+        SessionKeyBindings keys = snapshot.keys();
         try {
             OpaqueBankingToken token = tokens.issue();
             Digest32 lookupDigest = lookup.digest(token.exactValue());
@@ -52,22 +56,22 @@ public final class SessionCryptoAdapter implements SessionCryptography {
             random.nextBytes(nonceBytes);
             String dpopNonce = Base64.getUrlEncoder().withoutPadding().encodeToString(nonceBytes);
             EncryptedBankingToken encrypted = envelopes.issue(token,
-                    ECKey.parse(facts.responsePublicJwk()),
-                    new TokenDeliveryContext(facts.operationId(), facts.appId(),
-                            BankingTokenStatus.ACTIVE, facts.requestKey().base64Url(),
-                            facts.deviceKey().base64Url(), deadlines.absoluteExpiresAt()));
+                    ECKey.parse(keys.responsePublicJwk()),
+                    new TokenDeliveryContext(context.operationId(), context.appId(),
+                            BankingTokenStatus.ACTIVE, keys.requestKey().base64Url(),
+                            keys.deviceKey().base64Url(), deadlines.absoluteExpiresAt()));
             Digest32 envelopeDigest = digests.sha256(
                     encrypted.tokenEnvelope().getBytes(StandardCharsets.US_ASCII));
             byte[] candidateBytes = encoding.encode(List.of("PASSWORD_ACTIVE_V1",
-                    facts.operationId().toString(), intentId.toString(), sessionId.toString(),
+                    context.operationId().toString(), intentId.toString(), sessionId.toString(),
                     generation.toString(), lookupVersion.value(), lookupDigest.base64Url(),
-                    facts.subjectId().toString(), facts.bindingId().toString(),
-                    facts.requestKey().base64Url(),
+                    context.subjectId().toString(), context.bindingId().toString(),
+                    keys.requestKey().base64Url(),
                     Long.toString(deadlines.idleExpiresAt().toEpochMilli()),
                     Long.toString(deadlines.absoluteExpiresAt().toEpochMilli()),
                     envelopeDigest.base64Url(), dpopNonce));
             Digest32 candidateDigest = digests.sha256(candidateBytes);
-            return new PreparedSession(facts, intentId, sessionId, generation,
+            return new PreparedSession(snapshot, intentId, sessionId, generation,
                     lookupVersion, lookupDigest, candidateDigest,
                     encrypted.tokenEnvelope(), encrypted.receipt(), dpopNonce,
                     deadlines, deliveryDeadline);

@@ -1,7 +1,8 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
 import com.vpbank.dcp.core.domain.customer.CustomerFreshnessPolicy;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.SessionRepository;
 import com.vpbank.dcp.core.port.out.session.PrepareSessionResult;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
@@ -43,33 +44,34 @@ public final class JpaPasswordSessionAdapter implements SessionRepository {
     }
 
     @Override
-    public Optional<SessionActivationFacts> currentFacts(UUID operationId, UUID subjectId) {
-        return facts(operationId, subjectId)
-                .filter(facts -> clock.instant().isBefore(facts.customerStatusValidUntil()));
+    public Optional<SessionActivationSnapshot> currentSnapshot(UUID operationId, UUID subjectId) {
+        return snapshot(operationId, subjectId)
+                .filter(snapshot -> clock.instant().isBefore(snapshot.customerStatus().validUntil()));
     }
 
     @Override
     public PrepareSessionResult prepare(PreparedSession candidate) {
         return Objects.requireNonNull(transactions.execute(status -> {
-            SessionActivationFacts facts = candidate.facts();
-            UUID owner = repository.operationSubject(facts.operationId());
-            if (!facts.subjectId().equals(owner)) {
+            SessionActivationSnapshot snapshot = candidate.snapshot();
+            SessionActivationContext context = snapshot.context();
+            UUID owner = repository.operationSubject(context.operationId());
+            if (!context.subjectId().equals(owner)) {
                 return new PrepareSessionResult.Rejected();
             }
-            lock(facts);
+            lock(snapshot);
             Optional<PreparedSession> existing = prepared(
-                    facts.operationId(), facts(facts.operationId(), facts.subjectId())
+                    context.operationId(), snapshot(context.operationId(), context.subjectId())
                             .orElse(null));
             if (existing.isPresent()) {
                 return new PrepareSessionResult.Existing(existing.get());
             }
-            SessionActivationFacts current = facts(facts.operationId(),
-                    facts.subjectId()).orElse(null);
-            if (!facts.equals(current) || !clock.instant().isBefore(facts.customerStatusValidUntil())
-                    || sessions.hasIntent(facts.operationId())) {
+            SessionActivationSnapshot current = snapshot(context.operationId(),
+                    context.subjectId()).orElse(null);
+            if (!snapshot.equals(current) || !clock.instant().isBefore(snapshot.customerStatus().validUntil())
+                    || sessions.hasIntent(context.operationId())) {
                 return new PrepareSessionResult.Rejected();
             }
-            repository.finalizeJourney(facts);
+            repository.finalizeJourney(snapshot);
             sessions.insertIntent(candidate);
             byte[] protectedResult = escrow.encode(new EscrowedSessionDelivery(
                     candidate.tokenEnvelope(), candidate.receipt(), candidate.dpopNonce()));
@@ -84,8 +86,8 @@ public final class JpaPasswordSessionAdapter implements SessionRepository {
         if (subjectId == null) {
             return Optional.empty();
         }
-        SessionActivationFacts facts = currentFacts(operationId, subjectId).orElse(null);
-        return prepared(operationId, facts);
+        SessionActivationSnapshot snapshot = currentSnapshot(operationId, subjectId).orElse(null);
+        return prepared(operationId, snapshot);
     }
 
     @Override
@@ -95,7 +97,7 @@ public final class JpaPasswordSessionAdapter implements SessionRepository {
             if (candidate == null || !candidate.intentId().equals(intentId)) {
                 return false;
             }
-            lock(candidate.facts());
+            lock(candidate.snapshot());
             String state = sessions.intentState(operationId, intentId).orElse(null);
             if ("COMPLETED".equals(state)) {
                 return true;
@@ -104,40 +106,41 @@ public final class JpaPasswordSessionAdapter implements SessionRepository {
                 return false;
             }
             sessions.markIntentApplied(operationId, intentId);
-            repository.completeJourney(candidate.facts().journeyId());
+            repository.completeJourney(candidate.snapshot().context().journeyId());
             repository.completeOperation(operationId);
             return true;
         }));
     }
 
-    private Optional<SessionActivationFacts> facts(UUID operationId, UUID subjectId) {
-        return repository.currentFacts(operationId, subjectId)
-                .map(view -> PasswordSessionPersistenceMapper.toFacts(view,
+    private Optional<SessionActivationSnapshot> snapshot(UUID operationId, UUID subjectId) {
+        return repository.currentSnapshot(operationId, subjectId)
+                .map(view -> PasswordSessionPersistenceMapper.toSnapshot(view,
                         freshness.validUntil(view.customerCheckedAt())));
     }
 
-    private void lock(SessionActivationFacts facts) {
-        repository.lockSubject(facts.subjectId());
-        repository.lockSubjectApp(facts.subjectId(), facts.appId());
-        repository.lockBinding(facts.bindingId(), facts.subjectId(), facts.appId());
-        repository.lockJourney(facts.journeyId());
-        repository.lockOperation(facts.operationId());
+    private void lock(SessionActivationSnapshot snapshot) {
+        SessionActivationContext context = snapshot.context();
+        repository.lockSubject(context.subjectId());
+        repository.lockSubjectApp(context.subjectId(), context.appId());
+        repository.lockBinding(context.bindingId(), context.subjectId(), context.appId());
+        repository.lockJourney(context.journeyId());
+        repository.lockOperation(context.operationId());
     }
 
-    private Optional<PreparedSession> prepared(UUID operationId, SessionActivationFacts facts) {
-        if (facts == null) {
+    private Optional<PreparedSession> prepared(UUID operationId, SessionActivationSnapshot snapshot) {
+        if (snapshot == null) {
             return Optional.empty();
         }
         return sessions.prepared(operationId).filter(view ->
-                view.customerSecurityVersion() == facts.customerSecurityVersion()
-                && view.credentialSecurityVersion() == facts.credentialSecurityVersion()
-                && view.deviceSecurityVersion() == facts.deviceSecurityVersion()
-                && SessionPersistenceMapper.toRequestKey(view).equals(facts.requestKey())
-                && view.bindingId().equals(facts.bindingId())
-                && view.subjectId().equals(facts.subjectId())).map(view -> {
+                view.customerSecurityVersion() == snapshot.securityVersions().customerSecurityVersion()
+                && view.credentialSecurityVersion() == snapshot.securityVersions().credentialSecurityVersion()
+                && view.deviceSecurityVersion() == snapshot.securityVersions().deviceSecurityVersion()
+                && SessionPersistenceMapper.toRequestKey(view).equals(snapshot.keys().requestKey())
+                && view.bindingId().equals(snapshot.context().bindingId())
+                && view.subjectId().equals(snapshot.context().subjectId())).map(view -> {
                     EscrowedSessionDelivery delivery = escrow.decode(
                             view.protectedResult(), SessionPersistenceMapper.toResultDigest(view));
-                    return SessionPersistenceMapper.toPreparedSession(facts, view, delivery);
+                    return SessionPersistenceMapper.toPreparedSession(snapshot, view, delivery);
                 });
     }
 }

@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.repository;
 
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
-import com.vpbank.dcp.infrastructure.persistence.projection.PasswordSessionFactsView;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
+import com.vpbank.dcp.infrastructure.persistence.projection.PasswordSessionSnapshotView;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.List;
@@ -18,8 +18,8 @@ public final class PasswordSessionPersistenceRepository {
         this.sql = Objects.requireNonNull(sql);
     }
 
-    public Optional<PasswordSessionFactsView> currentFacts(UUID operationId, UUID subjectId) {
-        List<?> rows = sql.createNativeQuery(PasswordSessionSql.CURRENT_FACTS)
+    public Optional<PasswordSessionSnapshotView> currentSnapshot(UUID operationId, UUID subjectId) {
+        List<?> rows = sql.createNativeQuery(PasswordSessionSql.CURRENT_SNAPSHOT)
                 .unwrap(NativeQuery.class)
                 .addScalar("BIN_TO_UUID(o.id)", String.class)
                 .addScalar("BIN_TO_UUID(j.id)", String.class)
@@ -47,7 +47,7 @@ public final class PasswordSessionPersistenceRepository {
             throw new InvalidSessionPersistenceException();
         }
         Object[] row = (Object[]) rows.getFirst();
-        return Optional.of(new PasswordSessionFactsView(uuid(row[0]), uuid(row[1]), uuid(row[2]),
+        return Optional.of(new PasswordSessionSnapshotView(uuid(row[0]), uuid(row[1]), uuid(row[2]),
                 (String) row[3], uuid(row[4]), (byte[]) row[5], (String) row[6],
                 (String) row[7], (byte[]) row[8], number(row[9]), number(row[10]),
                 number(row[11]), number(row[12]), (Instant) row[13],
@@ -81,10 +81,10 @@ public final class PasswordSessionPersistenceRepository {
         requiredLock(PasswordSessionSql.LOCK_OPERATION, "operationId", operationId);
     }
 
-    public void finalizeJourney(SessionActivationFacts facts) {
+    public void finalizeJourney(SessionActivationSnapshot snapshot) {
         int journey = sql.createNativeQuery(PasswordSessionSql.FINALIZING_JOURNEY)
-                .setParameter("journeyId", facts.journeyId().toString())
-                .setParameter("bindingId", facts.bindingId().toString()).executeUpdate();
+                .setParameter("journeyId", snapshot.context().journeyId().toString())
+                .setParameter("bindingId", snapshot.context().bindingId().toString()).executeUpdate();
         exactlyOne(journey);
     }
 

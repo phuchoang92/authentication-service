@@ -8,10 +8,14 @@ import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.session.InvalidSessionStateException;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.domain.session.SessionAssurance;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.port.out.session.CustomerStatusFreshness;
+import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
+import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
+import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.infrastructure.persistence.codec.EscrowedSessionDelivery;
-import com.vpbank.dcp.infrastructure.persistence.projection.PasswordSessionFactsView;
+import com.vpbank.dcp.infrastructure.persistence.projection.PasswordSessionSnapshotView;
 import com.vpbank.dcp.infrastructure.persistence.projection.PreparedSessionView;
 import java.time.Instant;
 import java.util.Arrays;
@@ -34,65 +38,77 @@ class PasswordSessionPersistenceMapperTest {
             "exact-envelope", "exact-receipt", "exact-nonce");
 
     @Test
-    void restoresAllFrozenFactsWithTheExplicitFreshnessDeadline() {
-        var facts = PasswordSessionPersistenceMapper.toFacts(factsView(), validUntil);
-        assertThat(facts).isEqualTo(new SessionActivationFacts(operationId, journeyId, subjectId,
-                "mobile", bindingId, Digest32.fromBytes(bytes(1)), "request-jwk", "response-jwk",
-                Digest32.fromBytes(bytes(2)), 11, 22, 33, 44, validUntil, new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
-                SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE), true));
+    void restoresAllSnapshotValuesWithTheExplicitFreshnessDeadline() {
+        var snapshot = PasswordSessionPersistenceMapper.toSnapshot(snapshotView(), validUntil);
+        assertThat(snapshot).isEqualTo(new SessionActivationSnapshot(
+                new SessionActivationContext(operationId, journeyId, subjectId, "mobile", bindingId),
+                new SessionKeyBindings(Digest32.fromBytes(bytes(1)), "request-jwk", "response-jwk",
+                        Digest32.fromBytes(bytes(2))),
+                new SessionSecurityVersions(11, 22, 33),
+                new CustomerStatusFreshness(44, validUntil),
+                new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
+                        SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE),
+                true));
         // Mapping performs no expiry decision even when the supplied deadline is in the past.
-        assertThat(PasswordSessionPersistenceMapper.toFacts(factsView(), Instant.EPOCH)
-                .customerStatusValidUntil()).isEqualTo(Instant.EPOCH);
+        assertThat(PasswordSessionPersistenceMapper.toSnapshot(snapshotView(), Instant.EPOCH)
+                .customerStatus().validUntil()).isEqualTo(Instant.EPOCH);
+    }
+
+    @Test
+    void snapshotAndNestedKeysHaveRedactedOutput() {
+        var snapshot = PasswordSessionPersistenceMapper.toSnapshot(snapshotView(), validUntil);
+        assertThat(snapshot.toString()).isEqualTo("SessionActivationSnapshot[redacted]");
+        assertThat(snapshot.keys().toString()).isEqualTo("SessionKeyBindings[redacted]");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"UNKNOWN", "CLIENT_ENFORCED", "HARDWARE_KEY"})
     void unsupportedPlatformClaimsCannotBecomePasswordAssurance(String evidence) {
-        var old = factsView();
-        var view = new PasswordSessionFactsView(old.operationId(), old.journeyId(), old.subjectId(),
+        var old = snapshotView();
+        var view = new PasswordSessionSnapshotView(old.operationId(), old.journeyId(), old.subjectId(),
                 old.appId(), old.bindingId(), old.requestKey(), old.requestPublicJwk(), old.responsePublicJwk(),
                 old.deviceKey(), old.customerSecurityVersion(), old.credentialSecurityVersion(),
                 old.deviceSecurityVersion(), old.customerStatusVersion(), old.customerCheckedAt(), evidence,
                 old.biometricLoginEnabled());
-        assertThatThrownBy(() -> PasswordSessionPersistenceMapper.toFacts(view, validUntil))
+        assertThatThrownBy(() -> PasswordSessionPersistenceMapper.toSnapshot(view, validUntil))
                 .isInstanceOf(InvalidSessionStateException.class);
     }
 
     @Test
     void restoresExactCandidateAndPreviouslyDecodedDelivery() {
-        var facts = PasswordSessionPersistenceMapper.toFacts(factsView(), validUntil);
+        var snapshot = PasswordSessionPersistenceMapper.toSnapshot(snapshotView(), validUntil);
         var view = preparedView("lookup_k2", bytes(3), checkedAt.plusSeconds(900), checkedAt.plusSeconds(3600));
-        var restored = SessionPersistenceMapper.toPreparedSession(facts, view, delivery);
-        assertThat(restored).isEqualTo(new PreparedSession(facts, intentId, sessionId, generation,
+        var restored = SessionPersistenceMapper.toPreparedSession(snapshot, view, delivery);
+        assertThat(restored).isEqualTo(new PreparedSession(snapshot, intentId, sessionId, generation,
                 new LookupKeyVersion("lookup_k2"), Digest32.fromBytes(bytes(3)), Digest32.fromBytes(bytes(4)),
                 "exact-envelope", "exact-receipt", "exact-nonce",
                 new SessionDeadlines(checkedAt.plusSeconds(900), checkedAt.plusSeconds(3600)),
                 checkedAt.plusSeconds(120)));
-        assertThat(SessionPersistenceMapper.toRequestKey(view)).isEqualTo(facts.requestKey());
+        assertThat(SessionPersistenceMapper.toRequestKey(view)).isEqualTo(snapshot.keys().requestKey());
         assertThat(SessionPersistenceMapper.toResultDigest(view)).isEqualTo(Digest32.fromBytes(bytes(5)));
     }
 
     @Test
     void invalidStoredDigestAndLookupVersionRemainErrors() {
-        var facts = PasswordSessionPersistenceMapper.toFacts(factsView(), validUntil);
-        assertThatThrownBy(() -> SessionPersistenceMapper.toPreparedSession(facts,
+        var snapshot = PasswordSessionPersistenceMapper.toSnapshot(snapshotView(), validUntil);
+        assertThatThrownBy(() -> SessionPersistenceMapper.toPreparedSession(snapshot,
                 preparedView("lookup_k2", new byte[31], checkedAt, checkedAt), delivery))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> SessionPersistenceMapper.toPreparedSession(facts,
+        assertThatThrownBy(() -> SessionPersistenceMapper.toPreparedSession(snapshot,
                 preparedView("bad/version", bytes(3), checkedAt, checkedAt), delivery))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void reversedSessionDeadlinesCannotBeRestored() {
-        var facts = PasswordSessionPersistenceMapper.toFacts(factsView(), validUntil);
-        assertThatThrownBy(() -> SessionPersistenceMapper.toPreparedSession(facts,
+        var snapshot = PasswordSessionPersistenceMapper.toSnapshot(snapshotView(), validUntil);
+        assertThatThrownBy(() -> SessionPersistenceMapper.toPreparedSession(snapshot,
                 preparedView("lookup_k2", bytes(3), checkedAt.plusSeconds(2), checkedAt.plusSeconds(1)), delivery))
                 .isInstanceOf(InvalidSessionStateException.class);
     }
 
-    private PasswordSessionFactsView factsView() {
-        return new PasswordSessionFactsView(operationId, journeyId, subjectId, "mobile", bindingId,
+    private PasswordSessionSnapshotView snapshotView() {
+        return new PasswordSessionSnapshotView(operationId, journeyId, subjectId, "mobile", bindingId,
                 bytes(1), "request-jwk", "response-jwk", bytes(2), 11, 22, 33, 44,
                 checkedAt, "NONE", true);
     }

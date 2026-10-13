@@ -10,7 +10,7 @@ import com.vpbank.dcp.core.port.out.session.SessionRepository;
 import com.vpbank.dcp.core.port.out.session.PrepareSessionResult;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
@@ -42,8 +42,8 @@ public final class ActivateSessionService implements ActivateSessionUseCase {
         UUID subjectId = command.subjectId();
         PreparedSession candidate = store.prepared(operationId).orElse(null);
         if (candidate == null) {
-            SessionActivationFacts facts = store.currentFacts(operationId, subjectId).orElse(null);
-            if (facts == null || !facts.subjectId().equals(subjectId)) {
+            SessionActivationSnapshot snapshot = store.currentSnapshot(operationId, subjectId).orElse(null);
+            if (snapshot == null || !snapshot.context().subjectId().equals(subjectId)) {
                 return new SessionActivationResult.Rejected();
             }
             UUID generation = authority.currentGeneration().orElse(null);
@@ -51,7 +51,7 @@ public final class ActivateSessionService implements ActivateSessionUseCase {
                 return new SessionActivationResult.Processing();
             }
             Instant now = clock.instant();
-            candidate = cryptography.prepare(facts, generation,
+            candidate = cryptography.prepare(snapshot, generation,
                     SessionDeadlines.createdAt(now), now.plusSeconds(120));
             PrepareSessionResult prepared = store.prepare(candidate);
             if (prepared instanceof PrepareSessionResult.Rejected) {
@@ -60,7 +60,7 @@ public final class ActivateSessionService implements ActivateSessionUseCase {
             candidate = prepared instanceof PrepareSessionResult.Existing(PreparedSession session)
                     ? session : ((PrepareSessionResult.Prepared) prepared).session();
         }
-        if (!candidate.facts().subjectId().equals(subjectId)
+        if (!candidate.snapshot().context().subjectId().equals(subjectId)
                 || !clock.instant().isBefore(candidate.deliveryDeadline())) {
             return new SessionActivationResult.Rejected();
         }

@@ -128,12 +128,22 @@ Password owns credential verification and trusted-device eligibility. After `LAS
 inbound port. The shared core has no password dependency. A command identifies an operation;
 current confirmed storage facts still determine whether it may activate.
 
-`SessionRepository`, `SessionCryptography`, `SessionAuthority`, `SessionActivationFacts`
+`SessionRepository`, `SessionCryptography`, `SessionAuthority`, `SessionActivationSnapshot`
 and `PreparedSession` describe shared issuance and recovery. `SessionCryptoAdapter`
 prepares token delivery, and `RedisSessionAuthority` publishes and checks it using the
 existing integration-only Redis mechanics. Typed `SessionAssurance` comes from the
 authentication source; Redis and the HTTP response mapper serialize those same values.
 The password mapper supplies `MFA_KEY_POSSESSION` / `NONE` / `NOT_APPLICABLE`.
+
+`SessionActivationSnapshot` is an immutable source snapshot with six components:
+`SessionActivationContext`, `SessionKeyBindings`, `SessionSecurityVersions`,
+`CustomerStatusFreshness`, `SessionAssurance` and biometric availability. The first four
+group fourteen formerly flat components; assurance and biometric availability remain explicit.
+All nested values retain
+value equality, so SQL preparation compares the complete snapshot after acquiring locks.
+`currentSnapshot` reads this contract and `PreparedSession.snapshot()` retains it for
+publication/recovery. Database projections remain flat database values; the persistence
+mapper assembles the grouped core snapshot. Snapshot/key output is redacted.
 
 `JpaPasswordSessionAdapter` implements the shared repository as the current password
 source bridge. It coordinates `PasswordSessionPersistenceRepository` (current password
@@ -272,6 +282,17 @@ and timezone-independent deadlines and Customer freshness. The password-source a
 integration starts from confirmed test storage; it does not establish a deployed App/BFF
 or partner flow. Totals include the complete worktree's independent changes. Reports are
 saved under `target/session-refactor-verification/`; historical results above stay intact.
+
+The grouped `SessionActivationSnapshot` refactor was checked on 2026-10-13: all 255
+unit/architecture tests passed; all 15 session MySQL integration cases passed under both
+UTC and `Asia/Ho_Chi_Minh`, and all four Redis session cases passed. The new cases reject
+changed keys, security versions, Customer freshness, assurance and biometric availability
+before any activation writes. SQL text, candidate digest inputs, escrow serialization and
+the nine pre-existing migration checksums were unchanged. Full `clean verify` on the
+captured source was not green: each timezone run had one schema table-count failure
+(20 expected, 25 actual) and one populated-V8 upgrade error (`value` cannot be null),
+both involving the concurrently added V10 migration. That migration was not modified by
+this refactor. Reports are saved under `target/session-snapshot-verification/`.
 
 On the current Mac, the verified command is:
 

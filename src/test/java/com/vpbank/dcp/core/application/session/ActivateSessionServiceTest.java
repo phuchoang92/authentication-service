@@ -17,7 +17,11 @@ import com.vpbank.dcp.core.port.in.session.ActivateSessionCommand;
 import com.vpbank.dcp.core.port.in.session.SessionActivationResult;
 import com.vpbank.dcp.core.port.out.session.PrepareSessionResult;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.port.out.session.CustomerStatusFreshness;
+import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
+import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
+import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
 import com.vpbank.dcp.core.port.out.session.SessionAuthority;
 import com.vpbank.dcp.core.port.out.session.SessionCryptography;
@@ -40,14 +44,14 @@ class ActivateSessionServiceTest {
             cryptography, authority, Clock.fixed(NOW, ZoneOffset.UTC));
     private final ActivateSessionCommand command = new ActivateSessionCommand(UUID.randomUUID(), UUID.randomUUID());
     private final UUID generation = UUID.randomUUID();
-    private final SessionActivationFacts facts = facts(command.subjectId());
-    private final PreparedSession candidate = candidate(facts, NOW.plusSeconds(120));
+    private final SessionActivationSnapshot snapshot = snapshot(command.subjectId());
+    private final PreparedSession candidate = candidate(snapshot, NOW.plusSeconds(120));
 
     @Test
     void preparesDurablyBeforePublishingAndReauthorizesBeforeDelivery() {
-        when(repository.currentFacts(command.operationId(), command.subjectId())).thenReturn(Optional.of(facts));
+        when(repository.currentSnapshot(command.operationId(), command.subjectId())).thenReturn(Optional.of(snapshot));
         when(authority.currentGeneration()).thenReturn(Optional.of(generation));
-        when(cryptography.prepare(facts, generation, SessionDeadlines.createdAt(NOW), NOW.plusSeconds(120)))
+        when(cryptography.prepare(snapshot, generation, SessionDeadlines.createdAt(NOW), NOW.plusSeconds(120)))
                 .thenReturn(candidate);
         when(repository.prepare(candidate)).thenReturn(new PrepareSessionResult.Prepared(candidate));
         deliverable(candidate, SessionApplyResult.APPLIED);
@@ -56,9 +60,9 @@ class ActivateSessionServiceTest {
 
         var order = inOrder(repository, cryptography, authority);
         order.verify(repository).prepared(command.operationId());
-        order.verify(repository).currentFacts(command.operationId(), command.subjectId());
+        order.verify(repository).currentSnapshot(command.operationId(), command.subjectId());
         order.verify(authority).currentGeneration();
-        order.verify(cryptography).prepare(facts, generation, SessionDeadlines.createdAt(NOW), NOW.plusSeconds(120));
+        order.verify(cryptography).prepare(snapshot, generation, SessionDeadlines.createdAt(NOW), NOW.plusSeconds(120));
         order.verify(repository).prepare(candidate);
         order.verify(authority).apply(candidate);
         order.verify(repository).markApplied(command.operationId(), candidate.intentId());
@@ -74,15 +78,15 @@ class ActivateSessionServiceTest {
         assertThat(service.activate(command)).isEqualTo(new SessionActivationResult.Active(candidate));
 
         verifyNoInteractions(cryptography);
-        verify(repository, never()).currentFacts(any(), any());
+        verify(repository, never()).currentSnapshot(any(), any());
         verify(repository, never()).prepare(any());
         verify(authority, never()).currentGeneration();
     }
 
     @Test
     void losingPreparationPublishesTheOriginalWinnerAndDiscardsItsOwnCandidate() {
-        PreparedSession winner = candidate(facts, NOW.plusSeconds(100));
-        when(repository.currentFacts(command.operationId(), command.subjectId())).thenReturn(Optional.of(facts));
+        PreparedSession winner = candidate(snapshot, NOW.plusSeconds(100));
+        when(repository.currentSnapshot(command.operationId(), command.subjectId())).thenReturn(Optional.of(snapshot));
         when(authority.currentGeneration()).thenReturn(Optional.of(generation));
         when(cryptography.prepare(any(), any(), any(), any())).thenReturn(candidate);
         when(repository.prepare(candidate)).thenReturn(new PrepareSessionResult.Existing(winner));
@@ -101,8 +105,8 @@ class ActivateSessionServiceTest {
 
     @Test
     void wrongCurrentOwnerCannotCreateASession() {
-        when(repository.currentFacts(command.operationId(), command.subjectId()))
-                .thenReturn(Optional.of(facts(UUID.randomUUID())));
+        when(repository.currentSnapshot(command.operationId(), command.subjectId()))
+                .thenReturn(Optional.of(snapshot(UUID.randomUUID())));
         assertThat(service.activate(command)).isInstanceOf(SessionActivationResult.Rejected.class);
         verifyNoInteractions(cryptography, authority);
     }
@@ -110,7 +114,7 @@ class ActivateSessionServiceTest {
     @Test
     void wrongStoredOwnerCannotPublishOrDeliver() {
         when(repository.prepared(command.operationId()))
-                .thenReturn(Optional.of(candidate(facts(UUID.randomUUID()), NOW.plusSeconds(120))));
+                .thenReturn(Optional.of(candidate(snapshot(UUID.randomUUID()), NOW.plusSeconds(120))));
         assertThat(service.activate(command)).isInstanceOf(SessionActivationResult.Rejected.class);
         verifyNoInteractions(cryptography, authority);
         verify(repository, never()).markApplied(any(), any());
@@ -118,14 +122,14 @@ class ActivateSessionServiceTest {
 
     @Test
     void deliveryExpiresAtTheExactDeadline() {
-        when(repository.prepared(command.operationId())).thenReturn(Optional.of(candidate(facts, NOW)));
+        when(repository.prepared(command.operationId())).thenReturn(Optional.of(candidate(snapshot, NOW)));
         assertThat(service.activate(command)).isInstanceOf(SessionActivationResult.Rejected.class);
         verifyNoInteractions(cryptography, authority);
     }
 
     @Test
     void missingGenerationRemainsProcessingWithoutPreparingAToken() {
-        when(repository.currentFacts(command.operationId(), command.subjectId())).thenReturn(Optional.of(facts));
+        when(repository.currentSnapshot(command.operationId(), command.subjectId())).thenReturn(Optional.of(snapshot));
         assertThat(service.activate(command)).isInstanceOf(SessionActivationResult.Processing.class);
         verifyNoInteractions(cryptography);
         verify(repository, never()).prepare(any());
@@ -134,7 +138,7 @@ class ActivateSessionServiceTest {
 
     @Test
     void rejectedDurablePreparationCannotPublish() {
-        when(repository.currentFacts(command.operationId(), command.subjectId())).thenReturn(Optional.of(facts));
+        when(repository.currentSnapshot(command.operationId(), command.subjectId())).thenReturn(Optional.of(snapshot));
         when(authority.currentGeneration()).thenReturn(Optional.of(generation));
         when(cryptography.prepare(any(), any(), any(), any())).thenReturn(candidate);
         when(repository.prepare(candidate)).thenReturn(new PrepareSessionResult.Rejected());
@@ -175,16 +179,20 @@ class ActivateSessionServiceTest {
         when(authority.deliverable(session)).thenReturn(true);
     }
 
-    private SessionActivationFacts facts(UUID subjectId) {
-        return new SessionActivationFacts(command.operationId(), UUID.randomUUID(), subjectId,
-                "mobile", UUID.randomUUID(), digest(1), "request-jwk", "response-jwk", digest(2),
-                1, 2, 3, 4, NOW.plusSeconds(300),
+    private SessionActivationSnapshot snapshot(UUID subjectId) {
+        return new SessionActivationSnapshot(
+                new SessionActivationContext(command.operationId(), UUID.randomUUID(), subjectId,
+                        "mobile", UUID.randomUUID()),
+                new SessionKeyBindings(digest(1), "request-jwk", "response-jwk", digest(2)),
+                new SessionSecurityVersions(1, 2, 3),
+                new CustomerStatusFreshness(4, NOW.plusSeconds(300)),
                 new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
-                        SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE), false);
+                        SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE),
+                false);
     }
 
-    private PreparedSession candidate(SessionActivationFacts facts, Instant deadline) {
-        return new PreparedSession(facts, UUID.randomUUID(), UUID.randomUUID(), generation,
+    private PreparedSession candidate(SessionActivationSnapshot snapshot, Instant deadline) {
+        return new PreparedSession(snapshot, UUID.randomUUID(), UUID.randomUUID(), generation,
                 new LookupKeyVersion("k1"), digest(3), digest(4), "encrypted-only",
                 "signed-receipt", UUID.randomUUID().toString(), SessionDeadlines.createdAt(NOW), deadline);
     }

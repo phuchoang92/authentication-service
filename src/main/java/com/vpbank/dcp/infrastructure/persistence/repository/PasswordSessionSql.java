@@ -32,7 +32,7 @@ final class PasswordSessionSql {
             SELECT id FROM auth_operation WHERE id = UUID_TO_BIN(:operationId) FOR UPDATE
             """;
 
-    static final String CURRENT_FACTS = """
+    static final String CURRENT_SNAPSHOT = """
             SELECT BIN_TO_UUID(o.id), BIN_TO_UUID(j.id), BIN_TO_UUID(s.id), o.app_id,
                    BIN_TO_UUID(b.id), j.request_jkt,
                    CAST(j.request_public_jwk AS CHAR), CAST(j.response_public_jwk AS CHAR),

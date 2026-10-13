@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.repository;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.infrastructure.persistence.projection.PreparedSessionView;
 import jakarta.persistence.EntityManager;
@@ -31,22 +31,22 @@ public final class SessionPersistenceRepository {
     }
 
     public void insertIntent(PreparedSession candidate) {
-        SessionActivationFacts facts = candidate.facts();
+        SessionActivationSnapshot snapshot = candidate.snapshot();
         int intent = sql.createNativeQuery(SessionSql.INSERT_INTENT)
                 .setParameter("intentId", candidate.intentId().toString())
-                .setParameter("subjectId", facts.subjectId().toString())
-                .setParameter("appId", facts.appId())
-                .setParameter("journeyId", facts.journeyId().toString())
-                .setParameter("operationId", facts.operationId().toString())
-                .setParameter("bindingId", facts.bindingId().toString())
-                .setParameter("requestJkt", facts.requestKey().bytes())
+                .setParameter("subjectId", snapshot.context().subjectId().toString())
+                .setParameter("appId", snapshot.context().appId())
+                .setParameter("journeyId", snapshot.context().journeyId().toString())
+                .setParameter("operationId", snapshot.context().operationId().toString())
+                .setParameter("bindingId", snapshot.context().bindingId().toString())
+                .setParameter("requestJkt", snapshot.keys().requestKey().bytes())
                 .setParameter("generation", candidate.generation().toString())
                 .setParameter("sessionId", candidate.sessionId().toString())
                 .setParameter("lookupDigest", candidate.lookupDigest().bytes())
                 .setParameter("lookupVersion", candidate.lookupVersion().value())
-                .setParameter("customerVersion", facts.customerSecurityVersion())
-                .setParameter("credentialVersion", facts.credentialSecurityVersion())
-                .setParameter("deviceVersion", facts.deviceSecurityVersion())
+                .setParameter("customerVersion", snapshot.securityVersions().customerSecurityVersion())
+                .setParameter("credentialVersion", snapshot.securityVersions().credentialSecurityVersion())
+                .setParameter("deviceVersion", snapshot.securityVersions().deviceSecurityVersion())
                 .setParameter("candidateDigest", candidate.candidateDigest().bytes())
                 .setParameter("idleExpiry", Timestamp.from(candidate.deadlines().idleExpiresAt()))
                 .setParameter("absoluteExpiry", Timestamp.from(candidate.deadlines().absoluteExpiresAt()))
@@ -56,11 +56,11 @@ public final class SessionPersistenceRepository {
 
     public void insertEscrow(PreparedSession candidate, byte[] protectedResult,
                              Digest32 resultDigest) {
-        SessionActivationFacts facts = candidate.facts();
+        SessionActivationSnapshot snapshot = candidate.snapshot();
         int escrow = sql.createNativeQuery(SessionSql.INSERT_ESCROW)
                 .setParameter("escrowId", UUID.randomUUID().toString())
                 .setParameter("intentId", candidate.intentId().toString())
-                .setParameter("operationId", facts.operationId().toString())
+                .setParameter("operationId", snapshot.context().operationId().toString())
                 .setParameter("protectedResult", protectedResult)
                 .setParameter("resultDigest", resultDigest.bytes())
                 .setParameter("deliveryDeadline", Timestamp.from(candidate.deliveryDeadline()))

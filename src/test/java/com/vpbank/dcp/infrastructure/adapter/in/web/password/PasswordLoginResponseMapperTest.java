@@ -5,7 +5,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.domain.session.SessionAssurance;
@@ -100,13 +101,14 @@ class PasswordLoginResponseMapperTest {
     }
 
     private PreparedSession session(Instant idle, Instant absolute) {
-        var facts = mock(SessionActivationFacts.class);
-        when(facts.bindingId()).thenReturn(BINDING);
-        when(facts.biometricLoginEnabled()).thenReturn(true);
-        when(facts.assurance()).thenReturn(new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
+        var snapshot = mock(SessionActivationSnapshot.class);
+        when(snapshot.context()).thenReturn(new SessionActivationContext(UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), "mobile", BINDING));
+        when(snapshot.biometricLoginEnabled()).thenReturn(true);
+        when(snapshot.assurance()).thenReturn(new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
                 SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE));
         var session = mock(PreparedSession.class);
-        when(session.facts()).thenReturn(facts);
+        when(session.snapshot()).thenReturn(snapshot);
         when(session.deadlines()).thenReturn(new SessionDeadlines(idle, absolute));
         when(session.tokenEnvelope()).thenReturn("encrypted-envelope-test-only");
         when(session.receipt()).thenReturn("signed-receipt-test-only");

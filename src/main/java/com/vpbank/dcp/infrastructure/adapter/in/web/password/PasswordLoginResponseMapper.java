@@ -2,7 +2,7 @@ package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginProcessingResponse;
@@ -50,15 +50,15 @@ public final class PasswordLoginResponseMapper {
     }
 
     private static @NonNull PasswordLoginResponse getLoginResponse(PreparedSession session, long seconds) {
-        SessionActivationFacts facts = session.facts();
+        SessionActivationSnapshot snapshot = session.snapshot();
         return new PasswordLoginActiveResponse("ACTIVE",
                 session.tokenEnvelope(), session.receipt(), Math.min(seconds, 3600), "banking",
                 new PasswordLoginActiveResponse.Session(session.deadlines().idleExpiresAt(),
                         session.deadlines().absoluteExpiresAt()),
-                new PasswordLoginActiveResponse.Security(true, facts.bindingId(),
-                        facts.biometricLoginEnabled(), new PasswordLoginActiveResponse.Assurance(
-                        facts.assurance().devicePossession().code(), facts.assurance().platformEvidence().code(),
-                        facts.assurance().biometricEnforcement().code())));
+                new PasswordLoginActiveResponse.Security(true, snapshot.context().bindingId(),
+                        snapshot.biometricLoginEnabled(), new PasswordLoginActiveResponse.Assurance(
+                        snapshot.assurance().devicePossession().code(), snapshot.assurance().platformEvidence().code(),
+                        snapshot.assurance().biometricEnforcement().code())));
     }
 
     private ResponseEntity<PasswordLoginResponse> problem(HttpStatus status, String code) {

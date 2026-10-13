@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Immutable database values; domain restoration belongs to the persistence mapper. */
-public record PasswordSessionFactsView(
+public record PasswordSessionSnapshotView(
         UUID operationId,
         UUID journeyId,
         UUID subjectId,
@@ -23,7 +23,7 @@ public record PasswordSessionFactsView(
         Instant customerCheckedAt,
         String platformAssurance,
         boolean biometricLoginEnabled) {
-    public PasswordSessionFactsView {
+    public PasswordSessionSnapshotView {
         Objects.requireNonNull(customerCheckedAt, "customerCheckedAt");
         requestKey = requestKey == null ? null : requestKey.clone();
         deviceKey = deviceKey == null ? null : deviceKey.clone();
@@ -41,7 +41,7 @@ public record PasswordSessionFactsView(
 
     @Override
     public boolean equals(Object other) {
-        return other instanceof PasswordSessionFactsView view
+        return other instanceof PasswordSessionSnapshotView view
                 && Objects.equals(operationId, view.operationId)
                 && Objects.equals(journeyId, view.journeyId)
                 && Objects.equals(subjectId, view.subjectId)
@@ -72,6 +72,6 @@ public record PasswordSessionFactsView(
 
     @Override
     public String toString() {
-        return "PasswordSessionFactsView[redacted]";
+        return "PasswordSessionSnapshotView[redacted]";
     }
 }

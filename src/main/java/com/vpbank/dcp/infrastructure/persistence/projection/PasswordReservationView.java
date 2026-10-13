@@ -4,7 +4,9 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Immutable database values; domain restoration belongs to the persistence mapper. */
+/**
+ * Immutable database values; domain restoration belongs to the persistence mapper.
+ */
 public record PasswordReservationView(
         UUID operationId,
         UUID journeyId,
@@ -15,7 +17,7 @@ public record PasswordReservationView(
         Objects.requireNonNull(journeyId, "journeyId");
         Objects.requireNonNull(commandDigest, "commandDigest");
         Objects.requireNonNull(commandKeyId, "commandKeyId");
-        commandDigest = commandDigest == null ? null : commandDigest.clone();
+        commandDigest = commandDigest.clone();
     }
 
     @Override

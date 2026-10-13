@@ -5,7 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.domain.session.SessionAssurance;
-import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.port.out.session.CustomerStatusFreshness;
+import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
+import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
+import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
@@ -85,15 +89,13 @@ class SessionAuthorityIT {
     @Test
     void serializesAssuranceSuppliedByTheAuthenticationSource() {
         var original = candidate();
-        var old = original.facts();
-        var facts = new SessionActivationFacts(old.operationId(), old.journeyId(), old.subjectId(),
-                old.appId(), old.bindingId(), old.requestKey(), old.requestPublicJwk(), old.responsePublicJwk(),
-                old.deviceKey(), old.customerSecurityVersion(), old.credentialSecurityVersion(),
-                old.deviceSecurityVersion(), old.customerStatusVersion(), old.customerStatusValidUntil(),
+        var old = original.snapshot();
+        var snapshot = new SessionActivationSnapshot(old.context(), old.keys(),
+                old.securityVersions(), old.customerStatus(),
                 new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
                         SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.CLIENT_ENFORCED),
                 old.biometricLoginEnabled());
-        var supplied = new PreparedSession(facts, original.intentId(), original.sessionId(), original.generation(),
+        var supplied = new PreparedSession(snapshot, original.intentId(), original.sessionId(), original.generation(),
                 original.lookupVersion(), original.lookupDigest(), original.candidateDigest(), original.tokenEnvelope(),
                 original.receipt(), original.dpopNonce(), original.deadlines(), original.deliveryDeadline());
         assertThat(authority.apply(supplied)).isEqualTo(SessionApplyResult.APPLIED);
@@ -126,12 +128,16 @@ class SessionAuthorityIT {
 
     private PreparedSession candidate() {
         Instant now = Instant.now();
-        SessionActivationFacts facts = new SessionActivationFacts(UUID.randomUUID(),
-                UUID.randomUUID(), subjectId, "neo-mobile", bindingId, digest(1),
-                "{}", "{}", digest(2), 0, 0, 0, 1,
-                now.plusSeconds(120), new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
-                SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE), false);
-        return new PreparedSession(facts, UUID.randomUUID(), UUID.randomUUID(),
+        SessionActivationSnapshot snapshot = new SessionActivationSnapshot(
+                new SessionActivationContext(UUID.randomUUID(), UUID.randomUUID(), subjectId,
+                        "neo-mobile", bindingId),
+                new SessionKeyBindings(digest(1), "{}", "{}", digest(2)),
+                new SessionSecurityVersions(0, 0, 0),
+                new CustomerStatusFreshness(1, now.plusSeconds(120)),
+                new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
+                        SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE),
+                false);
+        return new PreparedSession(snapshot, UUID.randomUUID(), UUID.randomUUID(),
                 authority.currentGeneration().orElseThrow(), new LookupKeyVersion("k1"),
                 digest(3), digest(4), "encrypted-only", "signed-receipt",
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
