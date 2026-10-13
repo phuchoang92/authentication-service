@@ -103,7 +103,7 @@ class ArchitectureRulesTest {
                             || pkg.contains(".adapter.") || pkg.contains(".persistence.repository.")
                             || type.getSimpleName().equals("SessionDeliveryEscrowCodec");
                 }
-            });
+            }).allowEmptyShould(true);
 
     @Test
     void persistenceResponsibilitiesRemainSeparated() {

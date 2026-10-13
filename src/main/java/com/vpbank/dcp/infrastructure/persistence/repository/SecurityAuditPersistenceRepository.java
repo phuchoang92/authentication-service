@@ -1,71 +1,59 @@
 package com.vpbank.dcp.infrastructure.persistence.repository;
 
 import com.vpbank.dcp.core.port.out.device.RecordDeviceRevocation;
+import com.vpbank.dcp.infrastructure.persistence.entity.SecurityAuditEventEntity;
+import com.vpbank.dcp.infrastructure.persistence.entity.SecurityAuditEventHeader;
 import com.vpbank.dcp.infrastructure.persistence.projection.DeviceRevocationAuditView;
-import jakarta.persistence.EntityManager;
-import java.sql.Timestamp;
-import java.util.List;
+import java.security.MessageDigest;
+import java.time.Clock;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class SecurityAuditPersistenceRepository {
-    private final EntityManager entityManager;
+    private final SecurityAuditJpaRepository events;
+    private final Clock clock;
 
-    public SecurityAuditPersistenceRepository(EntityManager entityManager) {
-        this.entityManager = Objects.requireNonNull(entityManager, "entityManager");
+    public SecurityAuditPersistenceRepository(SecurityAuditJpaRepository events, Clock clock) {
+        this.events = Objects.requireNonNull(events, "events");
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
-    public DeviceRevocationAuditView findDeviceRevocation(RecordDeviceRevocation command) {
-        List<?> rows = entityManager.createNativeQuery(SecurityAuditSql.FIND_DEVICE_REVOKE)
-                .setParameter("bindingId", command.bindingId().toString())
-                .setParameter("customerId", command.owner().customerId().toString())
-                .setParameter("channel", command.owner().channel()).getResultList();
-        if (rows.isEmpty()) {
-            return null;
-        }
-        if (rows.size() != 1) {
-            throw new UnexpectedDeviceRevocationStateException();
-        }
-        Object[] row = (Object[]) rows.getFirst();
-        return new DeviceRevocationAuditView(UUID.fromString((String) row[0]),
-                ((Number) row[1]).longValue(), ((Number) row[2]).intValue() == 1);
+    public DeviceRevocationAuditView findDeviceRevocation(RecordDeviceRevocation command,
+                                                           byte[] commandDigest) {
+        return events.findRevocation(command.bindingId(), command.owner().customerId(),
+                        command.owner().channel())
+                .filter(event -> event.commandDigest() != null)
+                .filter(event -> MessageDigest.isEqual(event.commandDigest(), commandDigest))
+                .map(event -> new DeviceRevocationAuditView(event.operationId(),
+                        event.deviceSecurityVersion(), hasPrimaryClear(command)))
+                .orElse(null);
     }
 
-    public void insertDeviceRevoked(RecordDeviceRevocation command, long securityVersion) {
-        int affected = entityManager.createNativeQuery(SecurityAuditSql.INSERT_DEVICE_REVOKE)
-                .setParameter("eventId", UUID.randomUUID().toString())
-                .setParameter("customerId", command.owner().customerId().toString())
-                .setParameter("channel", command.owner().channel())
-                .setParameter("operationId", command.operationId().toString())
-                .setParameter("bindingId", command.bindingId().toString())
-                .setParameter("deviceSecurityVersion", securityVersion)
-                .setParameter("reasonCode", command.reason().code())
-                .setParameter("actorType", command.actor().type().code())
-                .setParameter("actorId", command.actor().id())
-                .setParameter("occurredAt", Timestamp.from(command.occurredAt()))
-                .executeUpdate();
-        requireOne(affected);
+    public void insertDeviceRevoked(RecordDeviceRevocation command, long securityVersion,
+                                    byte[] commandDigest) {
+        SecurityAuditEventEntity event = SecurityAuditEventEntity.deviceRevoked(
+                header(command, 1), command.bindingId(), securityVersion,
+                command.reason().code(), commandDigest);
+        events.saveAndFlush(event);
     }
 
     public void insertPrimaryCleared(RecordDeviceRevocation command) {
-        int affected = entityManager.createNativeQuery(SecurityAuditSql.INSERT_PRIMARY_CLEARED)
-                .setParameter("eventId", UUID.randomUUID().toString())
-                .setParameter("customerId", command.owner().customerId().toString())
-                .setParameter("channel", command.owner().channel())
-                .setParameter("operationId", command.operationId().toString())
-                .setParameter("bindingId", command.bindingId().toString())
-                .setParameter("actorType", command.actor().type().code())
-                .setParameter("actorId", command.actor().id())
-                .setParameter("occurredAt", Timestamp.from(command.occurredAt()))
-                .executeUpdate();
-        requireOne(affected);
+        SecurityAuditEventEntity event = SecurityAuditEventEntity.primaryCleared(
+                header(command, 2), command.bindingId());
+        events.saveAndFlush(event);
     }
 
-    private static void requireOne(int affected) {
-        if (affected != 1) {
-            throw new UnexpectedDeviceRevocationStateException();
-        }
+    private boolean hasPrimaryClear(RecordDeviceRevocation command) {
+        return events.hasPrimaryClear(command.operationId(), command.owner().customerId(),
+                command.owner().channel(), command.bindingId());
+    }
+
+    private SecurityAuditEventHeader header(RecordDeviceRevocation command, int sequence) {
+        return new SecurityAuditEventHeader(UUID.randomUUID(), command.owner().customerId(),
+                command.owner().channel(), command.operationId(), sequence,
+                command.actor().type().code(), command.actor().id(), command.occurredAt(),
+                clock.instant());
     }
 }

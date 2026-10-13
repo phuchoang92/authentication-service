@@ -11,6 +11,7 @@ import com.vpbank.dcp.core.port.out.device.DeviceRevocationRecordResult;
 import com.vpbank.dcp.core.port.out.device.DeviceRevocationRepository;
 import com.vpbank.dcp.core.port.out.device.RecordDeviceRevocation;
 import java.time.Instant;
+import java.time.Clock;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -23,6 +24,8 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.boot.persistence.autoconfigure.EntityScan;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -34,6 +37,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.vpbank.dcp.infrastructure.persistence.repository.SecurityAuditPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.TrustedDeviceRevocationPersistenceRepository;
+import com.vpbank.dcp.infrastructure.persistence.codec.DeviceRevocationCommandDigest;
+import com.vpbank.dcp.infrastructure.persistence.entity.SecurityAuditEventEntity;
+import com.vpbank.dcp.infrastructure.persistence.repository.SecurityAuditJpaRepository;
 
 /** The database mutation and its audit must commit or roll back together. */
 @Testcontainers
@@ -66,9 +72,16 @@ class JpaDeviceRevocationAdapterIT {
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
+    @EntityScan(basePackageClasses = SecurityAuditEventEntity.class)
+    @EnableJpaRepositories(basePackageClasses = SecurityAuditJpaRepository.class)
     @Import({JpaDeviceRevocationAdapter.class, TrustedDeviceRevocationPersistenceRepository.class,
-            SecurityAuditPersistenceRepository.class})
+            SecurityAuditPersistenceRepository.class, DeviceRevocationCommandDigest.class})
     static class TestConfiguration {
+        @Bean
+        Clock clock() {
+            return Clock.systemUTC();
+        }
+
         @Bean
         TransactionTemplate transactionTemplate(PlatformTransactionManager manager) {
             return new TransactionTemplate(manager);
@@ -139,6 +152,44 @@ class JpaDeviceRevocationAdapterIT {
                 command.reason(), command.actor(), command.occurredAt());
         assertThat(revocations.recordRevocation(differentOperation))
                 .isInstanceOf(DeviceRevocationRecordResult.Conflict.class);
+    }
+
+    @Test
+    void sameOperationWithChangedCommandConflicts() {
+        Fixture fixture = seed(true);
+        RecordDeviceRevocation command = command(fixture);
+        assertThat(revocations.recordRevocation(command))
+                .isInstanceOf(DeviceRevocationRecordResult.Recorded.class);
+
+        RecordDeviceRevocation changedReason = new RecordDeviceRevocation(command.owner(),
+                command.bindingId(), command.operationId(), command.expectedVersion(),
+                DeviceRevocationReason.SECURITY_COMPROMISE, command.actor(), command.occurredAt());
+        assertThat(revocations.recordRevocation(changedReason))
+                .isInstanceOf(DeviceRevocationRecordResult.Conflict.class);
+
+        RecordDeviceRevocation changedActor = new RecordDeviceRevocation(command.owner(),
+                command.bindingId(), command.operationId(), command.expectedVersion(),
+                command.reason(), new SecurityActor(SecurityActorType.SYSTEM, "system-test"),
+                command.occurredAt());
+        assertThat(revocations.recordRevocation(changedActor))
+                .isInstanceOf(DeviceRevocationRecordResult.Conflict.class);
+        assertThat(eventCount(command.operationId())).isEqualTo(2);
+    }
+
+    @Test
+    void eventWithoutDigestCannotBeAssumedToMatchRetry() {
+        Fixture fixture = seed(false);
+        RecordDeviceRevocation command = command(fixture);
+        assertThat(revocations.recordRevocation(command))
+                .isInstanceOf(DeviceRevocationRecordResult.Recorded.class);
+        jdbc.update("""
+                UPDATE auth_security_audit_event SET command_digest = NULL
+                WHERE operation_id = UUID_TO_BIN(?) AND event_type = 'DEVICE_REVOKED'
+                """, command.operationId().toString());
+
+        assertThat(revocations.recordRevocation(command))
+                .isInstanceOf(DeviceRevocationRecordResult.Conflict.class);
+        assertThat(eventCount(command.operationId())).isEqualTo(1);
     }
 
     @Test

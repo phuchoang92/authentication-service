@@ -46,7 +46,7 @@ class PasswordCommandHmacTest {
         var operation = new PasswordOperationContext(
                 UUID.fromString(vector.path("operationId").asText()), "neo-mobile", "ANDROID",
                 vector.path("installationId").asText(), "alice",
-                UUID.fromString("22222222-2222-4222-8222-222222222222"));
+                "22222222-2222-4222-8222-222222222222");
         Digest32 proofId = new Sha256Digests().ofProofId("fixture-proof-id");
         var proofs = new VerifiedPasswordProofs(
                 new RequestKeyThumbprint(Digest32.fromBase64Url(

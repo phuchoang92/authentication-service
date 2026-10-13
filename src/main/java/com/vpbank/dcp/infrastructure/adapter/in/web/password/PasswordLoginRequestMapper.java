@@ -11,7 +11,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
-import java.util.UUID;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Maps validated headers and a typed JSON body into the login command. */
@@ -31,12 +30,12 @@ public final class PasswordLoginRequestMapper {
     public PasswordLoginCommand map(PasswordLoginHeaders headers, PasswordLoginRequest body, VerifiedDpopProof dpop) {
         Objects.requireNonNull(headers, "headers");
         Objects.requireNonNull(body, "body");
-        UUID bindingId = body.deviceBindingId() == null ? null : UUID.fromString(body.deviceBindingId());
         PasswordOperationContext operation = new PasswordOperationContext(headers.operationId(),
-                body.appId(), body.platform(), body.installationId(), body.username(), bindingId);
+                body.appId(), body.platform(), body.installationId(), body.username(),
+                body.deviceBindingId());
         PasswordVerification credential = new PasswordVerification(body.username(), body.password());
         PasswordWireProofs proofs = new PasswordWireProofs(dpop,
-                body.requestKeyProof(), body.deviceProof(), json.writeValueAsString(body.responseKey().publicJwk()));
+                body.requestKeyProof(), body.deviceProof(), json.writeValueAsString(body.tokenEncryptionKey().publicJwk()));
         Instant now = clock.instant();
         return new PasswordLoginCommand(operation, credential, proofs, now,
                 now.plus(credentialTimeout), now.plus(journeyTimeout));

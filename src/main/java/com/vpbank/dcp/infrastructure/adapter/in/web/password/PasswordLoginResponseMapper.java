@@ -55,7 +55,7 @@ public final class PasswordLoginResponseMapper {
                 session.delivery().tokenEnvelope(), session.delivery().receipt(), Math.min(seconds, 3600), "banking",
                 new PasswordLoginActiveResponse.Session(session.deadlines().idleExpiresAt(),
                         session.deadlines().absoluteExpiresAt()),
-                new PasswordLoginActiveResponse.Security(true, snapshot.context().bindingId(),
+                new PasswordLoginActiveResponse.Security(true, snapshot.context().bindingId().toString(),
                         snapshot.biometricLoginEnabled(), new PasswordLoginActiveResponse.Assurance(
                         snapshot.assurance().devicePossession().code(), snapshot.assurance().platformEvidence().code(),
                         snapshot.assurance().biometricEnforcement().code())));

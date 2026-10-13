@@ -154,7 +154,7 @@ class JosePasswordProofVerifierTest {
         var operation = new PasswordOperationContext(
                 UUID.fromString(vector.path("operationId").asText()), "neo-mobile", "ANDROID",
                 vector.path("installationId").asText(), username,
-                UUID.fromString("22222222-2222-4222-8222-222222222222"));
+                "22222222-2222-4222-8222-222222222222");
         var wire = new PasswordWireProofs(
                 new SpringDpopProofDecoder(digests, json).verify(dpop(),
                         DpopExpectation.forInitial("POST",

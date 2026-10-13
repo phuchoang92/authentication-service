@@ -13,6 +13,8 @@ import com.vpbank.dcp.infrastructure.adapter.out.totp.ProtectedTotpSecret;
 import com.vpbank.dcp.infrastructure.adapter.out.totp.TotpAlgorithm;
 import com.vpbank.dcp.infrastructure.adapter.out.totp.TotpSecretCodec;
 import com.vpbank.dcp.infrastructure.adapter.out.totp.TotpSecretKeys;
+import com.vpbank.dcp.infrastructure.persistence.entity.DeviceCredentialEntity;
+import com.vpbank.dcp.infrastructure.persistence.repository.DeviceCredentialJpaRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.DeviceTotpPersistenceRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -29,10 +31,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -70,6 +74,8 @@ class JpaDeviceTotpVerifierIT {
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
+    @EntityScan(basePackageClasses = DeviceCredentialEntity.class)
+    @EnableJpaRepositories(basePackageClasses = DeviceCredentialJpaRepository.class)
     @Import(DeviceTotpPersistenceRepository.class)
     static class TestConfiguration {
         @Bean
@@ -85,9 +91,10 @@ class JpaDeviceTotpVerifierIT {
 
         @Bean
         JpaDeviceTotpVerifier verifier(DeviceTotpPersistenceRepository repository,
+                                       DeviceCredentialJpaRepository credentialRows,
                                        TotpSecretCodec codec, TransactionTemplate transaction) {
-            return new JpaDeviceTotpVerifier(repository, codec, new TotpAlgorithm(),
-                    new TotpVerificationPolicy(3, Duration.ofMinutes(10)),
+            return new JpaDeviceTotpVerifier(repository, credentialRows, codec, new TotpAlgorithm(),
+                    new TotpVerificationPolicy(3, Duration.ofMinutes(15)),
                     Clock.fixed(NOW, ZoneOffset.UTC), transaction);
         }
     }
@@ -127,7 +134,7 @@ class JpaDeviceTotpVerifierIT {
             assertThat(verifier.verify(new CheckDeviceTotp(
                     new DeviceOwnership(fixture.customerId(), "other-channel"),
                     fixture.deviceId(), code))).isEqualTo(DeviceTotpCheckResult.REJECTED);
-            jdbc.update("UPDATE auth_device_totp_credential SET status = 'REVOKED', "
+            jdbc.update("UPDATE auth_device_credential SET status = 'REVOKED', "
                     + "revoked_at = UTC_TIMESTAMP(6) WHERE trusted_device_id = UUID_TO_BIN(?)",
                     fixture.deviceId().toString());
             assertThat(verifier.verify(fixture.check(code))).isEqualTo(DeviceTotpCheckResult.REJECTED);
@@ -141,7 +148,7 @@ class JpaDeviceTotpVerifierIT {
         ProtectedTotpSecret next = codec.protect(fixture.customerId(), CHANNEL,
                 fixture.deviceId(), nextCredentialId, SECRET);
         assertThatThrownBy(() -> jdbc.update("""
-                INSERT INTO auth_device_totp_credential
+                INSERT INTO auth_device_credential
                   (id, trusted_device_id, secret_ciphertext, secret_key_id, status, activated_at)
                 VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, 'ACTIVE', UTC_TIMESTAMP(6))
                 """, nextCredentialId.toString(), fixture.deviceId().toString(),
@@ -172,7 +179,7 @@ class JpaDeviceTotpVerifierIT {
     @Test
     void tamperedSecretFailsClosed() {
         Fixture fixture = seed();
-        jdbc.update("UPDATE auth_device_totp_credential SET secret_ciphertext = X'010203' "
+        jdbc.update("UPDATE auth_device_credential SET secret_ciphertext = X'010203' "
                 + "WHERE trusted_device_id = UUID_TO_BIN(?)", fixture.deviceId().toString());
         try (TotpCode code = code()) {
             assertThatThrownBy(() -> verifier.verify(fixture.check(code)))
@@ -189,17 +196,37 @@ class JpaDeviceTotpVerifierIT {
                         .isEqualTo(DeviceTotpCheckResult.REJECTED);
             }
         }
-        Integer failureCount = jdbc.queryForObject("SELECT failed_attempts FROM auth_device_totp_credential "
+        Integer failureCount = jdbc.queryForObject("SELECT failed_attempts FROM auth_device_credential "
                 + "WHERE trusted_device_id = UUID_TO_BIN(?)", Integer.class,
                 fixture.deviceId().toString());
         assertThat(failureCount).isZero();
-        assertThat(jdbc.queryForObject("SELECT blocked_until FROM auth_device_totp_credential "
+        assertThat(jdbc.queryForObject("SELECT blocked_until FROM auth_device_credential "
                 + "WHERE trusted_device_id = UUID_TO_BIN(?)", java.sql.Timestamp.class,
-                fixture.deviceId().toString())).isNotNull();
+                fixture.deviceId().toString()).toLocalDateTime())
+                .isEqualTo(java.time.LocalDateTime.ofInstant(NOW.plus(Duration.ofMinutes(15)),
+                        ZoneOffset.UTC));
         try (TotpCode correct = code()) {
             assertThat(verifier.verify(fixture.check(correct)))
                     .isEqualTo(DeviceTotpCheckResult.REJECTED);
         }
+
+        jdbc.update("UPDATE auth_device_credential "
+                + "SET blocked_until = '1970-01-01 00:00:58' "
+                + "WHERE trusted_device_id = UUID_TO_BIN(?)", fixture.deviceId().toString());
+        assertThat(jdbc.queryForObject("SELECT last_accepted_step FROM auth_device_credential "
+                + "WHERE trusted_device_id = UUID_TO_BIN(?)", Long.class,
+                fixture.deviceId().toString())).isEqualTo(-1L);
+        assertThat(jdbc.queryForObject("SELECT blocked_until FROM auth_device_credential "
+                + "WHERE trusted_device_id = UUID_TO_BIN(?)", java.sql.Timestamp.class,
+                fixture.deviceId().toString()).toLocalDateTime())
+                .isEqualTo(java.time.LocalDateTime.of(1970, 1, 1, 0, 0, 58));
+        try (TotpCode correct = code()) {
+            assertThat(verifier.verify(fixture.check(correct)))
+                    .isEqualTo(DeviceTotpCheckResult.ACCEPTED);
+        }
+        assertThat(jdbc.queryForObject("SELECT blocked_until FROM auth_device_credential "
+                + "WHERE trusted_device_id = UUID_TO_BIN(?)", java.sql.Timestamp.class,
+                fixture.deviceId().toString())).isNull();
     }
 
     private Fixture seed() {
@@ -230,7 +257,7 @@ class JpaDeviceTotpVerifierIT {
                 "installation-" + deviceId, "public-key-" + deviceId);
         ProtectedTotpSecret stored = codec.protect(customerId, CHANNEL, deviceId, credentialId, SECRET);
         jdbc.update("""
-                INSERT INTO auth_device_totp_credential
+                INSERT INTO auth_device_credential
                   (id, trusted_device_id, secret_ciphertext, secret_key_id, status, activated_at)
                 VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, 'ACTIVE', UTC_TIMESTAMP(6))
                 """, credentialId.toString(), deviceId.toString(), stored.ciphertext(), stored.keyId());

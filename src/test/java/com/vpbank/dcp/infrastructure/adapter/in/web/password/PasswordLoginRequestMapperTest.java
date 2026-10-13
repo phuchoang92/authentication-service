@@ -99,12 +99,31 @@ class PasswordLoginRequestMapperTest {
         assertThat(command.getValue().credential().username()).isEqualTo("alice");
         assertThat(command.getValue().operation().operationId().toString()).isEqualTo(OPERATION);
         assertThat(command.getValue().proofs().dpop()).isSameAs(dpop);
+        assertThat(json.readTree(command.getValue().proofs().responsePublicJwk()))
+                .isEqualTo(json.readTree(body).path("tokenEncryptionKey").path("publicJwk"));
         assertThat(command.getValue().credentialDeadline()).isEqualTo(Instant.parse("2026-10-12T00:02:00Z"));
         assertThat(command.getValue().toString()).doesNotContain(password);
         var parsed = json.readValue(body, PasswordLoginRequest.class);
+        assertThat(json.readTree(json.writeValueAsString(parsed)).has("tokenEncryptionKey")).isTrue();
+        assertThat(json.readTree(json.writeValueAsString(parsed)).has("responseKey")).isFalse();
         assertThat(parsed.toString()).doesNotContain(password);
         assertThat(PasswordLoginRequest.builder().password(password).toString()).doesNotContain(password);
         assertThat(json.writeValueAsString(parsed)).doesNotContain(password, "password");
+    }
+
+    @Test
+    void acceptsServerIssuedBindingIdWithoutAssumingUuidSyntax() throws Exception {
+        String opaqueBindingId = "dev_" + "A".repeat(32);
+        String body = validBody().replace("\"username\":",
+                "\"deviceBindingId\":\"" + opaqueBindingId + "\",\"username\":");
+
+        mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON)
+                        .header("DPoP", DPOP).header("Idempotency-Key", OPERATION).content(body))
+                .andExpect(status().isUnauthorized());
+
+        var command = ArgumentCaptor.forClass(PasswordLoginCommand.class);
+        verify(passwords).login(command.capture());
+        assertThat(command.getValue().operation().claimedBindingId()).isEqualTo(opaqueBindingId);
     }
 
     @ParameterizedTest
@@ -120,6 +139,7 @@ class PasswordLoginRequestMapperTest {
     static Stream<String> invalidBodies() {
         String body = validBody();
         return Stream.of(
+                body.replace("\"tokenEncryptionKey\":", "\"responseKey\":"),
                 body.replace("\"password\":\"test-password\"", "\"password\":\"first\",\"password\":\"second\""),
                 body.replace("\"platform\":\"ANDROID\"", "\"platform\":\"ANDROID\",\"unknown\":true"),
                 body + " {}",
@@ -139,7 +159,7 @@ class PasswordLoginRequestMapperTest {
                 body.replace("\"crv\":\"P-256\"", "\"crv\":\"P-256\",\"d\":\"private-key\""),
                 body.replace("\"kty\":\"EC\"", "\"kty\":false"),
                 body.replace("\"requestKeyProof\":\"" + "k".repeat(64) + "\"", "\"requestKeyProof\":\"short\""),
-                body.replace("\"username\":", "\"deviceBindingId\":\"bad-uuid\",\"username\":"),
+                body.replace("\"username\":", "\"deviceBindingId\":\"too-short\",\"username\":"),
                 "{\"original\":{\"bodyBase64\":\"e30\"}}",
                 " ".repeat(65_537) + body);
     }
@@ -197,7 +217,7 @@ class PasswordLoginRequestMapperTest {
                 {"appId":"neo-mobile","platform":"ANDROID",
                  "installationId":"install-c02bdd64-1234-4567-8901",
                  "username":"alice","password":"test-password",
-                 "responseKey":{"version":1,"algorithm":"ECDH-ES+A256GCM","format":"JWK",
+                 "tokenEncryptionKey":{"version":1,"algorithm":"ECDH-ES+A256GCM","format":"JWK",
                  "publicJwk":{"kty":"EC","crv":"P-256","x":"%s","y":"%s"}},
                  "requestKeyProof":"%s"}
                 """.formatted("A".repeat(43), "A".repeat(43), "k".repeat(64));

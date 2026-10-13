@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.Objects;
-import java.util.UUID;
 
 /** The seven top-level fields follow the public ACTIVE schema; nested metadata is cohesive. */
 public record PasswordLoginActiveResponse(String status, String tokenEnvelope, String receipt,
@@ -30,7 +29,7 @@ public record PasswordLoginActiveResponse(String status, String tokenEnvelope, S
         }
     }
 
-    public record Security(boolean deviceTrusted, UUID deviceBindingId,
+    public record Security(boolean deviceTrusted, String deviceBindingId,
                            boolean biometricLoginEnabled, Assurance assurance) {
         public Security {
             Objects.requireNonNull(deviceBindingId, "deviceBindingId");

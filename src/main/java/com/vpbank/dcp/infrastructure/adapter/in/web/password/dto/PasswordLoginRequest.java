@@ -35,12 +35,12 @@ public final class PasswordLoginRequest {
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private final String password;
     @JsonProperty
-    @Pattern(regexp = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+    @Size(min = 16, max = 300)
     private final String deviceBindingId;
     @JsonProperty
     @NotNull
     @Valid
-    private final ResponseEncryptionKeyRequest responseKey;
+    private final TokenEncryptionKeyRequest tokenEncryptionKey;
     @JsonProperty
     @NotNull
     @Size(min = 64, max = 8192)
@@ -56,7 +56,7 @@ public final class PasswordLoginRequest {
         this.username = builder.username;
         this.password = builder.password;
         this.deviceBindingId = builder.deviceBindingId;
-        this.responseKey = builder.responseKey;
+        this.tokenEncryptionKey = builder.tokenEncryptionKey;
         this.requestKeyProof = builder.requestKeyProof;
         this.deviceProof = builder.deviceProof;
     }
@@ -89,8 +89,8 @@ public final class PasswordLoginRequest {
         return deviceBindingId;
     }
 
-    public ResponseEncryptionKeyRequest responseKey() {
-        return responseKey;
+    public TokenEncryptionKeyRequest tokenEncryptionKey() {
+        return tokenEncryptionKey;
     }
 
     public String requestKeyProof() {
@@ -114,7 +114,7 @@ public final class PasswordLoginRequest {
         private String username;
         private String password;
         private String deviceBindingId;
-        private ResponseEncryptionKeyRequest responseKey;
+        private TokenEncryptionKeyRequest tokenEncryptionKey;
         private String requestKeyProof;
         private String deviceProof;
 
@@ -148,8 +148,8 @@ public final class PasswordLoginRequest {
             return this;
         }
 
-        public Builder responseKey(ResponseEncryptionKeyRequest responseKey) {
-            this.responseKey = responseKey;
+        public Builder tokenEncryptionKey(TokenEncryptionKeyRequest tokenEncryptionKey) {
+            this.tokenEncryptionKey = tokenEncryptionKey;
             return this;
         }
 

@@ -3,13 +3,13 @@
 **Current warning:** V11 retires the old journey/operation/device-key storage cluster;
 V12 removes `auth_customer_app` on an empty isolated device schema. Current device rows
 use `channel` instead of `app_id` and `is_primary` instead of a separate primary pointer.
-V13 adds an Auth-owned, encrypted TOTP credential for each trusted device. The verifier
-accepts six-digit SHA-1 codes at 30-second intervals with a ±1-step window, consumes
-each matched step once in MySQL, and refuses a revoked/expired binding. It is **not**
-an enabled login, trust, or transfer factor: no enrollment/provisioning API, challenge
-admission, attempt budget, or transfer-policy integration has been implemented. The
-the three-code acceptance window still requires server-side rate/attempt limits and a
-bound challenge before exposing the verifier through an API.
+V13 adds an Auth-owned, encrypted TOTP credential for each trusted device. V14 adds a
+credential-wide failed-attempt budget and timed lockout. The verifier accepts six-digit
+SHA-1 codes at 30-second intervals with a ±1-step window, consumes each matched step
+once in MySQL, and refuses a revoked/expired binding. It is **not** an enabled login,
+trust, or transfer factor: enrollment/provisioning, challenge binding, an active login
+session and transfer-policy integration are not implemented. The lockout limit must be
+supplied by validated configuration before this verifier is wired into a public flow.
 The old password/device/session persistence path has been removed.
 The password endpoint now returns a safe
 `TEMPORARILY_UNAVAILABLE` response; it does not call Keycloak or issue a banking token.
@@ -26,8 +26,8 @@ This is the isolated, clean-build G1 source tree, renamed from `authentication-s
 - Standalone Spring Boot 4.1.1 / Java 25 / Maven wrapper 3.9.11, one Maven module under `com.vpbank.dcp`.
 - JDK-only `core` ports and values; Spring/HTTP/JPA/Redis/JOSE implementations in `infrastructure`.
 - Strict JSON parsing, safe public errors, redacted secret-bearing values, configured public URI, stateless Spring Security X.509 with exact workload URI-SAN authorization, outbound TLS 1.3 client identity/trust factory.
-- Pinned biometric Keycloak context verifier, Spring Security DPoP decoder, typed enrollment JWS verifier, JWE envelope inspector, JCS command digest and signing-input codec. Password now travels through authenticated TLS to standard Keycloak Direct Grant; OTP remains an MFA-recipient JWE. Auth never decrypts OTP JWE.
-- Fresh MySQL 8.4 Flyway schema (6 current `auth_` tables after V13). V10 adds the trusted-device foundation; V11 retires empty old login/device storage; V12 removes empty `auth_customer_app` and moves primary to `auth_trusted_device`; V13 adds the encrypted TOTP credential. V1–V12 and their checksums are unchanged.
+- Pinned biometric Keycloak context verifier, Spring Security DPoP decoder, typed enrollment JWS verifier, JWE envelope inspector, JCS command digest and signing-input codec. The future password flow uses authenticated TLS to standard Keycloak Direct Grant. External SMS OTP remains an MFA-recipient JWE; the separately planned NEO-generated TOTP is Auth-owned and is not yet exposed by an API.
+- Fresh MySQL 8.4 Flyway schema (6 current `auth_` tables after V15). V10 adds the trusted-device foundation; V11 retires empty old login/device storage; V12 removes empty `auth_customer_app` and moves primary to `auth_trusted_device`; V13 adds the encrypted TOTP credential; V14 adds its credential-wide verification budget; V15 renames its table to `auth_device_credential` without copying data. V1–V14 and their checksums are unchanged.
 - Dedicated Redis key factories and a development/integration-only online session store. Replay uses native `SET NX` with expiry; session and nonce records use Redis hashes with TTL. There is no Lua or Redis Authority Control implementation. Redis run-ID changes close old sessions, but multi-key activation, touch and revocation are **not atomic**.
 
 ## G2 implementation status
@@ -61,8 +61,11 @@ The password HTTP boundary keeps request and response DTOs in
 validated JSON body and input-only password; `PasswordLoginResponse` is the typed union
 of ACTIVE, PROCESSING and error DTOs. The controller and response mapper return
 `ResponseEntity<PasswordLoginResponse>` rather than untyped response maps. The existing
-JSON names, response statuses, UUID strings, date-time strings and response headers stay
-unchanged. `DpopProofFilter` and its verified-proof attribute constants live in
+response statuses, UUID strings, date-time strings and response headers stay unchanged.
+The Kenc request field is `tokenEncryptionKey`, represented by `TokenEncryptionKeyRequest`;
+it replaces `responseKey` and describes the App public key used for encrypted token
+delivery. Signed proof claim `responseKeyJkt` retains its existing name and bytes.
+`DpopProofFilter` and its verified-proof attribute constants live in
 `infrastructure.adapter.in.web.security` (with constants under `security.constant`).
 
 Spring Security owns the stateless inbound security chain. X.509 authenticates the TLS workload certificate against the exact configured URI-SAN allowlist. The password DPoP filter runs after workload authorization and before MVC reads the JSON body; `DPoPProofJwtDecoderFactory` verifies signature/type, and Spring claim validators enforce the server-pinned method/URI, required JTI and 30-second age/5-second future bounds. Auth additionally enforces its configured asymmetric algorithm/key, nonce and token-hash profile. The filter passes a core-owned `VerifiedDpopProof` request attribute containing the verified public JWK, thumbprint and proof-ID digest. The controller/body mapper never forwards raw DPoP into the use case, and Kreq verification no longer reparses or re-verifies it. Shared replay remains in the existing Redis password-proof reservation before provider dispatch; Spring's default in-memory DPoP replay cache is not used. Form login, HTTP Basic, browser sessions and request caching are disabled on this private workload boundary. Core has no Spring dependencies.
@@ -315,6 +318,16 @@ captured source was not green: each timezone run had one schema table-count fail
 (20 expected, 25 actual) and one populated-V8 upgrade error (`value` cannot be null),
 both involving the concurrently added V10 migration. That migration was not modified by
 this refactor. Reports are saved under `target/session-snapshot-verification/`.
+
+The grouped `PreparedSession` refactor was checked on 2026-10-13: 259 unit/architecture
+tests passed, including exact restoration and redacted nested output. All 15 session
+MySQL cases passed in UTC and `Asia/Ho_Chi_Minh`; all four Redis session cases passed.
+SQL, escrow serialization, candidate digest inputs and V1–V9 checksums stayed unchanged.
+Full `clean verify` on the captured source returned exit 1: 65 UTC integration cases and
+52 non-UTC persistence cases each contained one schema count failure (20 expected,
+25 actual) and one populated-V8 upgrade error (V10's `ck_v10_empty_source` constraint).
+The unrelated trusted-device schema test gained assertions after capture; these were
+not executed in this run. Reports are saved under `target/prepared-session-verification/`.
 
 On the current Mac, the verified command is:
 

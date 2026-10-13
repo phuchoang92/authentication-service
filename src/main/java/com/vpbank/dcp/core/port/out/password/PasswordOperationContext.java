@@ -6,7 +6,7 @@ import java.util.UUID;
 /** The non-secret facts the App proofs must bind before credential dispatch. */
 public record PasswordOperationContext(UUID operationId, String appId, String platform,
                                        String installationId, String username,
-                                       UUID claimedBindingId) {
+                                       String claimedBindingId) {
 
     public PasswordOperationContext {
         Objects.requireNonNull(operationId, "operationId");
@@ -16,6 +16,10 @@ public record PasswordOperationContext(UUID operationId, String appId, String pl
         Objects.requireNonNull(username, "username");
         if (appId.isBlank() || installationId.isBlank() || username.isBlank()
                 || !("ANDROID".equals(platform) || "IOS".equals(platform))) {
+            throw new InvalidPasswordOperationException();
+        }
+        if (claimedBindingId != null
+                && (claimedBindingId.length() < 16 || claimedBindingId.length() > 300)) {
             throw new InvalidPasswordOperationException();
         }
     }
