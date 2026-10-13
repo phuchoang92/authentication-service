@@ -1,28 +1,31 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
+import com.vpbank.dcp.core.domain.totp.TotpVerificationPolicy;
 import com.vpbank.dcp.core.port.out.totp.CheckDeviceTotp;
 import com.vpbank.dcp.core.port.out.totp.DeviceTotpCheckResult;
 import com.vpbank.dcp.core.port.out.totp.DeviceTotpUnavailableException;
 import com.vpbank.dcp.core.port.out.totp.DeviceTotpVerifier;
-import com.vpbank.dcp.core.domain.totp.TotpVerificationPolicy;
-import com.vpbank.dcp.infrastructure.adapter.out.totp.TotpAlgorithm;
 import com.vpbank.dcp.infrastructure.adapter.out.totp.InvalidTotpSecretException;
 import com.vpbank.dcp.infrastructure.adapter.out.totp.ProtectedTotpSecret;
+import com.vpbank.dcp.infrastructure.adapter.out.totp.TotpAlgorithm;
 import com.vpbank.dcp.infrastructure.adapter.out.totp.TotpSecretCodec;
 import com.vpbank.dcp.infrastructure.persistence.entity.DeviceCredentialEntity;
 import com.vpbank.dcp.infrastructure.persistence.repository.DeviceCredentialJpaRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.DeviceTotpPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.UnexpectedDeviceTotpStateException;
 import jakarta.persistence.PersistenceException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.dao.DataAccessException;
-import org.springframework.transaction.support.TransactionTemplate;
 
-/** Verifies one code and consumes its time step in the same short SQL transaction. */
+/**
+ * Verifies one code and consumes its time step in the same short SQL transaction.
+ */
 public final class JpaDeviceTotpVerifier implements DeviceTotpVerifier {
     private final DeviceTotpPersistenceRepository credentials;
     private final DeviceCredentialJpaRepository credentialRows;

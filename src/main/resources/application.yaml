@@ -54,7 +54,6 @@ auth:
     command-key-id: ${AUTH_PASSWORD_HMAC_KEY_ID}
     command-hmac-base64: ${AUTH_PASSWORD_HMAC_BASE64}
     customer-policy-version: ${AUTH_CUSTOMER_POLICY_VERSION}
-    customer-status-max-age-ms: ${AUTH_CUSTOMER_STATUS_MAX_AGE_MS}
     credential-deadline-ms: ${AUTH_PASSWORD_CREDENTIAL_DEADLINE_MS}
     journey-deadline-ms: ${AUTH_PASSWORD_JOURNEY_DEADLINE_MS}
   native-session:
@@ -94,5 +93,6 @@ auth:
       key-id: ${AUTH_KC_CONTEXT_KID}
       public-jwk: ${AUTH_KC_CONTEXT_PUBLIC_JWK}
   customer:
+    status-max-age-ms: ${AUTH_CUSTOMER_STATUS_MAX_AGE_MS}
     origin: ${AUTH_CUSTOMER_ORIGIN}
     request-timeout-ms: ${AUTH_CUSTOMER_REQUEST_TIMEOUT_MS}

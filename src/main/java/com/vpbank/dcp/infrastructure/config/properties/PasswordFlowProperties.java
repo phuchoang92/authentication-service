@@ -10,6 +10,5 @@ import org.springframework.validation.annotation.Validated;
 public record PasswordFlowProperties(@NotBlank String commandKeyId,
                                      @NotBlank String commandHmacBase64,
                                      @NotBlank String customerPolicyVersion,
-                                     @Positive long customerStatusMaxAgeMs,
                                      @Positive long credentialDeadlineMs,
                                      @Positive long journeyDeadlineMs) { }

@@ -2,13 +2,10 @@ package com.vpbank.dcp.core.port.out.customer;
 
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
-import java.util.UUID;
-
-/** Atomically links verified KC identity and Customer owner to the claimed operation. */
+/** Atomically links a verified provider identity to one immutable business customer. */
 public interface CustomerOwnerRepository {
 
-    CustomerOwnerAcceptance accept(UUID operationId, String appId,
-                                   VerifiedProviderIdentity identity,
+    CustomerOwnerAcceptance accept(VerifiedProviderIdentity identity,
                                    CustomerAuthenticationState snapshot,
                                    String policyVersion);
 }

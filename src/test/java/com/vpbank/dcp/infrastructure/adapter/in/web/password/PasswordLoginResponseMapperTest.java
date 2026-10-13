@@ -13,7 +13,7 @@ import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.domain.session.SessionAssurance;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginProcessingResponse;
+import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -47,26 +47,12 @@ class PasswordLoginResponseMapperTest {
                 {"status":"ACTIVE","tokenEnvelope":"encrypted-envelope-test-only",
                  "receipt":"signed-receipt-test-only","expires_in":3600,"scope":"banking",
                  "session":{"idleExpiresAt":"2026-10-12T00:15:00Z","absoluteExpiresAt":"2026-10-12T01:00:00Z"},
-                 "security":{"deviceTrusted":true,"deviceBindingId":"22222222-2222-4222-8222-222222222222",
+                 "security":{"deviceTrusted":true,"deviceBindingId":"%s",
                  "biometricLoginEnabled":true,"assurance":{"devicePossession":"MFA_KEY_POSSESSION",
-                 "platformEvidence":"NONE","biometricEnforcement":"NOT_APPLICABLE"}}}
-                """));
+                "platformEvidence":"NONE","biometricEnforcement":"NOT_APPLICABLE"}}}
+                """.formatted(new OpaqueBindingIdCodec().encode(BINDING))));
         assertThat(response.getBody().toString()).doesNotContain("encrypted-envelope", "signed-receipt");
         assertThat(body.toString()).doesNotContain("password", "lookupDigest", "generation", "sessionId", "dpopNonce");
-    }
-
-    @Test
-    void processingDtoKeepsTheOriginalOperationAndHasNoTokenDelivery() {
-        var response = mapper.map(OPERATION, new PasswordLoginResult.Processing());
-        assertThat(response.getStatusCode().value()).isEqualTo(202);
-        assertThat(response.getBody()).isInstanceOf(PasswordLoginProcessingResponse.class);
-        JsonNode body = json.readTree(json.writeValueAsString(response.getBody()));
-        assertThat(fields(body)).containsExactlyInAnyOrder("status", "operationId", "nextAction", "correlationId");
-        assertThat(body.path("status").asText()).isEqualTo("PROCESSING");
-        assertThat(body.path("operationId").asText()).isEqualTo(OPERATION.toString());
-        assertThat(body.path("nextAction").asText()).isEqualTo("POLL_RESULT");
-        assertThat(UUID.fromString(body.path("correlationId").asText())).isNotNull();
-        assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
     }
 
     @Test
@@ -94,8 +80,10 @@ class PasswordLoginResponseMapperTest {
         JsonNode body = json.readTree(json.writeValueAsString(response.getBody()));
         assertThat(fields(body)).containsExactlyInAnyOrder("code", "message", "correlationId", "nextAction");
         assertThat(body.path("code").asText()).isEqualTo(code);
-        assertThat(body.path("message").asText()).isEqualTo("The request was rejected");
-        assertThat(body.path("nextAction").asText()).isEqualTo("RETRY_LATER");
+        assertThat(body.path("message").asText()).isEqualTo(status == 503
+                ? "Sign-in could not be completed. Please sign in again."
+                : "The request was rejected");
+        assertThat(body.path("nextAction").asText()).isEqualTo("START_NEW_LOGIN");
         assertThat(UUID.fromString(body.path("correlationId").asText())).isNotNull();
         assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
         assertThat(response.getHeaders().getFirst("DPoP-Nonce")).isNull();
@@ -104,7 +92,7 @@ class PasswordLoginResponseMapperTest {
     private PreparedSession session(Instant idle, Instant absolute) {
         var snapshot = mock(SessionActivationSnapshot.class);
         when(snapshot.context()).thenReturn(new SessionActivationContext(UUID.randomUUID(),
-                UUID.randomUUID(), UUID.randomUUID(), "mobile", BINDING));
+                UUID.randomUUID(), "mobile", BINDING));
         when(snapshot.biometricLoginEnabled()).thenReturn(true);
         when(snapshot.assurance()).thenReturn(new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
                 SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE));

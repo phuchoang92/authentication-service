@@ -15,5 +15,9 @@ public interface DeviceCredentialJpaRepository extends Repository<DeviceCredenti
             + "where credential.trustedDeviceId = :bindingId and credential.status = 'ACTIVE'")
     List<DeviceCredentialEntity> lockActive(@Param("bindingId") UUID bindingId);
 
+    @Query("select count(credential) from DeviceCredentialEntity credential "
+            + "where credential.trustedDeviceId = :bindingId and credential.status = 'ACTIVE'")
+    long countActive(@Param("bindingId") UUID bindingId);
+
     void flush();
 }

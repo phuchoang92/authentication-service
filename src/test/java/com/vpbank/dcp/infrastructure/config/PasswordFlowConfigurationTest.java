@@ -21,7 +21,6 @@ class PasswordFlowConfigurationTest {
                         "auth.password-flow.command-key-id=test",
                         "auth.password-flow.command-hmac-base64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                         "auth.password-flow.customer-policy-version=test",
-                        "auth.password-flow.customer-status-max-age-ms=1000",
                         "auth.password-flow.credential-deadline-ms=1000",
                         "auth.password-flow.journey-deadline-ms=1000")
                 .run(context -> {

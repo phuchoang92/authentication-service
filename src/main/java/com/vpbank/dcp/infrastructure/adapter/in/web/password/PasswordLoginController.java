@@ -6,17 +6,13 @@ import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginRe
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.security.constant.DpopRequestAttributes;
 import jakarta.validation.Valid;
-import java.util.Objects;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestAttribute;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Objects;
 
 /**
  * This route is private to the mTLS-authenticated Mobile BFF, never App-facing.
@@ -37,11 +33,12 @@ public final class PasswordLoginController {
         this.responses = Objects.requireNonNull(responses);
     }
 
-    @PostMapping(path = "/password", consumes = MediaType.APPLICATION_JSON_VALUE,
+    @PostMapping(path = "/password",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<PasswordLoginResponse> login(@RequestHeader HttpHeaders headers,
-                                   @Valid @RequestBody PasswordLoginRequest body,
-                                   @RequestAttribute(DpopRequestAttributes.VERIFIED_DPOP_PROOF) VerifiedDpopProof dpop) {
+                                                       @Valid @RequestBody PasswordLoginRequest body,
+                                                       @RequestAttribute(DpopRequestAttributes.VERIFIED_DPOP_PROOF) VerifiedDpopProof dpop) {
         var command = requests.map(PasswordLoginHeaders.from(headers), body, dpop);
         return responses.map(command.operation().operationId(), passwords.login(command));
     }

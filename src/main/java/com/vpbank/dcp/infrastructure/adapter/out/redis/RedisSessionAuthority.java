@@ -116,6 +116,20 @@ public final class RedisSessionAuthority implements SessionAuthority {
         }
     }
 
+    @Override
+    public boolean revoke(PreparedSession session) {
+        Objects.requireNonNull(session);
+        try {
+            String sessionKey = sessionKey(session);
+            String nonceKey = nonces.forFamily(session.candidate().sessionId());
+            redis.delete(List.of(sessionKey, nonceKey));
+            return !Boolean.TRUE.equals(redis.hasKey(sessionKey))
+                    && !Boolean.TRUE.equals(redis.hasKey(nonceKey));
+        } catch (RuntimeException failure) {
+            return false;
+        }
+    }
+
     private boolean isCurrent(PreparedSession session) {
         Instant now = clock.instant();
         return !session.candidate().generation().equals(identity.currentGeneration().orElse(null))

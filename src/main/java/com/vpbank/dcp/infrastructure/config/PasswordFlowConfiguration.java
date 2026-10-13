@@ -5,14 +5,17 @@ import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginRequestMapper;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
-import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.json.JsonMapper;
 
-/** Password admission is closed until the replacement flow uses the new device schema. */
+import java.time.Clock;
+
+/**
+ * Password admission is closed until the replacement flow uses the new device schema.
+ */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication
 @EnableConfigurationProperties(PasswordFlowProperties.class)
@@ -20,7 +23,7 @@ public class PasswordFlowConfiguration {
 
     @Bean
     PasswordLoginRequestMapper passwordLoginRequestMapper(PasswordFlowProperties policy,
-                                                            JsonMapper json, Clock clock) {
+                                                          JsonMapper json, Clock clock) {
         return new PasswordLoginRequestMapper(policy, json, clock);
     }
 

@@ -9,23 +9,22 @@ import java.util.UUID;
  */
 public final class TrustedDeviceRouting {
 
-    public TrustedDeviceRoute decide(UUID subjectId, String appId, String installationHash,
-                                     UUID lastSuccessfulBindingId, DeviceCandidate candidate,
-                                     Instant now) {
-        Objects.requireNonNull(subjectId, "subjectId");
-        Objects.requireNonNull(appId, "appId");
-        Objects.requireNonNull(installationHash, "installationHash");
+    public TrustedDeviceRoute decide(UUID customerId, String channel, String platform,
+                                     DeviceCandidate candidate, Instant now) {
+        Objects.requireNonNull(customerId, "customerId");
+        Objects.requireNonNull(channel, "channel");
+        Objects.requireNonNull(platform, "platform");
         Objects.requireNonNull(now, "now");
         if (candidate == null) {
             return TrustedDeviceRoute.NEW_DEVICE;
         }
-        if (!subjectId.equals(candidate.ownerId()) || !appId.equals(candidate.appId())
-                || !installationHash.equals(candidate.installationHash())
+        if (!customerId.equals(candidate.ownerId()) || !channel.equals(candidate.channel())
+                || !platform.equals(candidate.platform()) || !candidate.installationMatches()
                 || !candidate.active() || !candidate.expiresAt().isAfter(now)
-                || !candidate.keyActive() || !candidate.possessionVerified()) {
+                || !candidate.possessionVerified()) {
             return TrustedDeviceRoute.REJECTED;
         }
-        return candidate.bindingId().equals(lastSuccessfulBindingId)
+        return candidate.primary()
                 ? TrustedDeviceRoute.LAST_TRUSTED : TrustedDeviceRoute.OTHER_TRUSTED;
     }
 }

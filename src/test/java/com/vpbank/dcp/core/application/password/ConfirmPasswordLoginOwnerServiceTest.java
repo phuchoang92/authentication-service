@@ -4,8 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
+import com.vpbank.dcp.core.port.in.customer.CustomerLoginEligibilityResult;
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.CustomerStatus;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
@@ -17,11 +20,10 @@ import org.junit.jupiter.api.Test;
 
 class ConfirmPasswordLoginOwnerServiceTest {
 
-    private final CheckCustomerLoginEligibilityService snapshots = mock(CheckCustomerLoginEligibilityService.class);
+    private final CheckCustomerLoginEligibilityUseCase customers = mock(CheckCustomerLoginEligibilityUseCase.class);
     private final CustomerOwnerRepository owners = mock(CustomerOwnerRepository.class);
     private final ConfirmPasswordLoginOwnerService service =
-            new ConfirmPasswordLoginOwnerService(snapshots, owners, "test-policy");
-    private final UUID operationId = UUID.randomUUID();
+            new ConfirmPasswordLoginOwnerService(customers, owners, "test-policy");
     private final VerifiedProviderIdentity identity = new VerifiedProviderIdentity(
             "https://auth.bank.test/realms/mobile", "kc-a");
     private final Instant now = Instant.parse("2026-10-11T10:00:00Z");
@@ -31,33 +33,41 @@ class ConfirmPasswordLoginOwnerServiceTest {
     @Test
     void eligibleSnapshotAndDurableOwnerAreBothRequired() {
         UUID subjectId = UUID.randomUUID();
-        when(snapshots.checkEligibility(identity, now))
+        when(customers.checkEligibility(identity, now))
                 .thenReturn(new CustomerLoginEligibilityResult.Eligible(customer));
-        when(owners.accept(operationId, "neo-mobile", identity, customer, "test-policy"))
+        when(owners.accept(identity, customer, "test-policy"))
                 .thenReturn(new CustomerOwnerAcceptance.Accepted(subjectId));
 
-        assertThat(service.confirmOwner(operationId, "neo-mobile", identity, now))
+        assertThat(service.confirmOwner(identity, now))
                 .isEqualTo(new PasswordLoginOwnerResult.Accepted(subjectId, customer));
-        verify(owners).accept(operationId, "neo-mobile", identity, customer, "test-policy");
+        verify(owners).accept(identity, customer, "test-policy");
     }
 
     @Test
     void unavailableCustomerNeverTouchesOwnerStore() {
-        when(snapshots.checkEligibility(identity, now)).thenReturn(new CustomerLoginEligibilityResult.Unavailable());
+        when(customers.checkEligibility(identity, now)).thenReturn(new CustomerLoginEligibilityResult.Unavailable());
 
-        assertThat(service.confirmOwner(operationId, "neo-mobile", identity, now))
+        assertThat(service.confirmOwner(identity, now))
                 .isInstanceOf(PasswordLoginOwnerResult.Unavailable.class);
-        verify(owners, never()).accept(operationId, "neo-mobile", identity, customer, "test-policy");
+        verify(owners, never()).accept(identity, customer, "test-policy");
+    }
+
+    @Test
+    void rejectedCustomerCannotReachDurableOwnerAcceptance() {
+        when(customers.checkEligibility(identity, now)).thenReturn(new CustomerLoginEligibilityResult.Rejected());
+        assertThat(service.confirmOwner(identity, now))
+                .isInstanceOf(PasswordLoginOwnerResult.Rejected.class);
+        verifyNoInteractions(owners);
     }
 
     @Test
     void skippedBlockWatermarkDoesNotBecomeAccepted() {
-        when(snapshots.checkEligibility(identity, now))
+        when(customers.checkEligibility(identity, now))
                 .thenReturn(new CustomerLoginEligibilityResult.Eligible(customer));
-        when(owners.accept(operationId, "neo-mobile", identity, customer, "test-policy"))
+        when(owners.accept(identity, customer, "test-policy"))
                 .thenReturn(new CustomerOwnerAcceptance.ReconciliationRequired());
 
-        assertThat(service.confirmOwner(operationId, "neo-mobile", identity, now))
+        assertThat(service.confirmOwner(identity, now))
                 .isInstanceOf(PasswordLoginOwnerResult.Rejected.class);
     }
 }

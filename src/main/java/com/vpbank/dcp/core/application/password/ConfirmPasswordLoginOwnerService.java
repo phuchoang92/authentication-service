@@ -2,23 +2,29 @@ package com.vpbank.dcp.core.application.password;
 
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
+import com.vpbank.dcp.core.port.in.customer.CustomerLoginEligibilityResult;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerAcceptance;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
+import com.vpbank.dcp.core.port.out.customer.CustomerOwnerUnavailableException;
 import com.vpbank.dcp.core.port.out.customer.InvalidCustomerOwnerCommandException;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Reads Customer outside SQL, then durably accepts the immutable owner under SQL locks. */
+/**
+ * Reads Customer outside SQL, then durably accepts the immutable owner under SQL locks.
+ */
 public final class ConfirmPasswordLoginOwnerService {
 
-    private final CheckCustomerLoginEligibilityService snapshots;
+    private final CheckCustomerLoginEligibilityUseCase customers;
     private final CustomerOwnerRepository owners;
     private final String policyVersion;
 
-    public ConfirmPasswordLoginOwnerService(CheckCustomerLoginEligibilityService snapshots,
-                                     CustomerOwnerRepository owners, String policyVersion) {
-        this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
+    public ConfirmPasswordLoginOwnerService(CheckCustomerLoginEligibilityUseCase customers,
+                                            CustomerOwnerRepository owners, String policyVersion) {
+        this.customers = Objects.requireNonNull(customers, "customers");
         this.owners = Objects.requireNonNull(owners, "owners");
         if (policyVersion == null || policyVersion.isBlank() || policyVersion.length() > 64) {
             throw new InvalidCustomerOwnerCommandException();
@@ -26,9 +32,8 @@ public final class ConfirmPasswordLoginOwnerService {
         this.policyVersion = policyVersion;
     }
 
-    public PasswordLoginOwnerResult confirmOwner(UUID operationId, String appId,
-                                           VerifiedProviderIdentity identity, Instant now) {
-        CustomerLoginEligibilityResult checked = snapshots.checkEligibility(identity, now);
+    public PasswordLoginOwnerResult confirmOwner(VerifiedProviderIdentity identity, Instant now) {
+        CustomerLoginEligibilityResult checked = customers.checkEligibility(identity, now);
         if (checked instanceof CustomerLoginEligibilityResult.Rejected) {
             return new PasswordLoginOwnerResult.Rejected();
         }
@@ -37,10 +42,14 @@ public final class ConfirmPasswordLoginOwnerService {
         }
         CustomerAuthenticationState customer =
                 ((CustomerLoginEligibilityResult.Eligible) checked).customer();
-        CustomerOwnerAcceptance owner = owners.accept(operationId, appId, identity,
-                customer, policyVersion);
-        if (owner instanceof CustomerOwnerAcceptance.Accepted accepted) {
-            return new PasswordLoginOwnerResult.Accepted(accepted.subjectId(), customer);
+        CustomerOwnerAcceptance owner;
+        try {
+            owner = owners.accept(identity, customer, policyVersion);
+        } catch (CustomerOwnerUnavailableException failure) {
+            return new PasswordLoginOwnerResult.Unavailable();
+        }
+        if (owner instanceof CustomerOwnerAcceptance.Accepted(UUID subjectId)) {
+            return new PasswordLoginOwnerResult.Accepted(subjectId, customer);
         }
         if (owner instanceof CustomerOwnerAcceptance.NotClaimable) {
             return new PasswordLoginOwnerResult.NotClaimable();

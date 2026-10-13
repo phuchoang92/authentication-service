@@ -67,7 +67,7 @@ class DeviceCredentialRenameMigrationIT {
                 """, credentialId.toString(), bindingId.toString(), ciphertext);
 
         Flyway after = flyway(null);
-        assertThat(after.migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(after.migrate().migrationsExecuted).isEqualTo(3);
         assertThat(jdbc.queryForObject("""
                 SELECT COUNT(*) FROM information_schema.TABLES
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_device_totp_credential'

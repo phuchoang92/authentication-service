@@ -3,7 +3,9 @@ package com.vpbank.dcp.core.domain.totp;
 import java.util.Arrays;
 import java.util.Objects;
 
-/** Short-lived sensitive input; callers must close it after verification. */
+/**
+ * Short-lived sensitive input; callers must close it after verification.
+ */
 public final class TotpCode implements AutoCloseable {
     private final char[] digits;
 

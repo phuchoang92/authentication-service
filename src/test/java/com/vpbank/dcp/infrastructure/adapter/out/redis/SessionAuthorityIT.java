@@ -127,10 +127,19 @@ class SessionAuthorityIT {
         assertThat(authority.deliverable(candidate)).isFalse();
     }
 
+    @Test
+    void revokedCandidateCannotBeDelivered() {
+        PreparedSession candidate = candidate();
+        assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.APPLIED);
+
+        assertThat(authority.revoke(candidate)).isTrue();
+        assertThat(authority.deliverable(candidate)).isFalse();
+    }
+
     private PreparedSession candidate() {
         Instant now = Instant.now();
         SessionActivationSnapshot snapshot = new SessionActivationSnapshot(
-                new SessionActivationContext(UUID.randomUUID(), UUID.randomUUID(), subjectId,
+                new SessionActivationContext(UUID.randomUUID(), subjectId,
                         "neo-mobile", bindingId),
                 new SessionKeyBindings(digest(1), "{}", "{}", digest(2)),
                 new SessionSecurityVersions(0, 0, 0),

@@ -3,6 +3,7 @@ package com.vpbank.dcp.infrastructure.adapter.out.redis.key;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import java.util.Objects;
+import java.util.UUID;
 
 /** Typed authority keys; no raw proof IDs, credentials or App identifiers appear in Redis keys. */
 public final class PasswordProofReplayKeys {
@@ -11,6 +12,11 @@ public final class PasswordProofReplayKeys {
 
     public PasswordProofReplayKeys(AuthorityScope scope) {
         this.scope = Objects.requireNonNull(scope, "scope");
+    }
+
+    public String forOperation(UUID operationId) {
+        Objects.requireNonNull(operationId, "operationId");
+        return "password:operation:used:v1:" + scope.value() + ":" + operationId;
     }
 
     public String forRequestKey(RequestKeyThumbprint key, Digest32 proofIdDigest) {

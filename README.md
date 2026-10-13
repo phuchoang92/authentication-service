@@ -68,6 +68,17 @@ delivery. Signed proof claim `responseKeyJkt` retains its existing name and byte
 `DpopProofFilter` and its verified-proof attribute constants live in
 `infrastructure.adapter.in.web.security` (with constants under `security.constant`).
 
+Customer login eligibility belongs to `core.application.customer`, through the shared
+`CheckCustomerLoginEligibilityUseCase` inbound port and adjacent
+`CustomerLoginEligibilityResult`. The password owner-confirmation component calls the
+port after verified identity; Customer resolution, blocked/closed status, exact freshness
+expiry and dependency failures retain their existing typed outcomes. Owner acceptance
+and current local guards remain separate checks. `CustomerLoginConfiguration` assembles
+the use case from `CustomerDirectory` and required `auth.customer.status-max-age-ms`,
+using the existing `AUTH_CUSTOMER_STATUS_MAX_AGE_MS` environment variable. This replaces
+`auth.password-flow.customer-status-max-age-ms`. Biometric/PIN callers will reuse this
+boundary when their flows are implemented; the current password endpoint remains unavailable.
+
 Spring Security owns the stateless inbound security chain. X.509 authenticates the TLS workload certificate against the exact configured URI-SAN allowlist. The password DPoP filter runs after workload authorization and before MVC reads the JSON body; `DPoPProofJwtDecoderFactory` verifies signature/type, and Spring claim validators enforce the server-pinned method/URI, required JTI and 30-second age/5-second future bounds. Auth additionally enforces its configured asymmetric algorithm/key, nonce and token-hash profile. The filter passes a core-owned `VerifiedDpopProof` request attribute containing the verified public JWK, thumbprint and proof-ID digest. The controller/body mapper never forwards raw DPoP into the use case, and Kreq verification no longer reparses or re-verifies it. Shared replay remains in the existing Redis password-proof reservation before provider dispatch; Spring's default in-memory DPoP replay cache is not used. Form login, HTTP Basic, browser sessions and request caching are disabled on this private workload boundary. Core has no Spring dependencies.
 
 The one-request password route exists at BFF `POST /api/v1/authentications/password` and private Auth `POST /internal/v1/authentications/password`. The BFF route is enabled only with the `integration` profile and explicit mTLS settings. Auth reserves and verifies the one-shot command, checks the current Customer/device route, and can issue an encrypted ACTIVE banking token only for `LAST_TRUSTED` while `AUTH_INTEGRATION_ACTIVE_ENABLED=true` under the `integration` profile. `OTHER_TRUSTED` and `NEW_DEVICE` return safe 503 without a fabricated MFA challenge or token. MFA is an external HTTP service, but the G3 integration is not implemented here. Auth publishes session and nonce records to Redis; its former private banking-request admission endpoint and its dedicated proof/context adapters have been removed. BFF-side Redis admission is a separate implementation task and is not verified by Auth tests.

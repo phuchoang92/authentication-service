@@ -11,5 +11,6 @@ final class DeviceTotpSql {
              FOR UPDATE
             """;
 
-    private DeviceTotpSql() { }
+    private DeviceTotpSql() {
+    }
 }

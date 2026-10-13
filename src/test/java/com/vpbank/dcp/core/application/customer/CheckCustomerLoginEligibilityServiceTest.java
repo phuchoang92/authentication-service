@@ -1,4 +1,4 @@
-package com.vpbank.dcp.core.application.password;
+package com.vpbank.dcp.core.application.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -9,6 +9,8 @@ import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.CustomerStatus;
 import com.vpbank.dcp.core.domain.customer.InvalidCustomerFreshnessPolicyException;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.port.in.customer.CustomerLoginEligibilityResult;
+import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
 import com.vpbank.dcp.core.port.out.customer.CustomerResolution;
@@ -19,7 +21,7 @@ import org.junit.jupiter.api.Test;
 class CheckCustomerLoginEligibilityServiceTest {
 
     private final CustomerDirectory directory = mock(CustomerDirectory.class);
-    private final CheckCustomerLoginEligibilityService service =
+    private final CheckCustomerLoginEligibilityUseCase service =
             new CheckCustomerLoginEligibilityService(directory, Duration.ofSeconds(30));
     private final VerifiedProviderIdentity identity = new VerifiedProviderIdentity(
             "https://auth.bank.test/realms/mobile", "kc-user-1");
@@ -34,9 +36,24 @@ class CheckCustomerLoginEligibilityServiceTest {
     }
 
     @Test
+    void snapshotExpiresAtTheExactFreshnessBoundary() {
+        CustomerAuthenticationState customer = customer(CustomerStatus.ELIGIBLE, now);
+        when(directory.resolve(identity)).thenReturn(new CustomerResolution.Found(customer));
+        assertThat(service.checkEligibility(identity, now.plusSeconds(30).minusNanos(1)))
+                .isInstanceOf(CustomerLoginEligibilityResult.Eligible.class);
+        assertThat(service.checkEligibility(identity, now.plusSeconds(30)))
+                .isInstanceOf(CustomerLoginEligibilityResult.Unavailable.class);
+    }
+
+    @Test
     void blockedCustomerAndUnknownIdentityRejectGenerically() {
         when(directory.resolve(identity)).thenReturn(new CustomerResolution.Found(
                 customer(CustomerStatus.BLOCKED, now)));
+        assertThat(service.checkEligibility(identity, now))
+                .isInstanceOf(CustomerLoginEligibilityResult.Rejected.class);
+
+        when(directory.resolve(identity)).thenReturn(new CustomerResolution.Found(
+                customer(CustomerStatus.CLOSED, now)));
         assertThat(service.checkEligibility(identity, now))
                 .isInstanceOf(CustomerLoginEligibilityResult.Rejected.class);
 

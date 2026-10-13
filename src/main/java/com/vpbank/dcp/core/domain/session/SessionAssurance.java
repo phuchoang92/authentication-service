@@ -2,9 +2,13 @@ package com.vpbank.dcp.core.domain.session;
 
 import java.util.Objects;
 
-/** Independent assurance axes supplied by the confirmed authentication source. */
-public record SessionAssurance(DevicePossession devicePossession, PlatformEvidence platformEvidence,
+/**
+ * Independent assurance axes supplied by the confirmed authentication source.
+ */
+public record SessionAssurance(DevicePossession devicePossession,
+                               PlatformEvidence platformEvidence,
                                BiometricEnforcement biometricEnforcement) {
+
     public SessionAssurance {
         Objects.requireNonNull(devicePossession, "devicePossession");
         Objects.requireNonNull(platformEvidence, "platformEvidence");
@@ -16,9 +20,13 @@ public record SessionAssurance(DevicePossession devicePossession, PlatformEviden
 
         private final String code;
 
-        DevicePossession(String code) { this.code = code; }
+        DevicePossession(String code) {
+            this.code = code;
+        }
 
-        public String code() { return code; }
+        public String code() {
+            return code;
+        }
     }
 
     public enum PlatformEvidence {
@@ -26,9 +34,13 @@ public record SessionAssurance(DevicePossession devicePossession, PlatformEviden
 
         private final String code;
 
-        PlatformEvidence(String code) { this.code = code; }
+        PlatformEvidence(String code) {
+            this.code = code;
+        }
 
-        public String code() { return code; }
+        public String code() {
+            return code;
+        }
     }
 
     public enum BiometricEnforcement {
@@ -36,8 +48,12 @@ public record SessionAssurance(DevicePossession devicePossession, PlatformEviden
 
         private final String code;
 
-        BiometricEnforcement(String code) { this.code = code; }
+        BiometricEnforcement(String code) {
+            this.code = code;
+        }
 
-        public String code() { return code; }
+        public String code() {
+            return code;
+        }
     }
 }

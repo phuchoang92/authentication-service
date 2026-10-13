@@ -16,33 +16,33 @@ class TrustedDeviceRoutingTest {
     @Test
     void noCandidateIsNewDevice() {
         assertEquals(TrustedDeviceRoute.NEW_DEVICE,
-                routing.decide(owner, "neo-mobile", "hash", binding, null, now));
+                routing.decide(owner, "neo-mobile", "ANDROID", null, now));
     }
 
     @Test
     void eligibleCurrentBindingIsLastTrusted() {
         assertEquals(TrustedDeviceRoute.LAST_TRUSTED,
-                routing.decide(owner, "neo-mobile", "hash", binding, candidate(owner, true), now));
+                routing.decide(owner, "neo-mobile", "ANDROID", candidate(owner, true, true), now));
     }
 
     @Test
     void eligibleDifferentBindingNeedsStepUp() {
         assertEquals(TrustedDeviceRoute.OTHER_TRUSTED,
-                routing.decide(owner, "neo-mobile", "hash", UUID.randomUUID(), candidate(owner, true), now));
+                routing.decide(owner, "neo-mobile", "ANDROID", candidate(owner, true, false), now));
     }
 
     @Test
     void wrongOwnerOrMissingProofCannotDowngradeToNewDevice() {
         assertEquals(TrustedDeviceRoute.REJECTED,
-                routing.decide(owner, "neo-mobile", "hash", binding,
-                        candidate(UUID.randomUUID(), true), now));
+                routing.decide(owner, "neo-mobile", "ANDROID",
+                        candidate(UUID.randomUUID(), true, true), now));
         assertEquals(TrustedDeviceRoute.REJECTED,
-                routing.decide(owner, "neo-mobile", "hash", binding,
-                        candidate(owner, false), now));
+                routing.decide(owner, "neo-mobile", "ANDROID",
+                        candidate(owner, false, true), now));
     }
 
-    private DeviceCandidate candidate(UUID candidateOwner, boolean proof) {
-        return new DeviceCandidate(binding, candidateOwner, "neo-mobile", "hash", true,
-                now.plusSeconds(60), true, proof);
+    private DeviceCandidate candidate(UUID candidateOwner, boolean proof, boolean primary) {
+        return new DeviceCandidate(binding, candidateOwner, "neo-mobile", "ANDROID", true,
+                true, primary, now.plusSeconds(60), proof);
     }
 }

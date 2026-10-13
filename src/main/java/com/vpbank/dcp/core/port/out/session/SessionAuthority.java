@@ -12,4 +12,7 @@ public interface SessionAuthority {
     SessionApplyResult apply(PreparedSession session);
 
     boolean deliverable(PreparedSession session);
+
+    /** Remove this exact candidate when post-publication revalidation rejects it. */
+    boolean revoke(PreparedSession session);
 }

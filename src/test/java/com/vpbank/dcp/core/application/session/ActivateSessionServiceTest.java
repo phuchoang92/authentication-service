@@ -184,7 +184,7 @@ class ActivateSessionServiceTest {
 
     private SessionActivationSnapshot snapshot(UUID subjectId) {
         return new SessionActivationSnapshot(
-                new SessionActivationContext(command.operationId(), UUID.randomUUID(), subjectId,
+                new SessionActivationContext(command.operationId(), subjectId,
                         "mobile", UUID.randomUUID()),
                 new SessionKeyBindings(digest(1), "request-jwk", "response-jwk", digest(2)),
                 new SessionSecurityVersions(1, 2, 3),

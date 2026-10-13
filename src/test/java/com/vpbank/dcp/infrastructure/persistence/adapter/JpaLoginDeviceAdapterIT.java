@@ -1,0 +1,164 @@
+package com.vpbank.dcp.infrastructure.persistence.adapter;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
+import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityStore;
+import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdCodec;
+import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdKeyMaterial;
+import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
+import com.vpbank.dcp.infrastructure.persistence.codec.ProtectedDeviceId;
+import com.vpbank.dcp.infrastructure.persistence.repository.LoginDevicePersistenceRepository;
+import com.vpbank.dcp.infrastructure.persistence.repository.LoginSessionSecurityPersistenceRepository;
+import com.vpbank.dcp.infrastructure.persistence.entity.SecurityAuditEventEntity;
+import com.vpbank.dcp.infrastructure.persistence.repository.SecurityAuditJpaRepository;
+import java.security.SecureRandom;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.persistence.autoconfigure.EntityScan;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+@Testcontainers
+@SpringBootTest(classes = JpaLoginDeviceAdapterIT.TestConfiguration.class,
+        webEnvironment = SpringBootTest.WebEnvironment.NONE, properties = {
+        "spring.jpa.hibernate.ddl-auto=none", "spring.datasource.hikari.maximum-pool-size=5",
+        "spring.data.redis.host=127.0.0.1",
+        "spring.data.redis.port=1", "spring.data.redis.username=none",
+        "spring.data.redis.password=none", "spring.data.redis.ssl.enabled=false"
+})
+class JpaLoginDeviceAdapterIT {
+    private static final String CHANNEL = "neo-mobile";
+    private static final String INSTALLATION = "random-installation-123456789";
+
+    @Container
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(DockerImageName.parse(
+            "mysql@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242"))
+            .withDatabaseName("auth_login_device")
+            .withUsername("auth_test").withPassword("test-only-password");
+
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
+
+    @Autowired LoginDeviceRepository devices;
+    @Autowired LoginSessionSecurityStore sessionSecurity;
+    @Autowired DeviceIdCodec deviceIds;
+    @Autowired OpaqueBindingIdCodec publicIds;
+    @Autowired JdbcTemplate jdbc;
+
+    @SpringBootConfiguration
+    @EnableAutoConfiguration
+    @EntityScan(basePackageClasses = SecurityAuditEventEntity.class)
+    @EnableJpaRepositories(basePackageClasses = SecurityAuditJpaRepository.class)
+    @Import({LoginDevicePersistenceRepository.class, LoginSessionSecurityPersistenceRepository.class})
+    static class TestConfiguration {
+        @Bean
+        TransactionTemplate transactionTemplate(PlatformTransactionManager manager) {
+            return new TransactionTemplate(manager);
+        }
+
+        @Bean
+        DeviceIdCodec deviceIdCodec() {
+            byte[] lookup = new byte[32];
+            byte[] encryption = new byte[32];
+            Arrays.fill(lookup, (byte) 7);
+            Arrays.fill(encryption, (byte) 8);
+            return new DeviceIdCodec(new DeviceIdKeyMaterial("lookup-test", Map.of("lookup-test", lookup)),
+                    new DeviceIdKeyMaterial("encryption-test", Map.of("encryption-test", encryption)),
+                    new SecureRandom());
+        }
+
+        @Bean
+        OpaqueBindingIdCodec opaqueBindingIdCodec() {
+            return new OpaqueBindingIdCodec();
+        }
+
+        @Bean
+        LoginDeviceRepository loginDeviceRepository(LoginDevicePersistenceRepository repository,
+                                                    DeviceIdCodec codec, OpaqueBindingIdCodec ids,
+                                                    TransactionTemplate transactions) {
+            return new JpaLoginDeviceAdapter(repository, codec, ids, transactions);
+        }
+
+        @Bean
+        LoginSessionSecurityStore loginSessionSecurityStore(
+                LoginSessionSecurityPersistenceRepository repository, TransactionTemplate transactions) {
+            return new JpaLoginSessionSecurityStore(repository, transactions);
+        }
+    }
+
+    @Test
+    void currentDeviceRequiresOwnerChannelAndInstallation() {
+        UUID customerId = UUID.randomUUID();
+        UUID bindingId = UUID.randomUUID();
+        ProtectedDeviceId protectedId = deviceIds.protect(customerId, CHANNEL, bindingId, INSTALLATION);
+        seed(customerId, bindingId, protectedId);
+        String externalId = publicIds.encode(bindingId);
+
+        assertThat(devices.current(customerId, CHANNEL, INSTALLATION, externalId))
+                .get().satisfies(device -> {
+                    assertThat(device.primary()).isTrue();
+                    assertThat(device.installationMatches()).isTrue();
+                    assertThat(device.bindingId()).isEqualTo(bindingId);
+                });
+        assertThat(devices.current(customerId, CHANNEL, "different-installation-123456", externalId))
+                .get().satisfies(device -> assertThat(device.installationMatches()).isFalse());
+        assertThat(devices.current(UUID.randomUUID(), CHANNEL, INSTALLATION, externalId)).isEmpty();
+        assertThat(devices.current(customerId, "different-channel", INSTALLATION, externalId)).isEmpty();
+        assertThat(devices.keyForProof(externalId)).isPresent();
+        assertThat(devices.keyForProof(bindingId.toString())).isEmpty();
+        assertThat(sessionSecurity.current(customerId, bindingId, CHANNEL))
+                .get().satisfies(security -> {
+                    assertThat(security.customerEligible()).isTrue();
+                    assertThat(security.deviceActive()).isTrue();
+                    assertThat(security.primary()).isTrue();
+                    assertThat(security.customerStatusVersion()).isEqualTo(1);
+                    assertThat(security.biometricEnabled()).isFalse();
+                });
+    }
+
+    private void seed(UUID customerId, UUID bindingId, ProtectedDeviceId protectedId) {
+        jdbc.update("""
+                INSERT INTO auth_customer
+                  (id, customer_id, customer_status_version, customer_status_checked_at,
+                   status, policy_version, created_at, updated_at)
+                VALUES (UUID_TO_BIN(?), ?, 1, UTC_TIMESTAMP(6), 'ELIGIBLE', 'test',
+                        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """, customerId.toString(), "customer-" + customerId);
+        jdbc.update("""
+                INSERT INTO auth_trusted_device
+                  (id, auth_customer_id, channel, device_id_lookup, device_id_lookup_key_id,
+                   device_id_ciphertext, device_id_key_id, platform, label, status,
+                   device_public_key, device_public_key_hash, device_key_algorithm,
+                   trust_method, trust_policy_version, possession_assurance,
+                   trusted_at, expires_at, is_primary, created_at, updated_at)
+                VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, ?, ?, ?, 'ANDROID',
+                        'Test device', 'ACTIVE', X'01020304', UNHEX(SHA2(?, 256)),
+                        'ES256', 'NFC_FACE_SMS_OTP', 'test-policy', 'MFA_KEY_POSSESSION',
+                        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 90 DAY, 1,
+                        UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                """, bindingId.toString(), customerId.toString(), CHANNEL,
+                protectedId.lookup().bytes(), protectedId.lookupKeyId(),
+                protectedId.ciphertext(), protectedId.encryptionKeyId(), "public-key-" + bindingId);
+    }
+}

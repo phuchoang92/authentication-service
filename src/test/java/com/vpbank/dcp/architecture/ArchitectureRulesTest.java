@@ -39,6 +39,22 @@ class ArchitectureRulesTest {
             .should().dependOnClassesThat().resideInAPackage("..core.application.session..")
             .because("password calls the shared inbound session port");
 
+    private static final ArchRule CUSTOMER_CORE_DOES_NOT_IMPORT_LOGIN_METHODS = noClasses()
+            .that().resideInAnyPackage("..core.domain.customer..", "..core.application.customer..",
+                    "..core.port.in.customer..", "..core.port.out.customer..")
+            .should().dependOnClassesThat().resideInAnyPackage("..core.application.password..",
+                    "..core.port.in.password..", "..core.port.out.password..", "..core.domain.password..",
+                    "..core.application.biometric..", "..core.port.in.biometric..", "..core.port.out.biometric..",
+                    "..core.domain.biometric..", "..core.application.pin..", "..core.port.in.pin..",
+                    "..core.port.out.pin..", "..core.domain.pin..")
+            .because("Customer eligibility is shared by authentication methods");
+
+    private static final ArchRule LOGIN_METHODS_CALL_CUSTOMER_THROUGH_PORT = noClasses()
+            .that().resideInAnyPackage("..core.application.password..", "..core.application.biometric..",
+                    "..core.application.pin..")
+            .should().dependOnClassesThat().resideInAPackage("..core.application.customer..")
+            .because("login methods call the shared inbound Customer port");
+
     private static final ArchRule OUTBOUND_ADAPTER_DOES_NOT_IMPORT_INBOUND_ADAPTER = noClasses()
             .that().resideInAnyPackage("..infrastructure.adapter.out..", "..infrastructure.persistence.adapter..")
             .should().dependOnClassesThat().resideInAPackage("..infrastructure.adapter.in..")
@@ -155,6 +171,23 @@ class ArchitectureRulesTest {
         assertThatThrownBy(() -> SESSION_CORE_DOES_NOT_IMPORT_PASSWORD.check(fixtures))
                 .isInstanceOf(AssertionError.class);
         assertThatThrownBy(() -> PASSWORD_CALLS_SESSION_THROUGH_PORT.check(fixtures))
+                .isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void sharedCustomerBoundaryRemainsIndependentOfLoginMethods() {
+        var production = new ClassFileImporter().withImportOption(new ImportOption.DoNotIncludeTests())
+                .importPackages("com.vpbank.dcp.core");
+        CUSTOMER_CORE_DOES_NOT_IMPORT_LOGIN_METHODS.check(production);
+        LOGIN_METHODS_CALL_CUSTOMER_THROUGH_PORT.check(production);
+    }
+
+    @Test
+    void negativeFixturesDemonstrateCustomerBoundaryViolationsAreCaught() {
+        var fixtures = new ClassFileImporter().importPackages("com.vpbank.archfixtures.core.application");
+        assertThatThrownBy(() -> CUSTOMER_CORE_DOES_NOT_IMPORT_LOGIN_METHODS.check(fixtures))
+                .isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> LOGIN_METHODS_CALL_CUSTOMER_THROUGH_PORT.check(fixtures))
                 .isInstanceOf(AssertionError.class);
     }
 

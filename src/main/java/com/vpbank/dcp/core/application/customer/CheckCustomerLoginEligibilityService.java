@@ -1,8 +1,10 @@
-package com.vpbank.dcp.core.application.password;
+package com.vpbank.dcp.core.application.customer;
 
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.InvalidCustomerFreshnessPolicyException;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.port.in.customer.CustomerLoginEligibilityResult;
+import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
 import com.vpbank.dcp.core.port.out.customer.CustomerResolution;
@@ -11,7 +13,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /** Reads Customer by verified provider identity; never infers eligibility from username. */
-public final class CheckCustomerLoginEligibilityService {
+public final class CheckCustomerLoginEligibilityService implements CheckCustomerLoginEligibilityUseCase {
 
     private final CustomerDirectory customers;
     private final Duration maximumAge;
@@ -24,6 +26,7 @@ public final class CheckCustomerLoginEligibilityService {
         }
     }
 
+    @Override
     public CustomerLoginEligibilityResult checkEligibility(VerifiedProviderIdentity identity, Instant now) {
         Objects.requireNonNull(identity, "identity");
         Objects.requireNonNull(now, "now");

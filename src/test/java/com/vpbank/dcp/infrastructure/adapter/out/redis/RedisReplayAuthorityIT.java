@@ -74,7 +74,7 @@ class RedisReplayAuthorityIT {
         RedisPasswordProofReplay first = passwordReplay();
         RedisPasswordProofReplay second = passwordReplay();
         PasswordReplayAttempt attempt = new PasswordReplayAttempt(
-                new RequestKeyThumbprint(digest(1)), digest(2),
+                UUID.randomUUID(), new RequestKeyThumbprint(digest(1)), digest(2),
                 new PasswordProofIds(digest(3), digest(4), digest(5)));
 
         UUID generation = identity.currentGeneration().orElseThrow();

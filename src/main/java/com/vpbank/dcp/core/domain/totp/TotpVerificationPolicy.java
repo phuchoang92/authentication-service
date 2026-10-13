@@ -3,7 +3,9 @@ package com.vpbank.dcp.core.domain.totp;
 import java.time.Duration;
 import java.util.Objects;
 
-/** Limits online guesses across all uses of one device credential. */
+/**
+ * Limits online guesses across all uses of one device credential.
+ */
 public record TotpVerificationPolicy(int maximumFailures, Duration lockDuration) {
 
     public TotpVerificationPolicy {

@@ -1,4 +1,4 @@
-package com.vpbank.dcp.core.application.password;
+package com.vpbank.dcp.core.port.in.customer;
 
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import java.util.Objects;

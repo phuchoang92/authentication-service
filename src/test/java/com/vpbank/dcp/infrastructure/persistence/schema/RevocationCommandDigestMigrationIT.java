@@ -65,7 +65,7 @@ class RevocationCommandDigestMigrationIT {
                 operationId.toString(), deviceId.toString());
 
         Flyway current = flyway(null);
-        assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(current.migrate().migrationsExecuted).isEqualTo(2);
         assertThat(jdbc.queryForObject("""
                 SELECT command_digest FROM auth_security_audit_event
                  WHERE operation_id = UUID_TO_BIN(?)

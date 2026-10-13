@@ -3,9 +3,14 @@ package com.vpbank.dcp.core.port.out.password;
 import java.util.Objects;
 import java.util.UUID;
 
-/** The non-secret facts the App proofs must bind before credential dispatch. */
-public record PasswordOperationContext(UUID operationId, String appId, String platform,
-                                       String installationId, String username,
+/**
+ * The non-secret facts the App proofs must bind before credential dispatch.
+ */
+public record PasswordOperationContext(UUID operationId,
+                                       String appId,
+                                       String platform,
+                                       String installationId,
+                                       String username,
                                        String claimedBindingId) {
 
     public PasswordOperationContext {

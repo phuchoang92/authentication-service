@@ -15,6 +15,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 public final class RedisPasswordProofReplay implements PasswordProofReplay {
 
     private static final Duration REPLAY_TTL = Duration.ofSeconds(120);
+    private static final Duration OPERATION_TTL = Duration.ofMinutes(15);
 
     private final StringRedisTemplate redis;
     private final RedisServerIdentity identity;
@@ -37,14 +38,15 @@ public final class RedisPasswordProofReplay implements PasswordProofReplay {
             if (generation == null) {
                 return new PasswordReplayResult.AuthorityClosed();
             }
-            if (!reserveKey(dpopKeys.forDpop(attempt.requestKey(), attempt.proofIds().dpop()))
+            if (!reserveKey(passwordKeys.forOperation(attempt.operationId()), OPERATION_TTL)
+                    || !reserveKey(dpopKeys.forDpop(attempt.requestKey(), attempt.proofIds().dpop()), REPLAY_TTL)
                     || !reserveKey(passwordKeys.forRequestKey(
-                            attempt.requestKey(), attempt.proofIds().requestKey()))) {
+                            attempt.requestKey(), attempt.proofIds().requestKey()), REPLAY_TTL)) {
                 return new PasswordReplayResult.Replayed();
             }
             if (attempt.deviceKeyThumbprint() != null
                     && !reserveKey(passwordKeys.forDeviceKey(
-                            attempt.deviceKeyThumbprint(), attempt.proofIds().deviceKey()))) {
+                            attempt.deviceKeyThumbprint(), attempt.proofIds().deviceKey()), REPLAY_TTL)) {
                 return new PasswordReplayResult.Replayed();
             }
             if (!generation.equals(identity.currentGeneration().orElse(null))) {
@@ -56,8 +58,8 @@ public final class RedisPasswordProofReplay implements PasswordProofReplay {
         }
     }
 
-    private boolean reserveKey(String key) {
-        Boolean reserved = redis.opsForValue().setIfAbsent(key, "1", REPLAY_TTL);
+    private boolean reserveKey(String key, Duration ttl) {
+        Boolean reserved = redis.opsForValue().setIfAbsent(key, "1", ttl);
         if (reserved == null) {
             throw new InvalidAuthorityRedisConfigurationException();
         }
