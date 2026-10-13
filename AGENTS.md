@@ -38,9 +38,12 @@ no core object components or domain conversion methods. Preserve defensive byte 
 content equality and redacted output. Existing core-typed write parameters remain allowed;
 repositories must not construct core values or depend on adapters/mappers. Mappers perform
 no I/O, clock access, transaction orchestration or freshness decisions.
-`PasswordOperationJpaRepository` exposes read projections for progress and verified
-identity only. Guarded reads, joins, locks and mutations use EntityManager repositories;
-never use a previously loaded entity for a decision after acquiring locks. No JPA caches,
+The retired password-operation entity, Spring Data repository, EntityManager repository,
+and SQL adapter have been removed. Do not recreate an operation write path merely to
+store login failures. The public password endpoint currently returns a safe unavailable
+result until a replacement login flow has an approved contract and tests. Guarded reads,
+joins, locks and mutations for capabilities that still exist use focused EntityManager
+repositories; never use a previously loaded entity for a decision after acquiring locks. No JPA caches,
 relationships, cascades or generic base repository. Customer freshness belongs to the
 JDK-only `CustomerFreshnessPolicy`; protected delivery serialization and digest checking
 belong to `SessionDeliveryEscrowCodec`. Shared intent/escrow SQL belongs to
@@ -50,6 +53,8 @@ journey/operation transitions at that source boundary.
 
 Preserve applied migration files and checksums. The user explicitly retired SQL
 Authority Control: V9 removes `auth_authority_control`, and its lease port/adapter/repository
-must not be restored. The remaining expanded schema stays in place. The DD three-table password-first
-schema is a separate change. Preserve Redis/BFF work in progress and historical test
-reports; this refactor does not authorize deployment, storage cutover or Git push.
+must not be restored. V11 retires the empty V1 login/device storage cluster; the old
+password flow is disabled and must not be re-enabled against V11. Design and test its
+replacement against the current customer/device tables first. Preserve Redis/BFF work
+in progress and historical test reports; this does not authorize deployment, storage
+cutover or Git push.

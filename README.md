@@ -1,4 +1,16 @@
-# Authentication Service v1 — G1 complete, G2 in progress
+# Authentication Service v1 — database simplification in progress
+
+**Current warning:** V11 retires the old journey/operation/device-key storage cluster
+on an empty isolated database. The password-operation entity, both persistence
+repositories, SQL holder, adapter, mapper and associated projections have been removed.
+The password endpoint now returns a safe
+`TEMPORARILY_UNAVAILABLE` response; it does not call Keycloak or issue a banking token.
+It does not write a failure row or lock an operation. This is **not** a working login flow.
+Do not deploy this build or use it for login until a replacement password flow and its
+tests are completed. V11 rejects populated old tables and is not a data migration.
+The V11 migration tests pass on isolated MySQL 8.4, and `./mvnw clean verify` passes
+after removing tests that targeted the retired password-operation/schema path. This
+does not prove a replacement password login; that flow remains unavailable.
 
 This is the isolated, clean-build G1 source tree, renamed from `authentication-service-rebuild` after the old project was removed. It is not connected to the running database, Redis, deployment, or Maven reactor. The design input is `../docs/DD/target` and the coding authority is `../docs/authentication-documentation/docs/design-v1/code-design-rules-and-patterns.md`.
 
@@ -8,10 +20,14 @@ This is the isolated, clean-build G1 source tree, renamed from `authentication-s
 - JDK-only `core` ports and values; Spring/HTTP/JPA/Redis/JOSE implementations in `infrastructure`.
 - Strict JSON parsing, safe public errors, redacted secret-bearing values, configured public URI, stateless Spring Security X.509 with exact workload URI-SAN authorization, outbound TLS 1.3 client identity/trust factory.
 - Pinned biometric Keycloak context verifier, Spring Security DPoP decoder, typed enrollment JWS verifier, JWE envelope inspector, JCS command digest and signing-input codec. Password now travels through authenticated TLS to standard Keycloak Direct Grant; OTP remains an MFA-recipient JWE. Auth never decrypts OTP JWE.
-- Fresh MySQL 8.4 Flyway schema (20 `auth_` tables) and short transaction tests. Additive V8 renames `auth_subject` to `auth_customer`; V9 removes the unused `auth_authority_control` table after retiring its SQL lease capability. V1–V8 and their checksums are unchanged.
+- Fresh MySQL 8.4 Flyway schema (6 current `auth_` tables after V11). Additive V8 renames `auth_subject` to `auth_customer`; V9 removes `auth_authority_control`; V10 adds current trusted-device tables; V11 retires empty old login/device storage. V1–V10 and their checksums are unchanged.
 - Dedicated Redis key factories and a development/integration-only online session store. Replay uses native `SET NX` with expiry; session and nonce records use Redis hashes with TTL. There is no Lua or Redis Authority Control implementation. Redis run-ID changes close old sessions, but multi-key activation, touch and revocation are **not atomic**.
 
 ## G2 implementation status
+
+The details below describe the **retired pre-V11 slice** for code navigation only.
+It is not wired for requests on the current schema. Its old tests characterize that
+slice and cannot establish current login acceptance.
 
 G2 has started, but it is **not an accepted login service**. Implemented and unit-tested so far:
 
@@ -128,8 +144,9 @@ Concurrent DPoP algorithm changes made during the run are outside this verificat
 
 ## Shared session activation
 
-Password owns credential verification and trusted-device eligibility. After `LAST_TRUSTED`,
-`PasswordLoginService` calls the inbound `ActivateSessionUseCase` with
+The following describes the removed pre-V11 password path, not the active API. In that path,
+password owned credential verification and trusted-device eligibility. After `LAST_TRUSTED`,
+the retired login service called the inbound `ActivateSessionUseCase` with
 `ActivateSessionCommand(operationId, subjectId)`. `ActivateSessionService` lives in
 `core.application.session`; its command and `SessionActivationResult` live beside the
 inbound port. The shared core has no password dependency. A command identifies an operation;
@@ -183,13 +200,13 @@ core.port.out.<capability>.<Capability>Repository
 infrastructure.persistence
     ├── adapter       Jpa<Capability>Adapter (transactions and coordination)
     ├── repository    <Capability>PersistenceRepository / <Capability>JpaRepository / <Capability>Sql
-    ├── entity        PasswordOperationEntity
+    ├── entity        Current JPA mappings only; no password-operation entity
     ├── projection    immutable database …View values
     ├── mapper        <Capability>PersistenceMapper (DB values → core)
     └── codec         SessionDeliveryEscrowCodec / EscrowedSessionDelivery
 ```
 
-The SQL capabilities are CustomerOwner, PasswordOperation, PasswordDeviceKey,
+The retained SQL capabilities are CustomerOwner, PasswordDeviceKey,
 PasswordDeviceRoute, PasswordSession and shared Session activation storage. Persistence groups classes by technical role,
 without customer/password/session subpackages. Core still groups domain and ports by
 capability. Redis ports retain their existing names. There are no compatibility aliases
@@ -202,19 +219,12 @@ holders remain package-private beside their owning repositories. Existing core-t
 write parameters are retained.
 
 Focused, handwritten, stateless mappers restore domain values and core-owned port
-results. Adapters invoke them, for example `queries.verifiedIdentity(id).map(
-PasswordOperationPersistenceMapper::toVerifiedIdentity)`. Mappers perform no I/O,
+results for retained capabilities. Mappers perform no I/O,
 transaction orchestration, clock access or freshness calculation. Views contain database
 values instead of domain objects, with defensive byte copies, content equality and
-redacted output. The current read paths return views, including Spring Data JPQL
-projections backed by `PasswordOperationEntity`; no entity loads or unused entity mapper
-methods are introduced solely for mapping.
-
-Spring Data reads operation progress and verified identity through JPQL scalar projections
-of an immutable entity mapped to the existing `auth_operation` table, including BINARY(16)
-UUIDs. It exposes no save/delete methods. Native SQL handles locked reads, joins and CAS;
-no loaded entity is used to decide a mutation. Both JPA query and second-level caches are
-disabled.
+redacted output. The retired `auth_operation` table has no entity, Spring Data repository,
+or active failure-recording adapter. Older password/session text below describes the
+pre-V11 path and is not evidence of current runtime behavior.
 
 Customer freshness uses the configured maximum age through `CustomerFreshnessPolicy`;
 a snapshot expires exactly at `checkedAt + maxAge`. `SessionDeliveryEscrowCodec` preserves

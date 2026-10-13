@@ -46,7 +46,6 @@ class PersistenceProjectionTest {
         var candidate = new DeviceCandidateView(id, id, "mobile", digest, "ACTIVE", time,
                 "ACTIVE", 1, digest);
         return Stream.of(
-                new PasswordReservationView(id, id, digest, "key-1"),
                 new StoredDeviceKeyView(new byte[]{1, 2, 3}, digest),
                 candidate,
                 new PasswordDeviceRouteView(id, id, digest, digest, candidate),

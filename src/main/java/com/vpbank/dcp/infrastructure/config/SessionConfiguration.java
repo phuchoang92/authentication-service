@@ -1,9 +1,6 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.application.session.ActivateSessionService;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
-import com.vpbank.dcp.core.port.in.session.ActivateSessionUseCase;
-import com.vpbank.dcp.core.port.out.session.SessionRepository;
 import com.vpbank.dcp.core.port.out.session.SessionCryptography;
 import com.vpbank.dcp.core.port.out.session.SessionAuthority;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenIssuer;
@@ -17,8 +14,6 @@ import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.config.properties.NativeSessionProperties;
 import com.vpbank.dcp.infrastructure.persistence.codec.SessionDeliveryEscrowCodec;
-import com.vpbank.dcp.infrastructure.persistence.repository.SessionPersistenceRepository;
-import jakarta.persistence.EntityManager;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -77,18 +72,6 @@ public class SessionConfiguration {
                                       NativeSessionProperties properties, Clock clock) {
         return new RedisSessionAuthority(redis, identity, scope,
                 Duration.ofMillis(properties.nonceValidityMs()), clock);
-    }
-
-    @Bean
-    ActivateSessionUseCase activateSession(SessionRepository store,
-                                          SessionCryptography cryptography,
-                                          SessionAuthority authority, Clock clock) {
-        return new ActivateSessionService(store, cryptography, authority, clock);
-    }
-
-    @Bean
-    SessionPersistenceRepository sessionPersistenceRepository(EntityManager sql) {
-        return new SessionPersistenceRepository(sql);
     }
 
     private byte[] secret(String encoded) {

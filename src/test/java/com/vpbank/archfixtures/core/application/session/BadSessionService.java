@@ -1,7 +1,7 @@
 package com.vpbank.archfixtures.core.application.session;
 
-import com.vpbank.dcp.core.application.password.PasswordLoginService;
+import com.vpbank.dcp.core.application.password.PasswordLoginUnavailableService;
 
 public class BadSessionService {
-    private PasswordLoginService password;
+    private PasswordLoginUnavailableService password;
 }

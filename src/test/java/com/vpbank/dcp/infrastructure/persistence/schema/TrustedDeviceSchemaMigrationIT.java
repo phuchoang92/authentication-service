@@ -31,7 +31,9 @@ class TrustedDeviceSchemaMigrationIT {
 
     @Test
     void createsTargetTablesOnFreshIsolatedDatabase() {
-        Flyway flyway = flyway(FRESH);
+        Flyway flyway = Flyway.configure()
+                .dataSource(FRESH.getJdbcUrl(), FRESH.getUsername(), FRESH.getPassword())
+                .target(MigrationVersion.fromVersion("10")).load();
 
         assertThat(flyway.migrate().migrationsExecuted).isEqualTo(10);
         assertThat(flyway.info().current().getVersion()).isEqualTo(MigrationVersion.fromVersion("10"));
