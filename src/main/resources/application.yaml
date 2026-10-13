@@ -47,6 +47,9 @@ server:
     trust-store-type: PKCS12
 
 auth:
+  dpop:
+    enabled: ${AUTH_DPOP_ENABLED:true}
+    allowed-algorithms: ${AUTH_DPOP_ALLOWED_ALGORITHMS:ES256}
   password-flow:
     command-key-id: ${AUTH_PASSWORD_HMAC_KEY_ID}
     command-hmac-base64: ${AUTH_PASSWORD_HMAC_BASE64}
@@ -77,7 +80,10 @@ auth:
   keycloak:
     private-client:
       token-audience: ${AUTH_KC_TOKEN_AUDIENCE}
-      private-jwk: ${AUTH_KC_CLIENT_PRIVATE_JWK}
+      client-id: ${AUTH_KC_CLIENT_ID:authentication-service}
+      authentication-method: ${AUTH_KC_CLIENT_AUTHENTICATION_METHOD:PRIVATE_KEY_JWT}
+      client-secret: ${AUTH_KC_CLIENT_SECRET:}
+      private-jwk: ${AUTH_KC_CLIENT_PRIVATE_JWK:}
       request-timeout-ms: ${AUTH_KC_REQUEST_TIMEOUT_MS}
     id-token-trust:
       issuer: ${AUTH_KC_ID_TOKEN_ISSUER}

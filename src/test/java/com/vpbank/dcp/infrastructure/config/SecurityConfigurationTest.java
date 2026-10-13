@@ -18,12 +18,10 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
 import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.adapter.in.web.security.DpopProofFilter;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.SpringDpopProofDecoder;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.infrastructure.config.properties.IngressProperties;
 import java.security.cert.CertificateExpiredException;
@@ -48,6 +46,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.context.support.TestPropertySourceUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -68,13 +67,21 @@ class SecurityConfigurationTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        startContext(false);
+        key = new ECKeyGenerator(Curve.P_256).generate();
+    }
+
+    private void startContext(boolean disableDpop) {
         context = new AnnotationConfigWebApplicationContext();
         context.setServletContext(new MockServletContext());
+        if (disableDpop) {
+            context.getEnvironment().setActiveProfiles("dev");
+            TestPropertySourceUtils.addInlinedPropertiesToEnvironment(context, "auth.dpop.enabled=false");
+        }
         context.register(TestConfiguration.class);
         context.refresh();
         mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
         probe = context.getBean(Probe.class);
-        key = new ECKeyGenerator(Curve.P_256).generate();
     }
 
     @AfterEach
@@ -145,6 +152,26 @@ class SecurityConfigurationTest {
         assertThat(probe.calls.get()).isEqualTo(1);
     }
 
+    @Test
+    void disabledNonProductionModeSkipsSignatureAndHttpBindingButRetainsKeyAndWorkloadChecks() throws Exception {
+        context.close();
+        startContext(true);
+        var unsignedBinding = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.ES256)
+                .type(new JOSEObjectType("dpop+jwt")).jwk(key.toPublicJWK()).build(),
+                new JWTClaimsSet.Builder().jwtID("dev-proof").issueTime(Date.from(NOW.minusSeconds(600)))
+                        .claim("htm", "GET").claim("htu", "https://other.example/wrong")
+                        .claim("nonce", "wrong-nonce").claim("ath", "wrong-hash").build());
+        unsignedBinding.sign(new ECDSASigner(new ECKeyGenerator(Curve.P_256).generate()));
+        mvc.perform(request().header("DPoP", unsignedBinding.serialize())).andExpect(status().isOk());
+        assertThat(probe.verified.verification()).isEqualTo(VerifiedDpopProof.Verification.DISABLED_FOR_NON_PRODUCTION);
+        assertThat(probe.verified.publicJwk()).isEqualTo(key.toPublicJWK().toJSONString());
+        mvc.perform(request().header("DPoP", unsignedBinding.serialize()).secure(false))
+                .andExpect(status().isForbidden());
+        mvc.perform(request()).andExpect(status().isBadRequest());
+        mvc.perform(request().header("DPoP", "p".repeat(64))).andExpect(status().isUnauthorized());
+        assertThat(probe.calls.get()).isEqualTo(1);
+    }
+
     private MockHttpServletRequestBuilder request() throws Exception {
         return post(PATH).secure(true).contentType(MediaType.APPLICATION_JSON).content("{}")
                 .requestAttr("jakarta.servlet.request.X509Certificate", certificates(6, WORKLOAD));
@@ -167,13 +194,14 @@ class SecurityConfigurationTest {
 
     @Configuration(proxyBeanMethods = false)
     @EnableWebMvc
-    @Import(SecurityConfiguration.class)
+    @Import({SecurityConfiguration.class, DpopConfiguration.class})
     static class TestConfiguration {
         @Bean IngressProperties ingress() { return new IngressProperties("https://api.bank.example", Set.of(WORKLOAD)); }
         @Bean ExternalUriPolicy externalUris() { return new ExternalUriPolicy("https://api.bank.example"); }
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
         @Bean JsonMapper json() { return new JsonMapper(); }
-        @Bean DpopProofDecoder decoder() { return new SpringDpopProofDecoder(new Sha256Digests(), new StrictJoseJson()); }
+        @Bean Sha256Digests digests() { return new Sha256Digests(); }
+        @Bean StrictJoseJson strictJson() { return new StrictJoseJson(); }
         @Bean Probe probe() { return new Probe(); }
     }
 

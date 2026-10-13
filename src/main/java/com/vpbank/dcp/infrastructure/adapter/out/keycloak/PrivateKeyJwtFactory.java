@@ -18,11 +18,15 @@ import java.util.UUID;
 /** Fresh RFC 7523 client authentication for each private Keycloak mutation. */
 public final class PrivateKeyJwtFactory {
 
-    private static final String CLIENT_ID = "authentication-service";
+    private final String clientId;
     private final URI tokenEndpoint;
     private final ECKey signingKey;
 
-    public PrivateKeyJwtFactory(URI tokenEndpoint, ECKey signingKey) {
+    public PrivateKeyJwtFactory(String clientId, URI tokenEndpoint, ECKey signingKey) {
+        if (clientId == null || clientId.isBlank()) {
+            throw new InvalidKeycloakClientConfigurationException();
+        }
+        this.clientId = clientId;
         this.tokenEndpoint = Objects.requireNonNull(tokenEndpoint, "tokenEndpoint");
         this.signingKey = Objects.requireNonNull(signingKey, "signingKey");
         if (!"https".equals(tokenEndpoint.getScheme()) || tokenEndpoint.getHost() == null
@@ -35,11 +39,15 @@ public final class PrivateKeyJwtFactory {
         }
     }
 
+    String clientId() {
+        return clientId;
+    }
+
     public String issue(Instant now) {
         Objects.requireNonNull(now, "now");
         var claims = new JWTClaimsSet.Builder()
-                .issuer(CLIENT_ID)
-                .subject(CLIENT_ID)
+                .issuer(clientId)
+                .subject(clientId)
                 .audience(tokenEndpoint.toString())
                 .jwtID(UUID.randomUUID().toString())
                 .issueTime(Date.from(now))

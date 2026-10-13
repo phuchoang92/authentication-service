@@ -3,8 +3,7 @@ package com.vpbank.dcp.infrastructure.config;
 import com.nimbusds.jose.jwk.ECKey;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.LengthPrefixedSigningInputEncoder;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.SpringDpopProofDecoder;
-import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.DpopAlgorithmPolicy;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.EnrollmentProofVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JcsCommandDigest;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JweEnvelopeInspector;
@@ -40,14 +39,9 @@ public class CryptoConfiguration {
     }
 
     @Bean
-    DpopProofDecoder dpopProofDecoder(Sha256Digests digests, StrictJoseJson json) {
-        return new SpringDpopProofDecoder(digests, json);
-    }
-
-    @Bean
     PasswordProofVerifier passwordProofVerifier(StrictJoseJson json,
-                                                Sha256Digests digests) {
-        return new JosePasswordProofVerifier(json, digests);
+                                                Sha256Digests digests, DpopAlgorithmPolicy algorithms) {
+        return new JosePasswordProofVerifier(json, digests, algorithms);
     }
 
     @Bean

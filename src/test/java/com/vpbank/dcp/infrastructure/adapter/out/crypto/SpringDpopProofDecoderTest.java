@@ -7,9 +7,12 @@ import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.ECDSASigner;
+import com.nimbusds.jose.crypto.RSASSASigner;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
+import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.port.out.security.DpopExpectation;
@@ -17,8 +20,11 @@ import com.vpbank.dcp.core.port.out.security.InvalidDpopProofException;
 import java.net.URI;
 import java.time.Instant;
 import java.util.Date;
+import java.util.Set;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SpringDpopProofDecoderTest {
     private static final Instant NOW = Instant.parse("2026-10-12T00:00:00Z");
@@ -85,6 +91,50 @@ class SpringDpopProofDecoderTest {
                 .type(new JOSEObjectType("dpop+jwt")).jwk(otherCurve.toPublicJWK()).build(), claims().build());
         otherAlgorithm.sign(new ECDSASigner(otherCurve));
         rejects(otherAlgorithm.serialize());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ES256", "ES384", "ES512", "RS256", "RS384", "RS512", "PS256", "PS384", "PS512"})
+    void configuredAlgorithmsVerifyRealSignaturesAndRejectTampering(String name) throws Exception {
+        JWSAlgorithm algorithm = JWSAlgorithm.parse(name);
+        JWK signingKey = JWSAlgorithm.Family.EC.contains(algorithm)
+                ? new ECKeyGenerator(Curve.forJWSAlgorithm(algorithm).iterator().next()).generate()
+                : new RSAKeyGenerator(2048).generate();
+        var proof = new SignedJWT(new JWSHeader.Builder(algorithm).type(new JOSEObjectType("dpop+jwt"))
+                .jwk(signingKey.toPublicJWK()).build(), claims().build());
+        proof.sign(signingKey instanceof ECKey ec ? new ECDSASigner(ec)
+                : new RSASSASigner(signingKey.toRSAKey()));
+        var configured = new SpringDpopProofDecoder(new Sha256Digests(), new StrictJoseJson(),
+                new DpopAlgorithmPolicy(Set.of(name)));
+        var verified = configured.verify(proof.serialize(), initial);
+        assertThat(verified.publicJwk()).isEqualTo(signingKey.toPublicJWK().toJSONString());
+        assertThat(verified.requestKey().digest().base64Url()).isEqualTo(signingKey.computeThumbprint().toString());
+        assertThat(verified.verification()).isEqualTo(com.vpbank.dcp.core.port.out.security.VerifiedDpopProof.Verification.VERIFIED);
+        String[] parts = proof.serialize().split("\\.");
+        byte[] signature = java.util.Base64.getUrlDecoder().decode(parts[2]);
+        signature[0] ^= 1;
+        String tampered = parts[0] + "." + parts[1] + "."
+                + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(signature);
+        assertThatThrownBy(() -> configured.verify(tampered, initial)).isInstanceOf(InvalidDpopProofException.class);
+        if (!"ES256".equals(name)) {
+            rejects(proof.serialize());
+        }
+    }
+
+    @Test
+    void algorithmPolicyRejectsMismatchedCurvesKeyFamiliesAndWeakRsaKeys() throws Exception {
+        var algorithms = new DpopAlgorithmPolicy(Set.of("ES256", "RS256"));
+        var otherCurve = new ECKeyGenerator(Curve.P_384).generate().toPublicJWK();
+        var generator = java.security.KeyPairGenerator.getInstance("RSA");
+        generator.initialize(1024);
+        var weakRsa = new com.nimbusds.jose.jwk.RSAKey.Builder(
+                (java.security.interfaces.RSAPublicKey) generator.generateKeyPair().getPublic()).build();
+        assertThatThrownBy(() -> algorithms.publicKey(otherCurve, JWSAlgorithm.ES256))
+                .isInstanceOf(InvalidCryptographicInputException.class);
+        assertThatThrownBy(() -> algorithms.publicKey(key.toPublicJWK(), JWSAlgorithm.RS256))
+                .isInstanceOf(InvalidCryptographicInputException.class);
+        assertThatThrownBy(() -> algorithms.publicKey(weakRsa, JWSAlgorithm.RS256))
+                .isInstanceOf(InvalidCryptographicInputException.class);
     }
 
     private void rejects(String compact) {

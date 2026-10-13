@@ -103,6 +103,7 @@ class PasswordLoginRequestMapperTest {
         assertThat(command.getValue().toString()).doesNotContain(password);
         var parsed = json.readValue(body, PasswordLoginRequest.class);
         assertThat(parsed.toString()).doesNotContain(password);
+        assertThat(PasswordLoginRequest.builder().password(password).toString()).doesNotContain(password);
         assertThat(json.writeValueAsString(parsed)).doesNotContain(password, "password");
     }
 

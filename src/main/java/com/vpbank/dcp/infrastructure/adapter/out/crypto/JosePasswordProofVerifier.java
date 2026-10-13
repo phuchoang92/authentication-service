@@ -5,6 +5,8 @@ import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.crypto.ECDSAVerifier;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.crypto.factories.DefaultJWSVerifierFactory;
 import com.nimbusds.jose.util.JSONObjectUtils;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
@@ -42,10 +44,17 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
 
     private final StrictJoseJson strictJson;
     private final Sha256Digests digests;
+    private final DpopAlgorithmPolicy algorithms;
 
     public JosePasswordProofVerifier(StrictJoseJson strictJson, Sha256Digests digests) {
+        this(strictJson, digests, new DpopAlgorithmPolicy(Set.of("ES256")));
+    }
+
+    public JosePasswordProofVerifier(StrictJoseJson strictJson, Sha256Digests digests,
+                                      DpopAlgorithmPolicy algorithms) {
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
         this.digests = Objects.requireNonNull(digests, "digests");
+        this.algorithms = Objects.requireNonNull(algorithms, "algorithms");
     }
 
     @Override
@@ -68,7 +77,7 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
         }
 
         VerifiedDpopProof dpop = request.wire().dpop();
-        ECKey requestKey = verifiedRequestKey(dpop);
+        JWK requestKey = verifiedRequestKey(dpop);
         ECKey responseKey = recipientKey(request.wire().responsePublicJwk());
         Digest32 responseThumbprint = thumbprint(responseKey);
         String installationHash = digests.sha256(
@@ -94,15 +103,15 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
                 responseKey.toPublicJWK().toJSONString());
     }
 
-    private ECKey verifiedRequestKey(VerifiedDpopProof verified) {
+    private JWK verifiedRequestKey(VerifiedDpopProof verified) {
         try {
-            ECKey key = ECKey.parse(verified.publicJwk());
-            if (key.isPrivate() || !Curve.P_256.equals(key.getCurve())
-                    || !thumbprint(key).equals(verified.requestKey().digest())) {
+            JWK key = JWK.parse(verified.publicJwk());
+            algorithms.checkPublicKey(key);
+            if (!thumbprint(key).equals(verified.requestKey().digest())) {
                 throw new InvalidCryptographicInputException();
             }
             return key;
-        } catch (ParseException failure) {
+        } catch (ParseException | JOSEException failure) {
             throw new InvalidCryptographicInputException(failure);
         }
     }
@@ -140,7 +149,7 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
         }
     }
 
-    private Digest32 verifyTypedProof(String compact, ECKey signingKey, String type,
+    private Digest32 verifyTypedProof(String compact, JWK signingKey, String type,
                                       String purpose, PasswordOperationContext operation,
                                       Digest32 requestThumbprint, Digest32 responseThumbprint,
                                       String installationHash, Instant now, Digest32 deviceThumbprint) {
@@ -151,10 +160,13 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
             String expectedKid = deviceThumbprint == null
                     ? requestThumbprint.base64Url() : deviceThumbprint.base64Url();
             if (!JWS_HEADERS.equals(header.toJSONObject().keySet())
-                    || !JWSAlgorithm.ES256.equals(header.getAlgorithm())
+                    || (deviceThumbprint != null && !JWSAlgorithm.ES256.equals(header.getAlgorithm()))
                     || header.getType() == null || !type.equals(header.getType().toString())
                     || !expectedKid.equals(header.getKeyID())
-                    || !proof.verify(new ECDSAVerifier(signingKey))) {
+                    || !proof.verify(deviceThumbprint == null
+                            ? new DefaultJWSVerifierFactory().createJWSVerifier(header,
+                                    algorithms.publicKey(signingKey, header.getAlgorithm()))
+                            : new ECDSAVerifier((ECKey) signingKey))) {
                 throw new InvalidCryptographicInputException();
             }
             JWTClaimsSet claims = proof.getJWTClaimsSet();
@@ -190,7 +202,7 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
                 ? null : operation.claimedBindingId().toString();
     }
 
-    private Digest32 thumbprint(ECKey key) {
+    private Digest32 thumbprint(JWK key) {
         try {
             return Digest32.fromBase64Url(key.computeThumbprint().toString());
         } catch (JOSEException failure) {

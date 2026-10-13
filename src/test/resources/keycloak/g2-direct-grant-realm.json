@@ -18,6 +18,19 @@
         "jwt.credential.kid": "test-client-key",
         "token.endpoint.auth.signing.alg": "ES256"
       }
+    },
+    {
+      "clientId": "bank-auth-secret",
+      "name": "Isolated client_secret_post integration test client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "test-only-client-secret",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false
     }
   ],
   "users": [

@@ -57,7 +57,7 @@ class KeycloakDirectGrantIT {
     void privateKeyJwtDirectGrantReturnsIdTokenOnlyForEnabledUserAndCorrectPassword()
             throws Exception {
         ECKey clientKey = clientKey();
-        var assertions = new PrivateKeyJwtFactory(URI.create(ISSUER
+        var assertions = new PrivateKeyJwtFactory("authentication-service", URI.create(ISSUER
                 + "/protocol/openid-connect/token"), clientKey);
         var success = token("alice", "correct-password-test-only", assertions.issue(Clock.systemUTC().instant()));
         assertThat(success.statusCode()).as("OAuth error code: "
@@ -69,12 +69,12 @@ class KeycloakDirectGrantIT {
 
         SignedJWT signed = SignedJWT.parse(idToken);
         JWK signingKey = signingKey(signed.getHeader().getKeyID());
-        var verifier = new KeycloakIdTokenVerifier(ISSUER, signed.getHeader().getKeyID(),
+        var verifier = new KeycloakIdTokenVerifier("authentication-service", ISSUER, signed.getHeader().getKeyID(),
                 signingKey, new StrictJoseJson(), Clock.systemUTC());
         var identity = verifier.verify(idToken);
         assertThat(identity.issuer()).isEqualTo(ISSUER);
         assertThat(identity.subject()).isNotBlank();
-        assertThatThrownBy(() -> new KeycloakIdTokenVerifier(ISSUER, "wrong-kid",
+        assertThatThrownBy(() -> new KeycloakIdTokenVerifier("authentication-service", ISSUER, "wrong-kid",
                 signingKey, new StrictJoseJson(), Clock.systemUTC()).verify(idToken))
                 .isInstanceOf(KeycloakVerificationUnavailableException.class);
 
@@ -84,13 +84,40 @@ class KeycloakDirectGrantIT {
                 assertions.issue(Clock.systemUTC().instant())).statusCode()).isEqualTo(400);
     }
 
+    @Test
+    void clientSecretDirectGrantReturnsIdentityForConfiguredClientAndRejectsWrongSecret() throws Exception {
+        var success = secretToken("test-only-client-secret");
+        assertThat(success.statusCode()).isEqualTo(200);
+        String idToken = JSON.readTree(success.body()).path("id_token").asText();
+        SignedJWT signed = SignedJWT.parse(idToken);
+        var verifier = new KeycloakIdTokenVerifier("bank-auth-secret", ISSUER, signed.getHeader().getKeyID(),
+                signingKey(signed.getHeader().getKeyID()), new StrictJoseJson(), Clock.systemUTC());
+        assertThat(verifier.verify(idToken).subject()).isNotBlank();
+        assertThat(signed.getJWTClaimsSet().getAudience()).containsExactly("bank-auth-secret");
+        assertThat(signed.getJWTClaimsSet().getStringClaim("azp")).isEqualTo("bank-auth-secret");
+
+        var rejected = secretToken("wrong-test-secret");
+        assertThat(rejected.statusCode()).isIn(400, 401);
+        assertThat(JSON.readTree(rejected.body()).path("error").asText()).isEqualTo("unauthorized_client");
+    }
+
+    private static HttpResponse<String> secretToken(String secret) throws Exception {
+        return token("alice", "correct-password-test-only",
+                Map.of("client_id", "bank-auth-secret", "client_secret", secret));
+    }
+
     private static HttpResponse<String> token(String username, String password,
                                               String assertion) throws Exception {
+        return token(username, password, Map.of("client_id", "authentication-service",
+                "client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                "client_assertion", assertion));
+    }
+
+    private static HttpResponse<String> token(String username, String password,
+                                              Map<String, String> credentials) throws Exception {
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("grant_type", "password");
-        fields.put("client_id", "authentication-service");
-        fields.put("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
-        fields.put("client_assertion", assertion);
+        fields.putAll(credentials);
         fields.put("scope", "openid");
         fields.put("username", username);
         fields.put("password", password);

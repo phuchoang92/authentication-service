@@ -10,6 +10,9 @@ import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakIdTokenVerifie
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakDirectGrantPasswordVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakTokenEndpoints;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.PrivateKeyJwtFactory;
+import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakClientAuthentication;
+import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakClientSecretAuthentication;
+import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakPrivateKeyJwtAuthentication;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalEndpoint;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
@@ -36,10 +39,18 @@ public class KeycloakPrivateClientConfiguration {
     private static final int MAX_TOKEN_RESPONSE_BYTES = 65_536;
 
     @Bean
-    PrivateKeyJwtFactory privateKeyJwtFactory(KeycloakPrivateClientProperties properties) {
+    KeycloakClientAuthentication keycloakClientAuthentication(KeycloakPrivateClientProperties properties) {
+        if (!properties.isClientCredentialConfigured()) {
+            throw new InvalidKeycloakClientConfigurationException();
+        }
         try {
-            return new PrivateKeyJwtFactory(URI.create(properties.tokenAudience()),
-                    ECKey.parse(properties.privateJwk()));
+            return switch (properties.authenticationMethod()) {
+                case CLIENT_SECRET_POST -> new KeycloakClientSecretAuthentication(
+                        properties.clientId(), properties.clientSecret());
+                case PRIVATE_KEY_JWT -> new KeycloakPrivateKeyJwtAuthentication(
+                        new PrivateKeyJwtFactory(properties.clientId(), URI.create(properties.tokenAudience()),
+                                ECKey.parse(properties.privateJwk())), Clock.systemUTC());
+            };
         } catch (IllegalArgumentException | ParseException failure) {
             throw new InvalidKeycloakClientConfigurationException(failure);
         }
@@ -49,7 +60,7 @@ public class KeycloakPrivateClientConfiguration {
     DirectGrantPasswordVerifier directGrantPasswordVerifier(HttpClient workloadHttpClient,
                                                             KeycloakPrivateClientProperties properties,
                                                             KeycloakIdTokenTrustProperties trust,
-                                                            PrivateKeyJwtFactory assertions,
+                                                            KeycloakClientAuthentication authentication,
                                                             StrictJoseJson strictJson) {
         try {
             strictJson.checkJson(trust.publicJwk());
@@ -60,8 +71,8 @@ public class KeycloakPrivateClientConfiguration {
                     Duration.ofMillis(properties.requestTimeoutMs()), MAX_TOKEN_RESPONSE_BYTES,
                     Set.of(tokenEndpoint.route()));
             DirectGrantTokenClient transport = new DirectGrantTokenClient(
-                    new ExternalHttpClient(workloadHttpClient, settings), tokenEndpoint, assertions, clock);
-            KeycloakIdTokenVerifier idTokens = new KeycloakIdTokenVerifier(trust.issuer(),
+                    new ExternalHttpClient(workloadHttpClient, settings), tokenEndpoint, authentication);
+            KeycloakIdTokenVerifier idTokens = new KeycloakIdTokenVerifier(properties.clientId(), trust.issuer(),
                     trust.keyId(), JWK.parse(trust.publicJwk()), strictJson, clock);
             return new KeycloakDirectGrantPasswordVerifier(transport, idTokens);
         } catch (IllegalArgumentException | ParseException failure) {

@@ -21,7 +21,7 @@ import java.util.Objects;
 /** Validates a pinned Keycloak ID token; a private subnet or HTTP 200 is not identity proof. */
 public final class KeycloakIdTokenVerifier {
 
-    private static final String CLIENT_ID = "authentication-service";
+    private final String clientId;
 
     private final String issuer;
     private final String keyId;
@@ -30,8 +30,12 @@ public final class KeycloakIdTokenVerifier {
     private final StrictJoseJson strictJson;
     private final Clock clock;
 
-    public KeycloakIdTokenVerifier(String issuer, String keyId, JWK publicKey,
+    public KeycloakIdTokenVerifier(String clientId, String issuer, String keyId, JWK publicKey,
                                    StrictJoseJson strictJson, Clock clock) {
+        if (clientId == null || clientId.isBlank()) {
+            throw new InvalidKeycloakClientConfigurationException();
+        }
+        this.clientId = clientId;
         this.issuer = Objects.requireNonNull(issuer, "issuer");
         this.keyId = Objects.requireNonNull(keyId, "keyId");
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
@@ -75,8 +79,8 @@ public final class KeycloakIdTokenVerifier {
             if (!issuer.equals(claims.getIssuer())
                     || claims.getSubject() == null || claims.getSubject().isBlank()
                     || claims.getAudience().size() != 1
-                    || !CLIENT_ID.equals(claims.getAudience().getFirst())
-                    || !CLIENT_ID.equals(claims.getStringClaim("azp"))
+                    || !clientId.equals(claims.getAudience().getFirst())
+                    || !clientId.equals(claims.getStringClaim("azp"))
                     || claims.getIssueTime() == null || claims.getExpirationTime() == null
                     || claims.getIssueTime().toInstant().isAfter(now.plusSeconds(5))
                     || claims.getIssueTime().toInstant().isBefore(now.minusSeconds(60))

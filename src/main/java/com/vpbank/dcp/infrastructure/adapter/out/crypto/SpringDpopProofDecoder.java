@@ -1,10 +1,9 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
 import com.nimbusds.jose.JOSEException;
-import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
-import com.nimbusds.jose.jwk.Curve;
-import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.port.out.security.DpopExpectation;
@@ -40,10 +39,17 @@ public final class SpringDpopProofDecoder implements DpopProofDecoder {
 
     private final Sha256Digests digests;
     private final StrictJoseJson strictJson;
+    private final DpopAlgorithmPolicy algorithms;
 
     public SpringDpopProofDecoder(Sha256Digests digests, StrictJoseJson strictJson) {
+        this(digests, strictJson, new DpopAlgorithmPolicy(Set.of("ES256")));
+    }
+
+    public SpringDpopProofDecoder(Sha256Digests digests, StrictJoseJson strictJson,
+                                  DpopAlgorithmPolicy algorithms) {
         this.digests = Objects.requireNonNull(digests, "digests");
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
+        this.algorithms = Objects.requireNonNull(algorithms, "algorithms");
     }
 
     @Override
@@ -55,6 +61,7 @@ public final class SpringDpopProofDecoder implements DpopProofDecoder {
                 throw new InvalidCryptographicInputException();
             }
             strictJson.checkCompactJws(compact);
+            JWK publicKey = checkedPublicKey(SignedJWT.parse(compact).getHeader());
             var context = DPoPProofContext.withDPoPProof(compact)
                     .method(expectation.method()).targetUri(canonicalExternalUri(expectation.externalUri()))
                     .build();
@@ -74,7 +81,6 @@ public final class SpringDpopProofDecoder implements DpopProofDecoder {
                             !time.isAfter(expectation.now().plusSeconds(5))),
                     new JwtClaimValidator<String>("jti", id -> !id.isBlank())));
             Jwt proof = factory.createDecoder(context).decode(compact);
-            ECKey publicKey = checkedPublicKey(JWSHeader.parse(proof.getHeaders()));
             RequestKeyThumbprint requestKey = new RequestKeyThumbprint(
                     Digest32.fromBase64Url(publicKey.computeThumbprint().toString()));
             if (!ALLOWED_CLAIMS.containsAll(proof.getClaims().keySet())
@@ -95,19 +101,16 @@ public final class SpringDpopProofDecoder implements DpopProofDecoder {
         return expectation.exactToken() == null ? null : digests.ofToken(expectation.exactToken()).base64Url();
     }
 
-    private ECKey checkedPublicKey(JWSHeader header) {
-        if (!JWSAlgorithm.ES256.equals(header.getAlgorithm())
-                || header.getType() == null
+    private JWK checkedPublicKey(JWSHeader header) throws JOSEException {
+        if (header.getType() == null
                 || !"dpop+jwt".equals(header.getType().toString())
-                || !(header.getJWK() instanceof ECKey key)
-                || !Curve.P_256.equals(key.getCurve())
-                || key.isPrivate()
                 || header.getJWKURL() != null
                 || header.getX509CertURL() != null
                 || (header.getCriticalParams() != null && !header.getCriticalParams().isEmpty())) {
             throw new InvalidCryptographicInputException();
         }
-        return (ECKey) header.getJWK();
+        algorithms.publicKey(header.getJWK(), header.getAlgorithm());
+        return header.getJWK();
     }
 
     private String canonicalExternalUri(URI uri) {

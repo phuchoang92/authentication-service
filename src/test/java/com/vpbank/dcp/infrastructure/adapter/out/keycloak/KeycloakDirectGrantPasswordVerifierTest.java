@@ -24,6 +24,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -41,10 +43,11 @@ class KeycloakDirectGrantPasswordVerifierTest {
         assertEquals("PasswordVerification[redacted]", credential.toString());
     }
 
-    @Test
-    void otherClientErrorIsNotMistakenForWrongPassword() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"invalid_client", "unauthorized_client"})
+    void otherClientErrorIsNotMistakenForWrongPassword(String error) throws Exception {
         DirectGrantTokenClient client = mock(DirectGrantTokenClient.class);
-        ExternalHttpClient.Response<JsonNode, JsonNode> reply = errorReply("invalid_client");
+        ExternalHttpClient.Response<JsonNode, JsonNode> reply = errorReply(error);
         when(client.requestTokens(any(), any())).thenReturn(reply);
         var verifier = new KeycloakDirectGrantPasswordVerifier(client,
                 mock(KeycloakIdTokenVerifier.class));
@@ -71,7 +74,7 @@ class KeycloakDirectGrantPasswordVerifierTest {
         DirectGrantTokenClient client = mock(DirectGrantTokenClient.class);
         ExternalHttpClient.Response<JsonNode, JsonNode> reply = successReply(idToken.serialize());
         when(client.requestTokens(any(), any())).thenReturn(reply);
-        var idVerifier = new KeycloakIdTokenVerifier("https://kc.bank.test/realms/mobile-banking",
+        var idVerifier = new KeycloakIdTokenVerifier("authentication-service", "https://kc.bank.test/realms/mobile-banking",
                 "kc-id-v1", signingKey.toPublicJWK(), new StrictJoseJson(),
                 Clock.fixed(now, ZoneOffset.UTC));
         var gateway = new KeycloakDirectGrantPasswordVerifier(client, idVerifier);

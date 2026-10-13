@@ -48,6 +48,21 @@ class KeycloakIdTokenVerifierTest {
     }
 
     @Test
+    void configuredClientIdMustMatchBothAudienceAndAuthorizedParty() throws Exception {
+        var verifier = new KeycloakIdTokenVerifier("bank-auth-secret",
+                "https://kc.bank.test/realms/mobile-banking", "kc-signing", signingKey.toPublicJWK(),
+                new StrictJoseJson(), Clock.fixed(NOW, ZoneOffset.UTC));
+        assertEquals("customer-subject", verifier.verify(token(signingKey, "bank-auth-secret",
+                "https://kc.bank.test/realms/mobile-banking")).subject());
+        assertThrows(KeycloakVerificationUnavailableException.class,
+                () -> verifier.verify(token(signingKey, "authentication-service",
+                        "https://kc.bank.test/realms/mobile-banking")));
+        assertThrows(KeycloakVerificationUnavailableException.class,
+                () -> verifier.verify(token(signingKey, "bank-auth-secret",
+                        "https://kc.bank.test/realms/mobile-banking", "other-client")));
+    }
+
+    @Test
     void missingAuthorizedPartyFailsClosed() throws Exception {
         JWTClaimsSet claims = new JWTClaimsSet.Builder()
                 .issuer("https://kc.bank.test/realms/mobile-banking")
@@ -65,17 +80,21 @@ class KeycloakIdTokenVerifierTest {
     }
 
     private KeycloakIdTokenVerifier verifier(ECKey key) {
-        return new KeycloakIdTokenVerifier("https://kc.bank.test/realms/mobile-banking",
+        return new KeycloakIdTokenVerifier("authentication-service", "https://kc.bank.test/realms/mobile-banking",
                 "kc-signing", key.toPublicJWK(), new StrictJoseJson(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private String token(ECKey key, String audience, String issuer) throws Exception {
+        return token(key, audience, issuer, audience);
+    }
+
+    private String token(ECKey key, String audience, String issuer, String authorizedParty) throws Exception {
         JWTClaimsSet claims = new JWTClaimsSet.Builder()
                 .issuer(issuer)
                 .subject("customer-subject")
                 .audience(audience)
-                .claim("azp", audience)
+                .claim("azp", authorizedParty)
                 .issueTime(Date.from(NOW))
                 .expirationTime(Date.from(NOW.plusSeconds(60)))
                 .build();

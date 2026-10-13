@@ -1,8 +1,8 @@
 package com.vpbank.dcp.core.application.password;
 
-import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginCommand;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
+import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
 
 import java.util.Objects;
@@ -17,8 +17,8 @@ public final class PasswordLoginService implements PasswordLoginUseCase {
     private final PasswordAvailabilityPolicy availability;
 
     public PasswordLoginService(PasswordLoginRouteService routes,
-                                         ActivatePasswordSessionService sessions,
-                                         PasswordAvailabilityPolicy availability) {
+                                ActivatePasswordSessionService sessions,
+                                PasswordAvailabilityPolicy availability) {
         this.routes = Objects.requireNonNull(routes);
         this.sessions = Objects.requireNonNull(sessions);
         this.availability = Objects.requireNonNull(availability);

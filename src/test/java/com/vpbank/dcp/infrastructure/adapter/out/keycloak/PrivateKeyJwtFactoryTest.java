@@ -22,7 +22,7 @@ class PrivateKeyJwtFactoryTest {
     @Test
     void everyMutationReceivesItsOwnShortLivedAssertion() throws Exception {
         var key = new ECKeyGenerator(Curve.P_256).keyID("auth-workload-1").generate();
-        var factory = new PrivateKeyJwtFactory(audience, key);
+        var factory = new PrivateKeyJwtFactory("authentication-service", audience, key);
         SignedJWT first = SignedJWT.parse(factory.issue(now));
         SignedJWT second = SignedJWT.parse(factory.issue(now));
 
@@ -38,7 +38,7 @@ class PrivateKeyJwtFactoryTest {
     void rejectNonTlsAudience() throws Exception {
         var key = new ECKeyGenerator(Curve.P_256).keyID("auth-workload-1").generate();
         assertThrows(InvalidKeycloakClientConfigurationException.class,
-                () -> new PrivateKeyJwtFactory(URI.create("http://keycloak.internal/realms/"
+                () -> new PrivateKeyJwtFactory("authentication-service", URI.create("http://keycloak.internal/realms/"
                         + "mobile-banking/protocol/openid-connect/token"), key));
     }
 }

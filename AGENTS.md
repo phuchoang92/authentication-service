@@ -6,6 +6,18 @@ This is the new `authentication-service` source tree, renamed from `authenticati
 
 Core is JDK-only and owns ports. Infrastructure owns Spring, HTTP, JPA, Redis and JOSE. Apply RK01–RK12 to Redis key construction and authority operations. Report implemented and actually executed tests separately.
 
+## Keycloak client authentication
+
+The user-approved client configuration supports `CLIENT_SECRET_POST` (`client_id` and
+`client_secret` in the HTTPS form) and `PRIVATE_KEY_JWT` (fresh ES256 client assertion).
+This overrides older contracts that fixed the client to `authentication-service` and
+required only `private_key_jwt`. Preserve that client ID and authentication method as
+configuration defaults. Validate the selected credential at startup; never fall back to
+another method on missing credentials or a provider rejection. The configured client ID
+must also bind assertion issuer/subject and the pinned ID-token audience/authorized party.
+Keep secrets out of output, use the existing bounded mTLS transport, and preserve ID-token
+verification, failure mapping and the single-dispatch/no-retry behavior.
+
 ## Persistence conventions
 
 The approved persistence refactor uses core `...Repository` ports and `Jpa...Adapter`
