@@ -48,6 +48,13 @@ The one-request password route exists at BFF `POST /api/v1/authentications/passw
 
 This is **not** an accepted end-to-end login service. Guarded result retrieval after a lost reply, lock/logout/rotation, Customer event/guard application, full App→BFF→Auth→Keycloak→ACTIVE integration, and the two-second Customer revocation guarantee remain incomplete. A crash after Keycloak acceptance but before the verified identity is persisted still leaves an uncertain operation; the original cannot redispatch the password. Production activation remains fail-closed, and this artifact must not replace the running service. Password no longer requires a custom Keycloak SPI; biometric still does.
 
+The V10 trusted-device schema is staged only on fresh isolated databases. The new
+`JpaDeviceRevocationAdapter` records the device status transition, primary-pointer clear and
+security audit atomically in MySQL; its port result is explicitly **not** public revoke success.
+No online Redis denial/guard, Keycloak cleanup, MFA trust completion, biometric flow or runtime
+password routing has been switched to these tables. The existing password path still reads the
+pre-V10 device tables and must not be interpreted as validating the new trusted-device design.
+
 ## Password DPoP configuration
 
 `auth.dpop.enabled` defaults to `true`; `auth.dpop.allowed-algorithms` defaults to `[ES256]`.
