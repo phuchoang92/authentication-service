@@ -1,17 +1,30 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.application.password.*;
+import com.vpbank.dcp.core.application.password.CheckCustomerLoginEligibilityService;
+import com.vpbank.dcp.core.application.password.CheckPasswordLoginEligibilityService;
+import com.vpbank.dcp.core.application.password.ConfirmPasswordLoginOwnerService;
+import com.vpbank.dcp.core.application.password.PasswordAvailabilityPolicy;
+import com.vpbank.dcp.core.application.password.PasswordLoginService;
+import com.vpbank.dcp.core.application.password.ReservePasswordLoginService;
+import com.vpbank.dcp.core.application.password.ResolveTrustedDeviceRouteService;
+import com.vpbank.dcp.core.application.password.VerifyPasswordLoginIdentityService;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRouting;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.core.port.in.session.ActivateSessionUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
 import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
-import com.vpbank.dcp.core.port.out.password.*;
-import com.vpbank.dcp.core.port.out.session.*;
+import com.vpbank.dcp.core.port.out.password.PasswordCommandHasher;
+import com.vpbank.dcp.core.port.out.password.PasswordDeviceKeyRepository;
+import com.vpbank.dcp.core.port.out.password.PasswordDeviceRouteRepository;
+import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
+import com.vpbank.dcp.core.port.out.password.PasswordProofReplay;
+import com.vpbank.dcp.core.port.out.password.PasswordProofVerifier;
+import com.vpbank.dcp.core.port.out.session.SessionRepository;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginRequestMapper;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.*;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.LengthPrefixedSigningInputEncoder;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.PasswordCommandHmac;
 import com.vpbank.dcp.infrastructure.persistence.adapter.JpaPasswordSessionAdapter;
 import com.vpbank.dcp.infrastructure.persistence.repository.PasswordSessionPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.SessionPersistenceRepository;
@@ -123,7 +136,8 @@ public class PasswordFlowConfiguration {
 
     @Bean
     SessionRepository passwordSessionRepository(PasswordSessionPersistenceRepository repository,
-            SessionPersistenceRepository sessions, TransactionTemplate transactions, Clock clock, CustomerFreshnessPolicy freshness,
+            SessionPersistenceRepository sessions, TransactionTemplate transactions, Clock clock,
+            CustomerFreshnessPolicy freshness,
             SessionDeliveryEscrowCodec escrow) {
         return new JpaPasswordSessionAdapter(repository, sessions, transactions, clock, freshness, escrow);
     }

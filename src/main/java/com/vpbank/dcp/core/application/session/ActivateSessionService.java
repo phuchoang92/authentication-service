@@ -10,12 +10,16 @@ import com.vpbank.dcp.core.port.out.session.SessionRepository;
 import com.vpbank.dcp.core.port.out.session.PrepareSessionResult;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
+import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Publishes one durable candidate only after live guarded Redis apply. */
+/**
+ * Publishes one durable candidate only after live guarded Redis apply. Recovery, preparation,
+ * publication, completion and final delivery checks stay in order within this single use case.
+ */
 public final class ActivateSessionService implements ActivateSessionUseCase {
     private final SessionRepository store;
     private final SessionCryptography cryptography;
@@ -38,7 +42,7 @@ public final class ActivateSessionService implements ActivateSessionUseCase {
         UUID subjectId = command.subjectId();
         PreparedSession candidate = store.prepared(operationId).orElse(null);
         if (candidate == null) {
-            var facts = store.currentFacts(operationId, subjectId).orElse(null);
+            SessionActivationFacts facts = store.currentFacts(operationId, subjectId).orElse(null);
             if (facts == null || !facts.subjectId().equals(subjectId)) {
                 return new SessionActivationResult.Rejected();
             }

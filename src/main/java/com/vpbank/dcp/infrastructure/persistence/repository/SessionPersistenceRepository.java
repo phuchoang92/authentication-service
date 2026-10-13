@@ -5,13 +5,13 @@ import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.infrastructure.persistence.projection.PreparedSessionView;
 import jakarta.persistence.EntityManager;
+import java.sql.Timestamp;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.hibernate.query.NativeQuery;
 
 /** Intent and encrypted delivery SQL; the calling adapter owns their transaction. */
 public final class SessionPersistenceRepository {
@@ -48,8 +48,8 @@ public final class SessionPersistenceRepository {
                 .setParameter("credentialVersion", facts.credentialSecurityVersion())
                 .setParameter("deviceVersion", facts.deviceSecurityVersion())
                 .setParameter("candidateDigest", candidate.candidateDigest().bytes())
-                .setParameter("idleExpiry", local(candidate.deadlines().idleExpiresAt()))
-                .setParameter("absoluteExpiry", local(candidate.deadlines().absoluteExpiresAt()))
+                .setParameter("idleExpiry", Timestamp.from(candidate.deadlines().idleExpiresAt()))
+                .setParameter("absoluteExpiry", Timestamp.from(candidate.deadlines().absoluteExpiresAt()))
                 .executeUpdate();
         exactlyOne(intent);
     }
@@ -63,13 +63,32 @@ public final class SessionPersistenceRepository {
                 .setParameter("operationId", facts.operationId().toString())
                 .setParameter("protectedResult", protectedResult)
                 .setParameter("resultDigest", resultDigest.bytes())
-                .setParameter("deliveryDeadline", local(candidate.deliveryDeadline()))
+                .setParameter("deliveryDeadline", Timestamp.from(candidate.deliveryDeadline()))
                 .executeUpdate();
         exactlyOne(escrow);
     }
 
     public Optional<PreparedSessionView> prepared(UUID operationId) {
         List<?> rows = sql.createNativeQuery(SessionSql.PREPARED)
+                .unwrap(NativeQuery.class)
+                .addScalar("BIN_TO_UUID(i.id)", String.class)
+                .addScalar("BIN_TO_UUID(i.session_id)", String.class)
+                .addScalar("BIN_TO_UUID(i.generation)", String.class)
+                .addScalar("lookup_key_version", String.class)
+                .addScalar("token_lookup_digest", byte[].class)
+                .addScalar("candidate_digest", byte[].class)
+                // Explicit Instant extraction keeps JDBC UTC independent of the JVM zone.
+                .addScalar("idle_expires_at", Instant.class)
+                .addScalar("absolute_expires_at", Instant.class)
+                .addScalar("delivery_deadline", Instant.class)
+                .addScalar("protected_result", byte[].class)
+                .addScalar("result_digest", byte[].class)
+                .addScalar("customer_security_version", Long.class)
+                .addScalar("credential_security_version", Long.class)
+                .addScalar("device_security_version", Long.class)
+                .addScalar("request_jkt", byte[].class)
+                .addScalar("BIN_TO_UUID(i.binding_id)", String.class)
+                .addScalar("BIN_TO_UUID(i.subject_id)", String.class)
                 .setParameter("operationId", operationId.toString()).getResultList();
         if (rows.isEmpty()) {
             return Optional.empty();
@@ -80,7 +99,7 @@ public final class SessionPersistenceRepository {
         Object[] row = (Object[]) rows.getFirst();
         return Optional.of(new PreparedSessionView(uuid(row[0]), uuid(row[1]),
                 uuid(row[2]), (String) row[3], (byte[]) row[4], (byte[]) row[5],
-                utc(row[6]), utc(row[7]), utc(row[8]), (byte[]) row[9],
+                (Instant) row[6], (Instant) row[7], (Instant) row[8], (byte[]) row[9],
                 (byte[]) row[10], number(row[11]), number(row[12]), number(row[13]),
                 (byte[]) row[14], uuid(row[15]), uuid(row[16])));
     }
@@ -106,6 +125,4 @@ public final class SessionPersistenceRepository {
 
     private UUID uuid(Object value) { return UUID.fromString((String) value); }
     private long number(Object value) { return ((Number) value).longValue(); }
-    private Instant utc(Object value) { return ((LocalDateTime) value).toInstant(ZoneOffset.UTC); }
-    private LocalDateTime local(Instant value) { return LocalDateTime.ofInstant(value, ZoneOffset.UTC); }
 }

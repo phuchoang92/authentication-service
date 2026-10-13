@@ -4,24 +4,17 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.JWK;
 import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.DirectGrantTokenClient;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.InvalidKeycloakClientConfigurationException;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakIdTokenVerifier;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakDirectGrantPasswordVerifier;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakTokenEndpoints;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.PrivateKeyJwtFactory;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakClientAuthentication;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakClientSecretAuthentication;
-import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakPrivateKeyJwtAuthentication;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalEndpoint;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
+import com.vpbank.dcp.infrastructure.adapter.out.keycloak.*;
 import com.vpbank.dcp.infrastructure.config.properties.KeycloakIdTokenTrustProperties;
 import com.vpbank.dcp.infrastructure.config.properties.KeycloakPrivateClientProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import tools.jackson.databind.JsonNode;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -29,7 +22,6 @@ import java.text.ParseException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Set;
-import tools.jackson.databind.JsonNode;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication

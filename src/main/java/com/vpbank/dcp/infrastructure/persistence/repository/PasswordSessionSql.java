@@ -44,7 +44,7 @@ final class PasswordSessionSql {
                            WHERE cr.binding_id = b.id AND cr.subject_id = s.id
                              AND cr.app_id = o.app_id AND cr.type = 'BIOMETRIC'
                              AND cr.observed_status = 'ACTIVE'
-                             AND cr.expires_at > UTC_TIMESTAMP(6))
+                             AND cr.expires_at > UTC_TIMESTAMP(6)) AS biometric_capable
               FROM auth_operation o
               JOIN auth_login_journey j ON j.id = o.journey_id
               JOIN auth_customer s ON s.id = o.subject_id

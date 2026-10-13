@@ -238,6 +238,7 @@ class JpaPasswordSessionAdapterIT {
     void currentFactsExpireAtTheSameExactBoundaryAsTheDomainPolicy() throws Exception {
         var candidate = candidate();
         var facts = candidate.facts();
+        assertThat(facts.customerStatusValidUntil()).isEqualTo(FRESHNESS.validUntil(NOW));
         var before = at(facts.customerStatusValidUntil().minusNanos(1));
         var expired = at(facts.customerStatusValidUntil());
         assertThat(before.currentFacts(facts.operationId(), facts.subjectId())).contains(facts);
@@ -331,8 +332,8 @@ class JpaPasswordSessionAdapterIT {
     }
 
     /**
-     * Activation writes deadlines through {@code LocalDateTime.ofInstant(instant, UTC)}. Same
-     * expectation as above, for the other binding strategy used in this adapter.
+     * Activation binds instant-backed timestamps through the configured JDBC UTC calendar;
+     * the stored wall clock must match under both the UTC and non-UTC failsafe executions.
      */
     @Test
     void activationDeadlinesAreStoredAsUtcWallClock() throws Exception {
@@ -341,13 +342,13 @@ class JpaPasswordSessionAdapterIT {
         assertThat(sessions.prepare(candidate)).isInstanceOf(PrepareSessionResult.Prepared.class);
 
         assertThat(storedWallClock("auth_authority_intent", "idle_expires_at", "id", candidate.intentId()))
-                .as("auth_authority_intent.idle_expires_at (LocalDateTime binding)")
+                .as("auth_authority_intent.idle_expires_at (Timestamp.from binding)")
                 .isEqualTo(utc(NOW.plusSeconds(120)));
         assertThat(storedWallClock("auth_authority_intent", "absolute_expires_at", "id", candidate.intentId()))
-                .as("auth_authority_intent.absolute_expires_at (LocalDateTime binding)")
+                .as("auth_authority_intent.absolute_expires_at (Timestamp.from binding)")
                 .isEqualTo(utc(NOW.plusSeconds(600)));
         assertThat(storedWallClock("auth_result_escrow", "delivery_deadline", "operation_id", operationId))
-                .as("auth_result_escrow.delivery_deadline (LocalDateTime binding)")
+                .as("auth_result_escrow.delivery_deadline (Timestamp.from binding)")
                 .isEqualTo(utc(NOW.plusSeconds(120)));
     }
 

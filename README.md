@@ -142,7 +142,7 @@ eligibility, locks and journey/operation transitions) and `SessionPersistenceRep
 Journey finalization, intent and escrow preparation roll back together; intent, journey
 and operation completion also roll back together. Redis calls remain outside SQL locks.
 Retries reuse the exact stored candidate, envelope, receipt and nonce, then check live
-authority before delivery. SQL statements, migration checksums, Redis schema/key bytes,
+authority before delivery. SQL guards/codes, migration checksums, Redis schema/key bytes,
 escrow JSON and the frozen `PASSWORD_ACTIVE_V1` candidate digest input are unchanged.
 
 `SessionConfiguration` assembles the shared crypto, Redis, delivery and activation use case;
@@ -209,11 +209,14 @@ completion and rollback after a partial multi-table transition. Freshness bounda
 escrow byte/digest regression tests run with the unit suite. These test descriptions are
 coverage scope; only an actually completed build establishes verification.
 
-The new session regressions exposed an existing timezone limitation in the unchanged
-`LocalDateTime` native-SQL binding: with the JVM in UTC+7, a UTC deadline can be stored
-seven hours earlier. Maven test JVMs explicitly use UTC for reproducible storage checks.
-This refactor does not repair that runtime binding or claim support for a non-UTC JVM;
-that issue requires a separate change and validation.
+Session intent and escrow deadlines now bind `Timestamp.from(Instant)` through the
+configured Hibernate JDBC UTC calendar, matching password operation and Customer writes.
+This fixes the previous `LocalDateTime` binding that stored deadlines seven hours early
+under a UTC+7 JVM. Explicit `Instant` result mappings also preserve restored deadlines
+and the source Customer freshness timestamp in either JVM zone. The facts query adds
+only a projection alias; SQL guards/codes, deadline policy and signing bytes stay unchanged.
+Maven runs the persistence integration tests under both UTC and `Asia/Ho_Chi_Minh`,
+including exact stored deadline values and activation/recovery at those boundaries.
 
 ## Build and test
 
@@ -258,6 +261,17 @@ behavior. The actual Spring Security chain proves disabled verification still re
 workload TLS and valid key metadata, while body-proof signatures remain enforced. These
 counts cover the current complete worktree and do not establish App/BFF interoperability
 with the newly selectable algorithms or deployment acceptance.
+
+The shared session activation extraction passed `clean verify` on 2026-10-13 with
+254 unit/architecture tests, 58 UTC integration tests and 45 repeated persistence tests
+under `Asia/Ho_Chi_Minh`, zero failures/errors/skips. Verification used an isolated copy
+whose complete source/build inputs matched the current tree, avoiding concurrent writes
+to the main build output. Coverage includes exact candidate/envelope/receipt/nonce retry,
+SQL lock revalidation and multi-table rollback, Redis schema/assurance, response mapping,
+and timezone-independent deadlines and Customer freshness. The password-source activation
+integration starts from confirmed test storage; it does not establish a deployed App/BFF
+or partner flow. Totals include the complete worktree's independent changes. Reports are
+saved under `target/session-refactor-verification/`; historical results above stay intact.
 
 On the current Mac, the verified command is:
 

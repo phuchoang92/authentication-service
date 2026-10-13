@@ -4,6 +4,7 @@ import com.vpbank.dcp.core.port.out.session.SessionAuthority;
 import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
+import com.vpbank.dcp.core.domain.session.SessionAssurance;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.NonceKeys;
@@ -152,7 +153,7 @@ public final class RedisSessionAuthority implements SessionAuthority {
         fields.put("idleExpiresAtMs", Long.toString(session.deadlines().idleExpiresAt().toEpochMilli()));
         fields.put("absoluteExpiresAtMs", Long.toString(session.deadlines().absoluteExpiresAt().toEpochMilli()));
         fields.put("nonceFamilyId", session.sessionId().toString());
-        var assurance = facts.assurance();
+        SessionAssurance assurance = facts.assurance();
         fields.put("assurance", "{\"biometricEnforcement\":\"" + assurance.biometricEnforcement().code()
                 + "\",\"devicePossession\":\"" + assurance.devicePossession().code()
                 + "\",\"platformEvidence\":\"" + assurance.platformEvidence().code() + "\"}");

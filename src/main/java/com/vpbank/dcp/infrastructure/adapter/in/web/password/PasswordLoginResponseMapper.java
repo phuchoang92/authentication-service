@@ -2,6 +2,7 @@ package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
+import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginProcessingResponse;
@@ -49,7 +50,7 @@ public final class PasswordLoginResponseMapper {
     }
 
     private static @NonNull PasswordLoginResponse getLoginResponse(PreparedSession session, long seconds) {
-        var facts = session.facts();
+        SessionActivationFacts facts = session.facts();
         return new PasswordLoginActiveResponse("ACTIVE",
                 session.tokenEnvelope(), session.receipt(), Math.min(seconds, 3600), "banking",
                 new PasswordLoginActiveResponse.Session(session.deadlines().idleExpiresAt(),
