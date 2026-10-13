@@ -4,8 +4,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Redis is the only online authority; absence or uncertainty never means allow. */
-public interface PasswordSessionAuthority {
+public interface SessionAuthority {
     Optional<UUID> currentGeneration();
-    SessionApplyResult apply(PreparedPasswordSession session);
-    boolean deliverable(PreparedPasswordSession session);
+    SessionApplyResult apply(PreparedSession session);
+    boolean deliverable(PreparedSession session);
 }

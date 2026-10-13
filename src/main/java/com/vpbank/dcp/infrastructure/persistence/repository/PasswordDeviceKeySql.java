@@ -3,7 +3,7 @@ package com.vpbank.dcp.infrastructure.persistence.repository;
 final class PasswordDeviceKeySql {
 
     static final String FIND_ACTIVE = """
-            SELECT k.public_key_spki, k.jkt
+            SELECT k.public_key_spki AS public_key_spki, k.jkt AS jkt
               FROM auth_device_binding b
               JOIN auth_device_key k ON k.binding_id = b.id
                AND k.subject_id = b.subject_id AND k.app_id = b.app_id

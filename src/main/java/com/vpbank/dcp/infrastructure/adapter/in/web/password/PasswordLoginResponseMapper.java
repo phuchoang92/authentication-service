@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
-import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
+import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginProcessingResponse;
@@ -24,7 +24,7 @@ public final class PasswordLoginResponseMapper {
     }
 
     public ResponseEntity<PasswordLoginResponse> map(UUID operationId, PasswordLoginResult result) {
-        if (result instanceof PasswordLoginResult.Active(PreparedPasswordSession session)) {
+        if (result instanceof PasswordLoginResult.Active(PreparedSession session)) {
             if (!clock.instant().isBefore(session.deadlines().idleExpiresAt())) {
                 return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
             }
@@ -48,7 +48,7 @@ public final class PasswordLoginResponseMapper {
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
     }
 
-    private static @NonNull PasswordLoginResponse getLoginResponse(PreparedPasswordSession session, long seconds) {
+    private static @NonNull PasswordLoginResponse getLoginResponse(PreparedSession session, long seconds) {
         var facts = session.facts();
         return new PasswordLoginActiveResponse("ACTIVE",
                 session.tokenEnvelope(), session.receipt(), Math.min(seconds, 3600), "banking",
@@ -56,7 +56,8 @@ public final class PasswordLoginResponseMapper {
                         session.deadlines().absoluteExpiresAt()),
                 new PasswordLoginActiveResponse.Security(true, facts.bindingId(),
                         facts.biometricLoginEnabled(), new PasswordLoginActiveResponse.Assurance(
-                        "MFA_KEY_POSSESSION", facts.platformAssurance(), "NOT_APPLICABLE")));
+                        facts.assurance().devicePossession().code(), facts.assurance().platformEvidence().code(),
+                        facts.assurance().biometricEnforcement().code())));
     }
 
     private ResponseEntity<PasswordLoginResponse> problem(HttpStatus status, String code) {

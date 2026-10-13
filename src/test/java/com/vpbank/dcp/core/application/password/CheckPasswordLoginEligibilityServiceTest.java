@@ -17,12 +17,12 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
-class PasswordLoginRouteServiceTest {
+class CheckPasswordLoginEligibilityServiceTest {
 
     private final VerifyPasswordLoginIdentityService credentials = mock(VerifyPasswordLoginIdentityService.class);
     private final ResolveTrustedDeviceRouteService devices = mock(ResolveTrustedDeviceRouteService.class);
     private final PasswordOperationRepository operations = mock(PasswordOperationRepository.class);
-    private final PasswordLoginRouteService service = new PasswordLoginRouteService(
+    private final CheckPasswordLoginEligibilityService service = new CheckPasswordLoginEligibilityService(
             credentials, devices, operations);
     private final PasswordLoginCommand command = mock(PasswordLoginCommand.class);
 
@@ -44,7 +44,7 @@ class PasswordLoginRouteServiceTest {
         when(operations.recordMfaUnavailable(operationId, TrustedDeviceRoute.NEW_DEVICE))
                 .thenReturn(PasswordCredentialRecordResult.RECORDED);
 
-        assertThat(service.route(command)).isInstanceOf(PasswordLoginRouteResult.MfaUnavailable.class);
+        assertThat(service.checkEligibility(command)).isInstanceOf(PasswordLoginEligibilityResult.MfaUnavailable.class);
         verify(operations).recordMfaUnavailable(operationId, TrustedDeviceRoute.NEW_DEVICE);
     }
 
@@ -52,7 +52,7 @@ class PasswordLoginRouteServiceTest {
     void alreadyFrozenMfaRouteNeverChecksCredentialsAgain() {
         when(credentials.verifyIdentity(command)).thenReturn(new PasswordLoginIdentityResult.MfaUnavailable());
 
-        assertThat(service.route(command)).isInstanceOf(PasswordLoginRouteResult.MfaUnavailable.class);
+        assertThat(service.checkEligibility(command)).isInstanceOf(PasswordLoginEligibilityResult.MfaUnavailable.class);
         verifyNoInteractions(devices, operations);
     }
 }

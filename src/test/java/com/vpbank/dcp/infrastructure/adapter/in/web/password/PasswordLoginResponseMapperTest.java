@@ -5,9 +5,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionFacts;
-import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
+import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
+import com.vpbank.dcp.core.domain.session.SessionAssurance;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginProcessingResponse;
@@ -98,12 +99,13 @@ class PasswordLoginResponseMapperTest {
         assertThat(response.getHeaders().getFirst("DPoP-Nonce")).isNull();
     }
 
-    private PreparedPasswordSession session(Instant idle, Instant absolute) {
-        var facts = mock(PasswordSessionFacts.class);
+    private PreparedSession session(Instant idle, Instant absolute) {
+        var facts = mock(SessionActivationFacts.class);
         when(facts.bindingId()).thenReturn(BINDING);
         when(facts.biometricLoginEnabled()).thenReturn(true);
-        when(facts.platformAssurance()).thenReturn("NONE");
-        var session = mock(PreparedPasswordSession.class);
+        when(facts.assurance()).thenReturn(new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
+                SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE));
+        var session = mock(PreparedSession.class);
         when(session.facts()).thenReturn(facts);
         when(session.deadlines()).thenReturn(new SessionDeadlines(idle, absolute));
         when(session.tokenEnvelope()).thenReturn("encrypted-envelope-test-only");

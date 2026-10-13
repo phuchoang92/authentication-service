@@ -18,10 +18,10 @@ public final class ReservePasswordLoginService {
     private final PasswordOperationRepository operations;
 
     public ReservePasswordLoginService(PasswordDeviceKeyRepository deviceKeys,
-                                    PasswordProofVerifier proofVerifier,
-                                    PasswordProofReplay proofReplay,
-                                    PasswordCommandHasher commandHasher,
-                                    PasswordOperationRepository operations) {
+                                       PasswordProofVerifier proofVerifier,
+                                       PasswordProofReplay proofReplay,
+                                       PasswordCommandHasher commandHasher,
+                                       PasswordOperationRepository operations) {
         this.deviceKeys = Objects.requireNonNull(deviceKeys, "deviceKeys");
         this.proofVerifier = Objects.requireNonNull(proofVerifier, "proofVerifier");
         this.proofReplay = Objects.requireNonNull(proofReplay, "proofReplay");
@@ -61,19 +61,22 @@ public final class ReservePasswordLoginService {
     }
 
     private PasswordLoginReservationResult result(PasswordLoginCommand command,
-                                           PasswordSemanticCommand semantic,
-                                           PasswordReservationResult reservation) {
-        if (reservation instanceof PasswordReservationResult.Created created) {
+                                                  PasswordSemanticCommand semantic,
+                                                  PasswordReservationResult reservation) {
+        if (reservation instanceof PasswordReservationResult.Created(java.util.UUID journeyId)) {
             return new PasswordLoginReservationResult.Reserved(command.operation().operationId(),
-                    created.journeyId());
+                    journeyId);
         }
-        if (reservation instanceof PasswordReservationResult.Existing existing) {
-            boolean sameOperation = command.operation().operationId().equals(existing.operationId());
-            boolean sameCommand = MessageDigest.isEqual(existing.commandDigest().bytes(),
-                    commandHasher.digest(semantic, existing.commandKeyId()).bytes());
+        if (reservation instanceof PasswordReservationResult.Existing(
+                java.util.UUID operationId, java.util.UUID journeyId,
+                com.vpbank.dcp.core.domain.security.Digest32 commandDigest, String commandKeyId
+        )) {
+            boolean sameOperation = command.operation().operationId().equals(operationId);
+            boolean sameCommand = MessageDigest.isEqual(commandDigest.bytes(),
+                    commandHasher.digest(semantic, commandKeyId).bytes());
             if (sameOperation && sameCommand) {
-                return new PasswordLoginReservationResult.Existing(existing.operationId(),
-                        existing.journeyId());
+                return new PasswordLoginReservationResult.Existing(operationId,
+                        journeyId);
             }
         }
         return new PasswordLoginReservationResult.Conflict();

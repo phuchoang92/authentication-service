@@ -2,8 +2,8 @@ package com.vpbank.dcp.infrastructure.config;
 
 import com.vpbank.dcp.core.application.password.*;
 import com.vpbank.dcp.core.domain.device.TrustedDeviceRouting;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
+import com.vpbank.dcp.core.port.in.session.ActivateSessionUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
 import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
@@ -14,11 +14,9 @@ import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginRespon
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.*;
 import com.vpbank.dcp.infrastructure.persistence.adapter.JpaPasswordSessionAdapter;
 import com.vpbank.dcp.infrastructure.persistence.repository.PasswordSessionPersistenceRepository;
-import com.vpbank.dcp.infrastructure.persistence.codec.PasswordDeliveryEscrowCodec;
+import com.vpbank.dcp.infrastructure.persistence.repository.SessionPersistenceRepository;
+import com.vpbank.dcp.infrastructure.persistence.codec.SessionDeliveryEscrowCodec;
 import com.vpbank.dcp.core.domain.customer.CustomerFreshnessPolicy;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisPasswordSessionAuthority;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.config.properties.NativeSessionProperties;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
 import jakarta.persistence.EntityManager;
@@ -28,11 +26,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Base64;
@@ -43,13 +39,8 @@ import java.util.Map;
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication
-@EnableConfigurationProperties({PasswordFlowProperties.class, NativeSessionProperties.class})
+@EnableConfigurationProperties(PasswordFlowProperties.class)
 public class PasswordFlowConfiguration {
-
-    @Bean
-    Clock authenticationClock() {
-        return Clock.systemUTC();
-    }
 
     @Bean
     PasswordLoginRequestMapper passwordLoginRequestMapper(PasswordFlowProperties policy,
@@ -113,39 +104,11 @@ public class PasswordFlowConfiguration {
     }
 
     @Bean
-    PasswordLoginRouteService passwordRoutes(VerifyPasswordLoginIdentityService credentials,
+    CheckPasswordLoginEligibilityService passwordLoginEligibility(VerifyPasswordLoginIdentityService credentials,
                                              PasswordDeviceRouteRepository deviceRoutes,
                                              PasswordOperationRepository operations) {
-        return new PasswordLoginRouteService(credentials,
+        return new CheckPasswordLoginEligibilityService(credentials,
                 new ResolveTrustedDeviceRouteService(deviceRoutes, new TrustedDeviceRouting()), operations);
-    }
-
-    @Bean
-    LookupKeyVersion bankingLookupKeyVersion(NativeSessionProperties properties) {
-        return new LookupKeyVersion(properties.lookupKeyVersion());
-    }
-
-    @Bean
-    TokenLookupHasher bankingTokenLookupHasher(LookupKeyVersion version,
-                                               NativeSessionProperties properties) {
-        return new TokenLookupHasher(version, secret(properties.lookupHmacBase64()));
-    }
-
-    @Bean
-    SecureRandom authenticationRandom() {
-        return new SecureRandom();
-    }
-
-    @Bean
-    PasswordSessionCryptography passwordSessionCryptography(NativeSessionProperties properties,
-                                                            BankingTokenEnvelopeIssuer envelopes,
-                                                            LengthPrefixedSigningInputEncoder encoding,
-                                                            Sha256Digests digests,
-                                                            LookupKeyVersion version,
-                                                            TokenLookupHasher lookup,
-                                                            SecureRandom random) {
-        return new PasswordSessionCryptoAdapter(new BankingTokenIssuer(version, random),
-                lookup, envelopes, version, encoding, digests, random);
     }
 
     @Bean
@@ -154,44 +117,22 @@ public class PasswordFlowConfiguration {
     }
 
     @Bean
-    PasswordDeliveryEscrowCodec passwordDeliveryEscrowCodec(JsonMapper json) {
-        return new PasswordDeliveryEscrowCodec(json);
-    }
-
-    @Bean
     CustomerFreshnessPolicy customerFreshnessPolicy(PasswordFlowProperties properties) {
         return new CustomerFreshnessPolicy(Duration.ofMillis(properties.customerStatusMaxAgeMs()));
     }
 
     @Bean
-    PasswordSessionRepository passwordSessionRepository(PasswordSessionPersistenceRepository repository,
-            TransactionTemplate transactions, Clock clock, CustomerFreshnessPolicy freshness,
-            PasswordDeliveryEscrowCodec escrow) {
-        return new JpaPasswordSessionAdapter(repository, transactions, clock, freshness, escrow);
+    SessionRepository passwordSessionRepository(PasswordSessionPersistenceRepository repository,
+            SessionPersistenceRepository sessions, TransactionTemplate transactions, Clock clock, CustomerFreshnessPolicy freshness,
+            SessionDeliveryEscrowCodec escrow) {
+        return new JpaPasswordSessionAdapter(repository, sessions, transactions, clock, freshness, escrow);
     }
 
     @Bean
-    PasswordSessionAuthority passwordSessionAuthority(StringRedisTemplate redis,
-                                                      RedisServerIdentity identity,
-                                                      AuthorityScope scope,
-                                                      NativeSessionProperties properties,
-                                                      Clock clock) {
-        return new RedisPasswordSessionAuthority(redis, identity, scope,
-                Duration.ofMillis(properties.nonceValidityMs()), clock);
-    }
-
-    @Bean
-    ActivatePasswordSessionService activatePasswordSession(PasswordSessionRepository store,
-                                            PasswordSessionCryptography cryptography,
-                                            PasswordSessionAuthority authority, Clock clock) {
-        return new ActivatePasswordSessionService(store, cryptography, authority, clock);
-    }
-
-    @Bean
-    PasswordLoginUseCase passwordLoginUseCase(PasswordLoginRouteService routes,
-                                                      ActivatePasswordSessionService sessions,
+    PasswordLoginUseCase passwordLoginUseCase(CheckPasswordLoginEligibilityService eligibility,
+                                                      ActivateSessionUseCase sessions,
                                                       PasswordAvailabilityPolicy availability) {
-        return new PasswordLoginService(routes, sessions, availability);
+        return new PasswordLoginService(eligibility, sessions, availability);
     }
 
     private byte[] secret(String encoded) {

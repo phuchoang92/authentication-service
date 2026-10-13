@@ -43,7 +43,10 @@ identity only. Guarded reads, joins, locks and mutations use EntityManager repos
 never use a previously loaded entity for a decision after acquiring locks. No JPA caches,
 relationships, cascades or generic base repository. Customer freshness belongs to the
 JDK-only `CustomerFreshnessPolicy`; protected delivery serialization and digest checking
-belong to `PasswordDeliveryEscrowCodec`.
+belong to `SessionDeliveryEscrowCodec`. Shared intent/escrow SQL belongs to
+`SessionPersistenceRepository`; `JpaPasswordSessionAdapter` coordinates it with the
+password-source repository in the same transaction. Keep password eligibility and
+journey/operation transitions at that source boundary.
 
 Preserve applied migration files and checksums. The user explicitly retired SQL
 Authority Control: V9 removes `auth_authority_control`, and its lease port/adapter/repository

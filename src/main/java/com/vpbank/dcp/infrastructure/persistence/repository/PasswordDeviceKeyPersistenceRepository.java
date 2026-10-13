@@ -3,6 +3,7 @@ package com.vpbank.dcp.infrastructure.persistence.repository;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.infrastructure.persistence.projection.StoredDeviceKeyView;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.Tuple;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -26,7 +27,8 @@ public class PasswordDeviceKeyPersistenceRepository {
         if (operation.claimedBindingId() == null) {
             return Optional.empty();
         }
-        List<?> rows = entityManager.createNativeQuery(PasswordDeviceKeySql.FIND_ACTIVE)
+        @SuppressWarnings("unchecked")
+        List<Tuple> rows = entityManager.createNativeQuery(PasswordDeviceKeySql.FIND_ACTIVE, Tuple.class)
                 .setParameter("bindingId", operation.claimedBindingId().toString())
                 .setParameter("appId", operation.appId())
                 .setParameter("installationHash", installationHash(operation.installationId()))
@@ -37,8 +39,9 @@ public class PasswordDeviceKeyPersistenceRepository {
         if (rows.size() != 1) {
             throw new UnexpectedPasswordOperationUpdateException();
         }
-        Object[] row = (Object[]) rows.getFirst();
-        return Optional.of(new StoredDeviceKeyView((byte[]) row[0], (byte[]) row[1]));
+        Tuple row = rows.getFirst();
+        return Optional.of(new StoredDeviceKeyView(
+                row.get("public_key_spki", byte[].class), row.get("jkt", byte[].class)));
     }
 
     private byte[] installationHash(String installationId) {

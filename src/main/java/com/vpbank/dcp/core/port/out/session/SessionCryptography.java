@@ -5,7 +5,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /** Issues a random token and encrypts it to frozen Kenc; never persists plaintext. */
-public interface PasswordSessionCryptography {
-    PreparedPasswordSession prepare(PasswordSessionFacts facts, UUID generation,
+public interface SessionCryptography {
+    PreparedSession prepare(SessionActivationFacts facts, UUID generation,
                                     SessionDeadlines deadlines, Instant deliveryDeadline);
 }

@@ -27,6 +27,18 @@ class ArchitectureRulesTest {
             .should().dependOnClassesThat().resideInAPackage("..infrastructure..")
             .because("dependency direction is infrastructure to core");
 
+    private static final ArchRule SESSION_CORE_DOES_NOT_IMPORT_PASSWORD = noClasses()
+            .that().resideInAnyPackage("..core.domain.session..", "..core.application.session..",
+                    "..core.port.in.session..", "..core.port.out.session..")
+            .should().dependOnClassesThat().resideInAnyPackage("..core.domain.password..",
+                    "..core.application.password..", "..core.port.in.password..", "..core.port.out.password..")
+            .because("session issuance is independent of authentication methods");
+
+    private static final ArchRule PASSWORD_CALLS_SESSION_THROUGH_PORT = noClasses()
+            .that().resideInAPackage("..core.application.password..")
+            .should().dependOnClassesThat().resideInAPackage("..core.application.session..")
+            .because("password calls the shared inbound session port");
+
     private static final ArchRule OUTBOUND_ADAPTER_DOES_NOT_IMPORT_INBOUND_ADAPTER = noClasses()
             .that().resideInAnyPackage("..infrastructure.adapter.out..", "..infrastructure.persistence.adapter..")
             .should().dependOnClassesThat().resideInAPackage("..infrastructure.adapter.in..")
@@ -89,7 +101,7 @@ class ArchitectureRulesTest {
                             || type.getName().equals("java.time.Clock")
                             || pkg.contains(".core.application.") || pkg.contains(".infrastructure.config")
                             || pkg.contains(".adapter.") || pkg.contains(".persistence.repository.")
-                            || type.getSimpleName().equals("PasswordDeliveryEscrowCodec");
+                            || type.getSimpleName().equals("SessionDeliveryEscrowCodec");
                 }
             });
 
@@ -125,7 +137,25 @@ class ArchitectureRulesTest {
         CORE_DOES_NOT_IMPORT_FRAMEWORK.check(classes);
         CORE_DOES_NOT_IMPORT_INFRASTRUCTURE.check(classes);
         OUTBOUND_ADAPTER_DOES_NOT_IMPORT_INBOUND_ADAPTER.check(
-                new ClassFileImporter().importPackages("com.vpbank.dcp.infrastructure"));
+                new ClassFileImporter().withImportOption(new ImportOption.DoNotIncludeTests())
+                        .importPackages("com.vpbank.dcp.infrastructure"));
+    }
+
+    @Test
+    void sharedSessionBoundaryRemainsIndependentOfPassword() {
+        var production = new ClassFileImporter()
+                .withImportOption(new ImportOption.DoNotIncludeTests()).importPackages("com.vpbank.dcp.core");
+        SESSION_CORE_DOES_NOT_IMPORT_PASSWORD.check(production);
+        PASSWORD_CALLS_SESSION_THROUGH_PORT.check(production);
+    }
+
+    @Test
+    void negativeFixturesDemonstrateSessionBoundaryViolationsAreCaught() {
+        var fixtures = new ClassFileImporter().importPackages("com.vpbank.archfixtures.core.application");
+        assertThatThrownBy(() -> SESSION_CORE_DOES_NOT_IMPORT_PASSWORD.check(fixtures))
+                .isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> PASSWORD_CALLS_SESSION_THROUGH_PORT.check(fixtures))
+                .isInstanceOf(AssertionError.class);
     }
 
     @Test

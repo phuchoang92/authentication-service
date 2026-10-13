@@ -1,8 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
-import com.vpbank.dcp.core.port.out.session.PasswordSessionAuthority;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionFacts;
-import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
+import com.vpbank.dcp.core.port.out.session.SessionAuthority;
+import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 /** Integration-only session publication using ordinary Redis commands. */
-public final class RedisPasswordSessionAuthority implements PasswordSessionAuthority {
+public final class RedisSessionAuthority implements SessionAuthority {
 
     private final StringRedisTemplate redis;
     private final RedisServerIdentity identity;
@@ -32,7 +32,7 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
     private final Clock clock;
     private final Sha256Digests digests = new Sha256Digests();
 
-    public RedisPasswordSessionAuthority(StringRedisTemplate redis, RedisServerIdentity identity,
+    public RedisSessionAuthority(StringRedisTemplate redis, RedisServerIdentity identity,
                                          AuthorityScope scope, Duration nonceValidity, Clock clock) {
         this.redis = Objects.requireNonNull(redis);
         this.identity = Objects.requireNonNull(identity);
@@ -54,7 +54,7 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
     }
 
     @Override
-    public SessionApplyResult apply(PreparedPasswordSession session) {
+    public SessionApplyResult apply(PreparedSession session) {
         Objects.requireNonNull(session);
         try {
             if (!isCurrent(session)) {
@@ -84,7 +84,7 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
     }
 
     @Override
-    public boolean deliverable(PreparedPasswordSession session) {
+    public boolean deliverable(PreparedSession session) {
         Objects.requireNonNull(session);
         try {
             if (!isCurrent(session)) {
@@ -113,7 +113,7 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
         }
     }
 
-    private boolean isCurrent(PreparedPasswordSession session) {
+    private boolean isCurrent(PreparedSession session) {
         Instant now = clock.instant();
         return session.generation().equals(identity.currentGeneration().orElse(null))
                 && now.isBefore(session.deadlines().idleExpiresAt())
@@ -122,12 +122,12 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
                 && now.isBefore(session.facts().customerStatusValidUntil());
     }
 
-    private String sessionKey(PreparedPasswordSession session) {
+    private String sessionKey(PreparedSession session) {
         return sessions.forLookup(session.lookupVersion(), session.lookupDigest());
     }
 
-    private Map<String, String> sessionFields(PreparedPasswordSession session) {
-        PasswordSessionFacts facts = session.facts();
+    private Map<String, String> sessionFields(PreparedSession session) {
+        SessionActivationFacts facts = session.facts();
         Map<String, String> fields = new HashMap<>();
         fields.put("schemaVersion", "1");
         fields.put("state", "ACTIVE");
@@ -152,13 +152,14 @@ public final class RedisPasswordSessionAuthority implements PasswordSessionAutho
         fields.put("idleExpiresAtMs", Long.toString(session.deadlines().idleExpiresAt().toEpochMilli()));
         fields.put("absoluteExpiresAtMs", Long.toString(session.deadlines().absoluteExpiresAt().toEpochMilli()));
         fields.put("nonceFamilyId", session.sessionId().toString());
-        fields.put("assurance", "{\"biometricEnforcement\":\"NOT_APPLICABLE\","
-                + "\"devicePossession\":\"MFA_KEY_POSSESSION\","
-                + "\"platformEvidence\":\"" + facts.platformAssurance() + "\"}");
+        var assurance = facts.assurance();
+        fields.put("assurance", "{\"biometricEnforcement\":\"" + assurance.biometricEnforcement().code()
+                + "\",\"devicePossession\":\"" + assurance.devicePossession().code()
+                + "\",\"platformEvidence\":\"" + assurance.platformEvidence().code() + "\"}");
         return fields;
     }
 
-    private Map<String, String> nonceFields(PreparedPasswordSession session) {
+    private Map<String, String> nonceFields(PreparedSession session) {
         String digest = digests.sha256(session.dpopNonce().getBytes(StandardCharsets.US_ASCII))
                 .base64Url();
         Instant expiry = clock.instant().plus(nonceValidity);

@@ -4,8 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionFacts;
-import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
+import com.vpbank.dcp.core.domain.session.SessionAssurance;
+import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
@@ -26,7 +27,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-class PasswordSessionAuthorityIT {
+class SessionAuthorityIT {
 
     private static final AuthorityScope SCOPE = new AuthorityScope("bank-session-it");
 
@@ -37,7 +38,7 @@ class PasswordSessionAuthorityIT {
 
     private LettuceConnectionFactory factory;
     private StringRedisTemplate redis;
-    private RedisPasswordSessionAuthority authority;
+    private RedisSessionAuthority authority;
     private UUID subjectId;
     private UUID bindingId;
 
@@ -53,7 +54,7 @@ class PasswordSessionAuthorityIT {
         identity.initialize();
         subjectId = UUID.randomUUID();
         bindingId = UUID.randomUUID();
-        authority = new RedisPasswordSessionAuthority(redis, identity, SCOPE,
+        authority = new RedisSessionAuthority(redis, identity, SCOPE,
                 Duration.ofSeconds(60), Clock.systemUTC());
     }
 
@@ -64,23 +65,46 @@ class PasswordSessionAuthorityIT {
 
     @Test
     void publishesSessionWithBoundOwnerAndExpiry() {
-        PreparedPasswordSession candidate = candidate();
+        PreparedSession candidate = candidate();
         assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.APPLIED);
+        String key = new SessionKeys().forLookup(candidate.lookupVersion(), candidate.lookupDigest());
+        var original = redis.opsForHash().entries(key);
         assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.ALREADY_APPLIED);
+        assertThat(redis.opsForHash().entries(key)).isEqualTo(original);
         assertThat(authority.deliverable(candidate)).isTrue();
 
-        String key = new SessionKeys().forLookup(candidate.lookupVersion(),
-                candidate.lookupDigest());
         assertThat(redis.opsForHash().get(key, "subjectId"))
                 .isEqualTo(subjectId.toString());
         assertThat(redis.opsForHash().get(key, "deviceBindingId"))
                 .isEqualTo(bindingId.toString());
+        assertThat(redis.opsForHash().get(key, "assurance")).isEqualTo(
+                "{\"biometricEnforcement\":\"NOT_APPLICABLE\",\"devicePossession\":\"MFA_KEY_POSSESSION\",\"platformEvidence\":\"NONE\"}");
         assertThat(redis.getExpire(key)).isPositive();
     }
 
     @Test
+    void serializesAssuranceSuppliedByTheAuthenticationSource() {
+        var original = candidate();
+        var old = original.facts();
+        var facts = new SessionActivationFacts(old.operationId(), old.journeyId(), old.subjectId(),
+                old.appId(), old.bindingId(), old.requestKey(), old.requestPublicJwk(), old.responsePublicJwk(),
+                old.deviceKey(), old.customerSecurityVersion(), old.credentialSecurityVersion(),
+                old.deviceSecurityVersion(), old.customerStatusVersion(), old.customerStatusValidUntil(),
+                new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
+                        SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.CLIENT_ENFORCED),
+                old.biometricLoginEnabled());
+        var supplied = new PreparedSession(facts, original.intentId(), original.sessionId(), original.generation(),
+                original.lookupVersion(), original.lookupDigest(), original.candidateDigest(), original.tokenEnvelope(),
+                original.receipt(), original.dpopNonce(), original.deadlines(), original.deliveryDeadline());
+        assertThat(authority.apply(supplied)).isEqualTo(SessionApplyResult.APPLIED);
+        String key = new SessionKeys().forLookup(supplied.lookupVersion(), supplied.lookupDigest());
+        assertThat(redis.opsForHash().get(key, "assurance")).isEqualTo(
+                "{\"biometricEnforcement\":\"CLIENT_ENFORCED\",\"devicePossession\":\"MFA_KEY_POSSESSION\",\"platformEvidence\":\"NONE\"}");
+    }
+
+    @Test
     void redisFlushClosesDeliveryAndCannotRecreateOldSession() {
-        PreparedPasswordSession candidate = candidate();
+        PreparedSession candidate = candidate();
         assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.APPLIED);
         redis.getConnectionFactory().getConnection().serverCommands().flushDb();
 
@@ -91,7 +115,7 @@ class PasswordSessionAuthorityIT {
 
     @Test
     void missingSessionExpiryDoesNotAuthorizeDelivery() {
-        PreparedPasswordSession candidate = candidate();
+        PreparedSession candidate = candidate();
         assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.APPLIED);
         String key = new SessionKeys().forLookup(candidate.lookupVersion(),
                 candidate.lookupDigest());
@@ -100,13 +124,14 @@ class PasswordSessionAuthorityIT {
         assertThat(authority.deliverable(candidate)).isFalse();
     }
 
-    private PreparedPasswordSession candidate() {
+    private PreparedSession candidate() {
         Instant now = Instant.now();
-        PasswordSessionFacts facts = new PasswordSessionFacts(UUID.randomUUID(),
+        SessionActivationFacts facts = new SessionActivationFacts(UUID.randomUUID(),
                 UUID.randomUUID(), subjectId, "neo-mobile", bindingId, digest(1),
                 "{}", "{}", digest(2), 0, 0, 0, 1,
-                now.plusSeconds(120), "NONE", false);
-        return new PreparedPasswordSession(facts, UUID.randomUUID(), UUID.randomUUID(),
+                now.plusSeconds(120), new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
+                SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE), false);
+        return new PreparedSession(facts, UUID.randomUUID(), UUID.randomUUID(),
                 authority.currentGeneration().orElseThrow(), new LookupKeyVersion("k1"),
                 digest(3), digest(4), "encrypted-only", "signed-receipt",
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",

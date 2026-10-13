@@ -119,6 +119,37 @@ includes both authentication modes on stock Keycloak 26.7.1, rejection of a wron
 secret, configured assertion/ID-token bindings, form encoding and startup validation.
 Concurrent DPoP algorithm changes made during the run are outside this verification snapshot.
 
+## Shared session activation
+
+Password owns credential verification and trusted-device eligibility. After `LAST_TRUSTED`,
+`PasswordLoginService` calls the inbound `ActivateSessionUseCase` with
+`ActivateSessionCommand(operationId, subjectId)`. `ActivateSessionService` lives in
+`core.application.session`; its command and `SessionActivationResult` live beside the
+inbound port. The shared core has no password dependency. A command identifies an operation;
+current confirmed storage facts still determine whether it may activate.
+
+`SessionRepository`, `SessionCryptography`, `SessionAuthority`, `SessionActivationFacts`
+and `PreparedSession` describe shared issuance and recovery. `SessionCryptoAdapter`
+prepares token delivery, and `RedisSessionAuthority` publishes and checks it using the
+existing integration-only Redis mechanics. Typed `SessionAssurance` comes from the
+authentication source; Redis and the HTTP response mapper serialize those same values.
+The password mapper supplies `MFA_KEY_POSSESSION` / `NONE` / `NOT_APPLICABLE`.
+
+`JpaPasswordSessionAdapter` implements the shared repository as the current password
+source bridge. It coordinates `PasswordSessionPersistenceRepository` (current password
+eligibility, locks and journey/operation transitions) and `SessionPersistenceRepository`
+(activation intent and encrypted delivery escrow) in the same short transactions.
+Journey finalization, intent and escrow preparation roll back together; intent, journey
+and operation completion also roll back together. Redis calls remain outside SQL locks.
+Retries reuse the exact stored candidate, envelope, receipt and nonce, then check live
+authority before delivery. SQL statements, migration checksums, Redis schema/key bytes,
+escrow JSON and the frozen `PASSWORD_ACTIVE_V1` candidate digest input are unchanged.
+
+`SessionConfiguration` assembles the shared crypto, Redis, delivery and activation use case;
+`PasswordFlowConfiguration` assembles password eligibility, the SQL bridge and its existing
+integration activation gate. Biometric/PIN and touch/lock/logout/revoke are future use cases
+in this capability; this extraction does not implement those flows or production authority.
+
 ## Persistence structure
 
 ```text
@@ -130,11 +161,11 @@ infrastructure.persistence
     ├── entity        PasswordOperationEntity
     ├── projection    immutable database …View values
     ├── mapper        <Capability>PersistenceMapper (DB values → core)
-    └── codec         PasswordDeliveryEscrowCodec / EscrowedPasswordDelivery
+    └── codec         SessionDeliveryEscrowCodec / EscrowedSessionDelivery
 ```
 
-The five SQL capabilities are CustomerOwner, PasswordOperation, PasswordDeviceKey,
-PasswordDeviceRoute and PasswordSession. Persistence groups classes by technical role,
+The SQL capabilities are CustomerOwner, PasswordOperation, PasswordDeviceKey,
+PasswordDeviceRoute, PasswordSession and shared Session activation storage. Persistence groups classes by technical role,
 without customer/password/session subpackages. Core still groups domain and ports by
 capability. Redis ports retain their existing names. There are no compatibility aliases
 for the replaced SQL ports.
@@ -145,7 +176,7 @@ check affected rows; they do not construct domain objects or workflow results. N
 holders remain package-private beside their owning repositories. Existing core-typed
 write parameters are retained.
 
-Five focused, handwritten, stateless mappers restore domain values and core-owned port
+Focused, handwritten, stateless mappers restore domain values and core-owned port
 results. Adapters invoke them, for example `queries.verifiedIdentity(id).map(
 PasswordOperationPersistenceMapper::toVerifiedIdentity)`. Mappers perform no I/O,
 transaction orchestration, clock access or freshness calculation. Views contain database
@@ -161,7 +192,7 @@ no loaded entity is used to decide a mutation. Both JPA query and second-level c
 disabled.
 
 Customer freshness uses the configured maximum age through `CustomerFreshnessPolicy`;
-a snapshot expires exactly at `checkedAt + maxAge`. `PasswordDeliveryEscrowCodec` preserves
+a snapshot expires exactly at `checkedAt + maxAge`. `SessionDeliveryEscrowCodec` preserves
 the existing JsonMapper encoding and checks SHA-256 using the JDK before decoding stored
 bytes. The persistence refactor preserved the API and transaction boundaries; the later
 explicit Authority Control removal adds V9 and deletes its unused core port, adapter and

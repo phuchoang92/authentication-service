@@ -6,14 +6,14 @@ import com.vpbank.dcp.core.port.out.password.PasswordCredentialRecordResult;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationRepository;
 import java.util.Objects;
 
-/** Freezes unsupported MFA routes without creating a challenge or a banking token. */
-public final class PasswordLoginRouteService {
+/** Checks identity and device eligibility, recording unavailable MFA before session activation. */
+public final class CheckPasswordLoginEligibilityService {
 
     private final VerifyPasswordLoginIdentityService credentials;
     private final ResolveTrustedDeviceRouteService devices;
     private final PasswordOperationRepository operations;
 
-    public PasswordLoginRouteService(VerifyPasswordLoginIdentityService credentials,
+    public CheckPasswordLoginEligibilityService(VerifyPasswordLoginIdentityService credentials,
                                      ResolveTrustedDeviceRouteService devices,
                                      PasswordOperationRepository operations) {
         this.credentials = Objects.requireNonNull(credentials, "credentials");
@@ -21,36 +21,36 @@ public final class PasswordLoginRouteService {
         this.operations = Objects.requireNonNull(operations, "operations");
     }
 
-    public PasswordLoginRouteResult route(PasswordLoginCommand command) {
+    public PasswordLoginEligibilityResult checkEligibility(PasswordLoginCommand command) {
         PasswordLoginIdentityResult credential = credentials.verifyIdentity(command);
         if (credential instanceof PasswordLoginIdentityResult.MfaUnavailable) {
-            return new PasswordLoginRouteResult.MfaUnavailable();
+            return new PasswordLoginEligibilityResult.MfaUnavailable();
         }
         if (credential instanceof PasswordLoginIdentityResult.Rejected) {
-            return new PasswordLoginRouteResult.Rejected();
+            return new PasswordLoginEligibilityResult.Rejected();
         }
         if (credential instanceof PasswordLoginIdentityResult.Conflict) {
-            return new PasswordLoginRouteResult.Conflict();
+            return new PasswordLoginEligibilityResult.Conflict();
         }
         if (credential instanceof PasswordLoginIdentityResult.AuthorityClosed) {
-            return new PasswordLoginRouteResult.AuthorityClosed();
+            return new PasswordLoginEligibilityResult.AuthorityClosed();
         }
         if (!(credential instanceof PasswordLoginIdentityResult.Verified verified)) {
-            return new PasswordLoginRouteResult.Processing();
+            return new PasswordLoginEligibilityResult.Processing();
         }
 
         TrustedDeviceRoute route = devices.resolve(command.operation().operationId(),
                 verified.subjectId(), command.operation().appId(), command.now());
         if (route == TrustedDeviceRoute.LAST_TRUSTED) {
-            return new PasswordLoginRouteResult.LastTrusted(verified.subjectId());
+            return new PasswordLoginEligibilityResult.LastTrusted(verified.subjectId());
         }
         if (route == TrustedDeviceRoute.REJECTED) {
-            return new PasswordLoginRouteResult.Rejected();
+            return new PasswordLoginEligibilityResult.Rejected();
         }
         PasswordCredentialRecordResult saved = operations.recordMfaUnavailable(
                 command.operation().operationId(), route);
         return saved == PasswordCredentialRecordResult.NOT_RECORDABLE
-                ? new PasswordLoginRouteResult.Processing()
-                : new PasswordLoginRouteResult.MfaUnavailable();
+                ? new PasswordLoginEligibilityResult.Processing()
+                : new PasswordLoginEligibilityResult.MfaUnavailable();
     }
 }

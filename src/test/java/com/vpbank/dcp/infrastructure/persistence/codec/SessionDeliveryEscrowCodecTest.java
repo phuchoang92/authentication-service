@@ -4,19 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.infrastructure.persistence.repository.InvalidPasswordSessionPersistenceException;
+import com.vpbank.dcp.infrastructure.persistence.repository.InvalidSessionPersistenceException;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
-class PasswordDeliveryEscrowCodecTest {
-    private final PasswordDeliveryEscrowCodec codec =
-            new PasswordDeliveryEscrowCodec(JsonMapper.builder().build());
+class SessionDeliveryEscrowCodecTest {
+    private final SessionDeliveryEscrowCodec codec =
+            new SessionDeliveryEscrowCodec(JsonMapper.builder().build());
 
     @Test
     void preservesExistingJsonBytesAndDigestAcrossRoundTrip() {
-        var delivery = new EscrowedPasswordDelivery("encrypted-token", "signed-receipt", "nonce");
+        var delivery = new EscrowedSessionDelivery("encrypted-token", "signed-receipt", "nonce");
         byte[] expected = """
                 {"tokenEnvelope":"encrypted-token","receipt":"signed-receipt","dpopNonce":"nonce"}\
                 """.getBytes(StandardCharsets.UTF_8);
@@ -28,12 +28,12 @@ class PasswordDeliveryEscrowCodecTest {
 
     @Test
     void rejectsChangedBytesAndNullEscrowBeforeDeserialization() {
-        byte[] bytes = codec.encode(new EscrowedPasswordDelivery("ciphertext", "receipt", "nonce"));
+        byte[] bytes = codec.encode(new EscrowedSessionDelivery("ciphertext", "receipt", "nonce"));
         Digest32 original = codec.digest(bytes);
         bytes[bytes.length - 2] ^= 1;
         assertThatThrownBy(() -> codec.decode(bytes, original))
-                .isInstanceOf(InvalidPasswordSessionPersistenceException.class);
+                .isInstanceOf(InvalidSessionPersistenceException.class);
         assertThatThrownBy(() -> codec.decode(null, original))
-                .isInstanceOf(InvalidPasswordSessionPersistenceException.class);
+                .isInstanceOf(InvalidSessionPersistenceException.class);
     }
 }

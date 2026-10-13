@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Immutable database values; domain restoration belongs to the persistence mapper. */
-public record PreparedPasswordSessionView(
+public record PreparedSessionView(
         UUID intentId,
         UUID sessionId,
         UUID generation,
@@ -24,7 +24,7 @@ public record PreparedPasswordSessionView(
         byte[] requestKey,
         UUID bindingId,
         UUID subjectId) {
-    public PreparedPasswordSessionView {
+    public PreparedSessionView {
         Objects.requireNonNull(resultDigest, "resultDigest");
         lookupDigest = lookupDigest == null ? null : lookupDigest.clone();
         candidateDigest = candidateDigest == null ? null : candidateDigest.clone();
@@ -60,7 +60,7 @@ public record PreparedPasswordSessionView(
 
     @Override
     public boolean equals(Object other) {
-        return other instanceof PreparedPasswordSessionView view
+        return other instanceof PreparedSessionView view
                 && Objects.equals(intentId, view.intentId)
                 && Objects.equals(sessionId, view.sessionId)
                 && Objects.equals(generation, view.generation)
@@ -95,6 +95,6 @@ public record PreparedPasswordSessionView(
 
     @Override
     public String toString() {
-        return "PreparedPasswordSessionView[redacted]";
+        return "PreparedSessionView[redacted]";
     }
 }

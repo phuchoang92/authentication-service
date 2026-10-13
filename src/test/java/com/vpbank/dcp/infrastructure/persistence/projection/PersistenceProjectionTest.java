@@ -52,7 +52,7 @@ class PersistenceProjectionTest {
                 new PasswordDeviceRouteView(id, id, digest, digest, candidate),
                 new PasswordSessionFactsView(id, id, id, "mobile", id, digest, "request", "response",
                         digest, 1, 2, 3, 4, time, "NONE", false),
-                new PreparedPasswordSessionView(id, id, id, "key-1", digest, digest,
+                new PreparedSessionView(id, id, id, "key-1", digest, digest,
                         time, time, time, new byte[]{1, 2, 3}, digest, 1, 2, 3, digest, id, id));
     }
 }

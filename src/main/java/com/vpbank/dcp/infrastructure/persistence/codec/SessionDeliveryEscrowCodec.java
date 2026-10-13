@@ -1,21 +1,21 @@
 package com.vpbank.dcp.infrastructure.persistence.codec;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.infrastructure.persistence.repository.InvalidPasswordSessionPersistenceException;
+import com.vpbank.dcp.infrastructure.persistence.repository.InvalidSessionPersistenceException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Objects;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Preserves the escrow JSON bytes and verifies their SHA-256 before decoding. */
-public final class PasswordDeliveryEscrowCodec {
+public final class SessionDeliveryEscrowCodec {
     private final JsonMapper json;
 
-    public PasswordDeliveryEscrowCodec(JsonMapper json) {
+    public SessionDeliveryEscrowCodec(JsonMapper json) {
         this.json = Objects.requireNonNull(json);
     }
 
-    public byte[] encode(EscrowedPasswordDelivery delivery) {
+    public byte[] encode(EscrowedSessionDelivery delivery) {
         return json.writeValueAsBytes(Objects.requireNonNull(delivery));
     }
 
@@ -28,10 +28,10 @@ public final class PasswordDeliveryEscrowCodec {
         }
     }
 
-    public EscrowedPasswordDelivery decode(byte[] protectedResult, Digest32 expectedDigest) {
+    public EscrowedSessionDelivery decode(byte[] protectedResult, Digest32 expectedDigest) {
         if (protectedResult == null || !digest(protectedResult).equals(expectedDigest)) {
-            throw new InvalidPasswordSessionPersistenceException();
+            throw new InvalidSessionPersistenceException();
         }
-        return json.readValue(protectedResult, EscrowedPasswordDelivery.class);
+        return json.readValue(protectedResult, EscrowedSessionDelivery.class);
     }
 }

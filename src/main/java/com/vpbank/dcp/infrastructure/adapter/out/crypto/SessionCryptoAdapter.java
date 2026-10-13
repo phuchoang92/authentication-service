@@ -4,9 +4,9 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionCryptography;
-import com.vpbank.dcp.core.port.out.session.PasswordSessionFacts;
-import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
+import com.vpbank.dcp.core.port.out.session.SessionCryptography;
+import com.vpbank.dcp.core.port.out.session.SessionActivationFacts;
+import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.text.ParseException;
@@ -17,7 +17,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Generates one candidate; a failed SQL reservation discards it without exposing a token. */
-public final class PasswordSessionCryptoAdapter implements PasswordSessionCryptography {
+public final class SessionCryptoAdapter implements SessionCryptography {
     private final BankingTokenIssuer tokens;
     private final TokenLookupHasher lookup;
     private final BankingTokenEnvelopeIssuer envelopes;
@@ -26,7 +26,7 @@ public final class PasswordSessionCryptoAdapter implements PasswordSessionCrypto
     private final Sha256Digests digests;
     private final SecureRandom random;
 
-    public PasswordSessionCryptoAdapter(BankingTokenIssuer tokens, TokenLookupHasher lookup,
+    public SessionCryptoAdapter(BankingTokenIssuer tokens, TokenLookupHasher lookup,
                                         BankingTokenEnvelopeIssuer envelopes,
                                         LookupKeyVersion lookupVersion,
                                         LengthPrefixedSigningInputEncoder encoding, Sha256Digests digests,
@@ -41,7 +41,7 @@ public final class PasswordSessionCryptoAdapter implements PasswordSessionCrypto
     }
 
     @Override
-    public PreparedPasswordSession prepare(PasswordSessionFacts facts, UUID generation,
+    public PreparedSession prepare(SessionActivationFacts facts, UUID generation,
                                            SessionDeadlines deadlines, Instant deliveryDeadline) {
         try {
             OpaqueBankingToken token = tokens.issue();
@@ -67,7 +67,7 @@ public final class PasswordSessionCryptoAdapter implements PasswordSessionCrypto
                     Long.toString(deadlines.absoluteExpiresAt().toEpochMilli()),
                     envelopeDigest.base64Url(), dpopNonce));
             Digest32 candidateDigest = digests.sha256(candidateBytes);
-            return new PreparedPasswordSession(facts, intentId, sessionId, generation,
+            return new PreparedSession(facts, intentId, sessionId, generation,
                     lookupVersion, lookupDigest, candidateDigest,
                     encrypted.tokenEnvelope(), encrypted.receipt(), dpopNonce,
                     deadlines, deliveryDeadline);

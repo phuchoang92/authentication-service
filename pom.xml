@@ -143,6 +143,22 @@
                     <execution>
                         <goals><goal>integration-test</goal><goal>verify</goal></goals>
                     </execution>
+                    <!-- Persistence ITs again under a non-UTC JVM: the default execution pins UTC and
+                         therefore cannot observe a timezone-dependent temporal binding. -->
+                    <execution>
+                        <id>integration-test-non-utc-jvm</id>
+                        <goals><goal>integration-test</goal><goal>verify</goal></goals>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <user.timezone>Asia/Ho_Chi_Minh</user.timezone>
+                            </systemPropertyVariables>
+                            <includes>
+                                <include>**/persistence/**/*IT.java</include>
+                            </includes>
+                            <reportsDirectory>${project.build.directory}/failsafe-reports-non-utc</reportsDirectory>
+                            <summaryFile>${project.build.directory}/failsafe-reports-non-utc/failsafe-summary.xml</summaryFile>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
         </plugins>

@@ -1,9 +1,9 @@
 package com.vpbank.dcp.core.port.in.password;
 
-import com.vpbank.dcp.core.port.out.session.PreparedPasswordSession;
+import com.vpbank.dcp.core.port.out.session.PreparedSession;
 
 public sealed interface PasswordLoginResult {
-    record Active(PreparedPasswordSession session) implements PasswordLoginResult { }
+    record Active(PreparedSession session) implements PasswordLoginResult { }
     record Processing() implements PasswordLoginResult { }
     record Rejected() implements PasswordLoginResult { }
     record Conflict() implements PasswordLoginResult { }
