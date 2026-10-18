@@ -9,7 +9,7 @@ public final class CustomerStateOrder {
                                          CustomerAuthenticationState incoming) {
         Objects.requireNonNull(current, "current");
         Objects.requireNonNull(incoming, "incoming");
-        if (!current.customerId().equals(incoming.customerId())) {
+        if (!current.customerNumber().equals(incoming.customerNumber())) {
             return CustomerStateDecision.CONFLICT;
         }
         if (incoming.lastAccessBlockVersion() > current.lastAccessBlockVersion()) {

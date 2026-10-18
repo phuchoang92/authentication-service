@@ -19,7 +19,7 @@ public class TrustedDeviceRevocationPersistenceRepository {
 
     public boolean lockCustomer(RecordDeviceRevocation command) {
         List<?> rows = entityManager.createNativeQuery(TrustedDeviceRevocationSql.LOCK_CUSTOMER)
-                .setParameter("customerId", command.owner().customerId().toString())
+                .setParameter("customerId", command.owner().subject().value().toString())
                 .getResultList();
         if (rows.isEmpty()) {
             return false;
@@ -30,7 +30,7 @@ public class TrustedDeviceRevocationPersistenceRepository {
 
     public UUID findPrimary(RecordDeviceRevocation command) {
         List<?> rows = entityManager.createNativeQuery(TrustedDeviceRevocationSql.FIND_PRIMARY)
-                .setParameter("customerId", command.owner().customerId().toString())
+                .setParameter("customerId", command.owner().subject().value().toString())
                 .setParameter("channel", command.owner().channel()).getResultList();
         if (rows.isEmpty()) {
             return null;
@@ -40,8 +40,8 @@ public class TrustedDeviceRevocationPersistenceRepository {
 
     public TrustedDeviceStateView lockDevice(RecordDeviceRevocation command) {
         List<?> rows = entityManager.createNativeQuery(TrustedDeviceRevocationSql.LOCK_DEVICE)
-                .setParameter("bindingId", command.bindingId().toString())
-                .setParameter("customerId", command.owner().customerId().toString())
+                .setParameter("bindingId", command.bindingId().value().toString())
+                .setParameter("customerId", command.owner().subject().value().toString())
                 .setParameter("channel", command.owner().channel()).getResultList();
         if (rows.isEmpty()) {
             return null;
@@ -53,8 +53,8 @@ public class TrustedDeviceRevocationPersistenceRepository {
 
     public int markRevoked(RecordDeviceRevocation command) {
         return entityManager.createNativeQuery(TrustedDeviceRevocationSql.REVOKE_DEVICE)
-                .setParameter("bindingId", command.bindingId().toString())
-                .setParameter("customerId", command.owner().customerId().toString())
+                .setParameter("bindingId", command.bindingId().value().toString())
+                .setParameter("customerId", command.owner().subject().value().toString())
                 .setParameter("channel", command.owner().channel())
                 .setParameter("expectedVersion", command.expectedVersion())
                 .setParameter("occurredAt", Timestamp.from(command.occurredAt()))

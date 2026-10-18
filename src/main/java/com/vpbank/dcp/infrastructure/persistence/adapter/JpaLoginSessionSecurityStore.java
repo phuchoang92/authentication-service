@@ -1,10 +1,16 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.port.out.session.LoginSessionSecurity;
 import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityStore;
 import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityUnavailableException;
+import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
+import com.vpbank.dcp.core.port.out.session.StoredCustomerSecurity;
+import com.vpbank.dcp.core.port.out.session.StoredDeviceSecurity;
 import com.vpbank.dcp.infrastructure.persistence.repository.LoginSessionSecurityPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.projection.LoginSessionSecurityView;
+import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,18 +30,21 @@ public final class JpaLoginSessionSecurityStore implements LoginSessionSecurityS
     }
 
     @Override
-    public Optional<LoginSessionSecurity> current(UUID customerId, UUID bindingId, String channel) {
-        Objects.requireNonNull(customerId);
+    public Optional<LoginSessionSecurity> current(SubjectId owner, BindingId bindingId, String channel) {
+        Objects.requireNonNull(owner);
         Objects.requireNonNull(bindingId);
         Objects.requireNonNull(channel);
         try {
             Optional<LoginSessionSecurityView> current = Objects.requireNonNull(transactions.execute(
-                    ignored -> repository.lockCurrent(customerId, bindingId, channel)));
-            return current.map(row -> new LoginSessionSecurity(customerId, bindingId, channel,
-                    "ELIGIBLE".equals(row.customerStatus()), "ACTIVE".equals(row.deviceStatus()),
-                    row.primary(), row.deviceExpiresAt(), row.customerSecurityVersion(),
-                    row.credentialSecurityVersion(), row.deviceSecurityVersion(),
-                    row.customerStatusVersion(), row.biometricEnabled()));
+                    ignored -> repository.lockCurrent(owner.value(), bindingId.value(), channel)));
+            return current.map(row -> new LoginSessionSecurity(
+                    new StoredCustomerSecurity("ELIGIBLE".equals(row.customerStatus()),
+                            row.customerStatusVersion()),
+                    new StoredDeviceSecurity("ACTIVE".equals(row.deviceStatus()),
+                            row.deviceExpiresAt().toInstant(ZoneOffset.UTC), row.devicePrimary()),
+                    new SessionSecurityVersions(row.customerSecurityVersion(),
+                            row.credentialSecurityVersion(), row.deviceSecurityVersion()),
+                    row.biometricEnabled()));
         } catch (DataAccessException | TransactionException failure) {
             throw new LoginSessionSecurityUnavailableException(failure);
         }

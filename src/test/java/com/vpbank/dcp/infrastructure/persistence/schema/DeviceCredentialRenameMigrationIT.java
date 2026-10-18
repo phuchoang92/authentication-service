@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.schema;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -32,8 +34,8 @@ class DeviceCredentialRenameMigrationIT {
 
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword()));
-        UUID customerId = UUID.randomUUID();
-        UUID bindingId = UUID.randomUUID();
+        SubjectId subject = new SubjectId(UUID.randomUUID());
+        BindingId bindingId = new BindingId(UUID.randomUUID());
         UUID credentialId = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO auth_customer
@@ -41,7 +43,7 @@ class DeviceCredentialRenameMigrationIT {
                    status, policy_version, created_at, updated_at)
                 VALUES (UUID_TO_BIN(?), ?, 1, UTC_TIMESTAMP(6), 'ELIGIBLE', 'test',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, customerId.toString(), "customer-" + customerId);
+                """, subject.toString(), "customer-" + subject);
         jdbc.update("""
                 INSERT INTO auth_trusted_device
                   (id, auth_customer_id, channel, device_id_lookup, device_id_lookup_key_id,
@@ -55,7 +57,7 @@ class DeviceCredentialRenameMigrationIT {
                         'ES256', 'NFC_FACE_SMS_OTP', 'test-policy', 'MFA_KEY_POSSESSION',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 90 DAY,
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, bindingId.toString(), customerId.toString(),
+                """, bindingId.toString(), subject.toString(),
                 "installation-" + bindingId, "public-key-" + bindingId);
         byte[] ciphertext = new byte[] {1, 2, 3, 4};
         jdbc.update("""

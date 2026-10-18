@@ -106,8 +106,8 @@ public final class RedisSessionAuthority implements SessionAuthority {
                     && "ACTIVE".equals(stored.get("state"))
                     && session.candidate().sessionId().toString().equals(stored.get("sessionId"))
                     && session.candidate().generation().toString().equals(stored.get("generation"))
-                    && session.snapshot().context().subjectId().toString().equals(stored.get("subjectId"))
-                    && session.snapshot().context().bindingId().toString().equals(stored.get("deviceBindingId"))
+                    && session.snapshot().context().subject().value().toString().equals(stored.get("subjectId"))
+                    && session.snapshot().context().bindingId().value().toString().equals(stored.get("deviceBindingId"))
                     && session.snapshot().keys().requestKey().base64Url().equals(stored.get("requestKeyJkt"))
                     && "1".equals(nonce.get("schemaVersion"))
                     && session.candidate().sessionId().toString().equals(nonce.get("familyId"));
@@ -153,12 +153,12 @@ public final class RedisSessionAuthority implements SessionAuthority {
         fields.put("schemaVersion", "1");
         fields.put("state", "ACTIVE");
         fields.put("sessionId", session.candidate().sessionId().toString());
-        fields.put("subjectId", context.subjectId().toString());
+        fields.put("subjectId", context.subject().value().toString());
         fields.put("appId", context.appId());
         fields.put("audience", context.appId());
         fields.put("channel", "MOBILE");
         fields.put("scope", "[\"banking\"]");
-        fields.put("deviceBindingId", context.bindingId().toString());
+        fields.put("deviceBindingId", context.bindingId().value().toString());
         fields.put("requestKeyJkt", keys.requestKey().base64Url());
         fields.put("requestPublicJwk", keys.requestPublicJwk());
         fields.put("generation", session.candidate().generation().toString());

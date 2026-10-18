@@ -1,5 +1,8 @@
 package com.vpbank.dcp.core.application.session;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -17,6 +20,9 @@ import com.vpbank.dcp.core.port.out.device.LoginDeviceSnapshot;
 import com.vpbank.dcp.core.port.out.password.StoredDeviceKey;
 import com.vpbank.dcp.core.port.out.session.LoginSessionSecurity;
 import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityStore;
+import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
+import com.vpbank.dcp.core.port.out.session.StoredCustomerSecurity;
+import com.vpbank.dcp.core.port.out.session.StoredDeviceSecurity;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
 import com.vpbank.dcp.core.port.out.session.SessionAuthority;
@@ -40,7 +46,7 @@ class IssueLoginSessionServiceTest {
     void primaryPasswordIssuesActiveWhenGuardsRemainCurrent() {
         Fixture fixture = fixture(true, LoginConfirmation.PRIMARY_PASSWORD);
         PreparedSession prepared = mock(PreparedSession.class);
-        when(security.current(fixture.customerId, fixture.bindingId, "neo-mobile"))
+        when(security.current(fixture.subject, fixture.bindingId, "neo-mobile"))
                 .thenReturn(Optional.of(fixture.guard));
         when(authority.currentGeneration()).thenReturn(Optional.of(fixture.generation));
         when(cryptography.prepare(any(), any(), any(), any())).thenReturn(prepared);
@@ -55,7 +61,7 @@ class IssueLoginSessionServiceTest {
     @Test
     void nonPrimaryPasswordCannotIssueActive() {
         Fixture fixture = fixture(false, LoginConfirmation.PRIMARY_PASSWORD);
-        when(security.current(fixture.customerId, fixture.bindingId, "neo-mobile"))
+        when(security.current(fixture.subject, fixture.bindingId, "neo-mobile"))
                 .thenReturn(Optional.of(fixture.guard));
 
         assertThat(service.issue(UUID.randomUUID(), now, fixture.evidence))
@@ -65,9 +71,9 @@ class IssueLoginSessionServiceTest {
 
     @Test
     void verifiedTotpCanIssueOnOtherTrustedDevice() {
-        Fixture fixture = fixture(false, LoginConfirmation.DEVICE_TOTP);
+        Fixture fixture = fixture(false, LoginConfirmation.MFA_CONFIRMED);
         PreparedSession prepared = mock(PreparedSession.class);
-        when(security.current(fixture.customerId, fixture.bindingId, "neo-mobile"))
+        when(security.current(fixture.subject, fixture.bindingId, "neo-mobile"))
                 .thenReturn(Optional.of(fixture.guard));
         when(authority.currentGeneration()).thenReturn(Optional.of(fixture.generation));
         when(cryptography.prepare(any(), any(), any(), any())).thenReturn(prepared);
@@ -81,10 +87,13 @@ class IssueLoginSessionServiceTest {
     @Test
     void guardChangeAfterPublicationRevokesCandidate() {
         Fixture fixture = fixture(true, LoginConfirmation.PRIMARY_PASSWORD);
-        LoginSessionSecurity revoked = new LoginSessionSecurity(fixture.customerId, fixture.bindingId,
-                "neo-mobile", true, false, false, now.plusSeconds(3600), 0, 0, 2, 3, false);
+        LoginSessionSecurity revoked = new LoginSessionSecurity(
+                new StoredCustomerSecurity(true, 3),
+                new StoredDeviceSecurity(false, now.plusSeconds(3600), false),
+                new SessionSecurityVersions(0, 0, 2),
+                false);
         PreparedSession prepared = mock(PreparedSession.class);
-        when(security.current(fixture.customerId, fixture.bindingId, "neo-mobile"))
+        when(security.current(fixture.subject, fixture.bindingId, "neo-mobile"))
                 .thenReturn(Optional.of(fixture.guard), Optional.of(revoked));
         when(authority.currentGeneration()).thenReturn(Optional.of(fixture.generation));
         when(cryptography.prepare(any(), any(), any(), any())).thenReturn(prepared);
@@ -98,7 +107,7 @@ class IssueLoginSessionServiceTest {
     @Test
     void redisLossNeverIssuesActive() {
         Fixture fixture = fixture(true, LoginConfirmation.PRIMARY_PASSWORD);
-        when(security.current(fixture.customerId, fixture.bindingId, "neo-mobile"))
+        when(security.current(fixture.subject, fixture.bindingId, "neo-mobile"))
                 .thenReturn(Optional.of(fixture.guard));
         when(authority.currentGeneration()).thenReturn(Optional.empty());
 
@@ -108,24 +117,27 @@ class IssueLoginSessionServiceTest {
     }
 
     private Fixture fixture(boolean primary, LoginConfirmation confirmation) {
-        UUID customerId = UUID.randomUUID();
-        UUID bindingId = UUID.randomUUID();
+        SubjectId subject = new SubjectId(UUID.randomUUID());
+        BindingId bindingId = new BindingId(UUID.randomUUID());
         UUID generation = UUID.randomUUID();
         Digest32 digest = Digest32.fromBytes(new byte[32]);
-        LoginDeviceSnapshot device = new LoginDeviceSnapshot(bindingId, customerId, "neo-mobile", "ANDROID",
+        LoginDeviceSnapshot device = new LoginDeviceSnapshot(bindingId, subject, "neo-mobile", "ANDROID",
                 true, primary, true, now.plusSeconds(3600), 1,
                 new StoredDeviceKey(new byte[]{1}, digest));
         SessionKeyBindings keys = new SessionKeyBindings(digest,
                 "request-jwk", "response-jwk", digest);
-        CustomerAuthenticationState customer = new CustomerAuthenticationState("customer-a",
+        CustomerAuthenticationState customer = new CustomerAuthenticationState(new CustomerNumber("customer-a"),
                 CustomerStatus.ELIGIBLE, 3, 0, now);
-        SessionLoginEvidence evidence = new SessionLoginEvidence(customerId, customer, device, keys,
+        SessionLoginEvidence evidence = new SessionLoginEvidence(subject, customer, device, keys,
                 generation, confirmation);
-        LoginSessionSecurity guard = new LoginSessionSecurity(customerId, bindingId, "neo-mobile",
-                true, true, primary, now.plusSeconds(3600), 0, 0, 1, 3, false);
-        return new Fixture(evidence, guard, customerId, bindingId, generation);
+        LoginSessionSecurity guard = new LoginSessionSecurity(
+                new StoredCustomerSecurity(true, 3),
+                new StoredDeviceSecurity(true, now.plusSeconds(3600), primary),
+                new SessionSecurityVersions(0, 0, 1),
+                false);
+        return new Fixture(evidence, guard, subject, bindingId, generation);
     }
 
     private record Fixture(SessionLoginEvidence evidence, LoginSessionSecurity guard,
-                           UUID customerId, UUID bindingId, UUID generation) { }
+                           SubjectId subject, BindingId bindingId, UUID generation) { }
 }

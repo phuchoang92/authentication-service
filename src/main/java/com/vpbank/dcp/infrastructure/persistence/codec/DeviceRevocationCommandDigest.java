@@ -16,9 +16,9 @@ public final class DeviceRevocationCommandDigest {
     public byte[] calculate(RecordDeviceRevocation command) {
         ByteArrayOutputStream encoded = new ByteArrayOutputStream();
         append(encoded, VERSION);
-        append(encoded, command.owner().customerId().toString());
+        append(encoded, command.owner().subject().value().toString());
         append(encoded, command.owner().channel());
-        append(encoded, command.bindingId().toString());
+        append(encoded, command.bindingId().value().toString());
         append(encoded, command.operationId().toString());
         append(encoded, Long.toString(command.expectedVersion()));
         append(encoded, command.reason().code());

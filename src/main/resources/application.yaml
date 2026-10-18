@@ -51,8 +51,6 @@ auth:
     enabled: ${AUTH_DPOP_ENABLED:true}
     allowed-algorithms: ${AUTH_DPOP_ALLOWED_ALGORITHMS:ES256}
   password-flow:
-    command-key-id: ${AUTH_PASSWORD_HMAC_KEY_ID}
-    command-hmac-base64: ${AUTH_PASSWORD_HMAC_BASE64}
     customer-policy-version: ${AUTH_CUSTOMER_POLICY_VERSION}
     credential-deadline-ms: ${AUTH_PASSWORD_CREDENTIAL_DEADLINE_MS}
     journey-deadline-ms: ${AUTH_PASSWORD_JOURNEY_DEADLINE_MS}
@@ -96,3 +94,15 @@ auth:
     status-max-age-ms: ${AUTH_CUSTOMER_STATUS_MAX_AGE_MS}
     origin: ${AUTH_CUSTOMER_ORIGIN}
     request-timeout-ms: ${AUTH_CUSTOMER_REQUEST_TIMEOUT_MS}
+  device-id:
+    lookup-key-id: ${AUTH_DEVICE_ID_LOOKUP_KEY_ID:}
+    lookup-key-base64: ${AUTH_DEVICE_ID_LOOKUP_KEY_BASE64:}
+    encryption-key-id: ${AUTH_DEVICE_ID_ENCRYPTION_KEY_ID:}
+    encryption-key-base64: ${AUTH_DEVICE_ID_ENCRYPTION_KEY_BASE64:}
+  totp-login:
+    secret-key-id: ${AUTH_TOTP_SECRET_KEY_ID:}
+    secret-key-base64: ${AUTH_TOTP_SECRET_KEY_BASE64:}
+    proof-private-jwk: ${AUTH_TOTP_PROOF_PRIVATE_JWK:}
+    challenge-lifetime-seconds: ${AUTH_TOTP_CHALLENGE_LIFETIME_SECONDS:0}
+    maximum-failures: ${AUTH_TOTP_MAX_FAILURES:0}
+    lock-minutes: ${AUTH_TOTP_LOCK_MINUTES:0}

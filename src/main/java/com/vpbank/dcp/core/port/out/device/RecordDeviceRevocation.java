@@ -1,5 +1,6 @@
 package com.vpbank.dcp.core.port.out.device;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
 import com.vpbank.dcp.core.domain.device.DeviceOwnership;
 import com.vpbank.dcp.core.domain.device.DeviceRevocationReason;
 import com.vpbank.dcp.core.domain.device.SecurityActor;
@@ -8,7 +9,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** A durable database transition; online denial is a separate required acknowledgement. */
-public record RecordDeviceRevocation(DeviceOwnership owner, UUID bindingId, UUID operationId,
+public record RecordDeviceRevocation(DeviceOwnership owner, BindingId bindingId, UUID operationId,
                                      long expectedVersion, DeviceRevocationReason reason,
                                      SecurityActor actor, Instant occurredAt) {
     public RecordDeviceRevocation {

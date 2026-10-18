@@ -1,5 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.out.customer;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.CustomerStatus;
 import com.vpbank.dcp.core.domain.customer.InvalidCustomerStateException;
@@ -21,7 +22,7 @@ final class CustomerResponseMapper {
     static CustomerAuthenticationState fromStatus(String requestedCustomerId,
                                                   CustomerResponse response) {
         CustomerAuthenticationState state = toState(response);
-        if (!state.customerId().equals(requestedCustomerId)) {
+        if (!state.customerNumber().value().equals(requestedCustomerId)) {
             throw new CustomerDirectoryUnavailableException();
         }
         return state;
@@ -34,7 +35,7 @@ final class CustomerResponseMapper {
             throw new CustomerDirectoryUnavailableException();
         }
         try {
-            return new CustomerAuthenticationState(response.customerId(),
+            return new CustomerAuthenticationState(new CustomerNumber(response.customerId()),
                     status(response.status()), response.statusVersion(),
                     response.lastAccessBlockVersion(), Instant.parse(response.checkedAt()));
         } catch (InvalidCustomerStateException | DateTimeParseException failure) {

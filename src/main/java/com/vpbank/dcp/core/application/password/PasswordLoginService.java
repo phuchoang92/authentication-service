@@ -1,29 +1,42 @@
 package com.vpbank.dcp.core.application.password;
 
+import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.port.in.password.PasswordLoginCommand;
+import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
+import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.core.port.in.session.IssueLoginSessionUseCase;
 import com.vpbank.dcp.core.port.in.session.LoginConfirmation;
 import com.vpbank.dcp.core.port.in.session.SessionLoginEvidence;
 import com.vpbank.dcp.core.port.in.session.SessionLoginResult;
-import com.vpbank.dcp.core.port.in.password.PasswordLoginCommand;
-import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
-import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
+import com.vpbank.dcp.core.port.out.password.VerifiedPasswordProofs;
 import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
+
 import java.util.Objects;
 
-/** Converts a verified password and device route into an actual, bounded login outcome. */
+/**
+ * The one place the password login branches, and the one place a denial becomes a contract type.
+ *
+ * <p>The step order is a security constraint, not a style choice: replay markers must be reserved
+ * before the password can leave this service, so proof admission runs first.
+ */
 public final class PasswordLoginService implements PasswordLoginUseCase {
-    private final AssessPasswordLoginService assessment;
+    private final PasswordProofs proofs;
+    private final CustomerIdentities identities;
+    private final LoginDevices devices;
     private final IssueLoginSessionUseCase sessions;
-    private final StartTotpLoginService totp;
+    private final StartMfaLoginService mfa;
     private final PasswordAvailabilityPolicy availability;
 
-    public PasswordLoginService(AssessPasswordLoginService assessment,
-                                IssueLoginSessionUseCase sessions,
-                                StartTotpLoginService totp,
+    public PasswordLoginService(PasswordProofs proofs, CustomerIdentities identities,
+                                LoginDevices devices, IssueLoginSessionUseCase sessions,
+                                StartMfaLoginService mfa,
                                 PasswordAvailabilityPolicy availability) {
-        this.assessment = Objects.requireNonNull(assessment);
+        this.proofs = Objects.requireNonNull(proofs);
+        this.identities = Objects.requireNonNull(identities);
+        this.devices = Objects.requireNonNull(devices);
         this.sessions = Objects.requireNonNull(sessions);
-        this.totp = Objects.requireNonNull(totp);
+        this.mfa = Objects.requireNonNull(mfa);
         this.availability = Objects.requireNonNull(availability);
     }
 
@@ -31,38 +44,75 @@ public final class PasswordLoginService implements PasswordLoginUseCase {
     public PasswordLoginResult login(PasswordLoginCommand command) {
         Objects.requireNonNull(command);
         if (!availability.integrationActivationEnabled()) {
-            return new PasswordLoginResult.TemporarilyUnavailable();
+            return denied(LoginDenial.UNAVAILABLE);
         }
-        PasswordLoginAssessment verified = assessment.assess(command);
-        if (verified instanceof PasswordLoginAssessment.LastTrusted primary) {
-            var proofs = primary.proofs();
-            var keys = new SessionKeyBindings(proofs.requestKey().digest(),
-                    proofs.requestPublicJwk(), proofs.responsePublicJwk(),
-                    proofs.deviceKeyThumbprint());
-            var evidence = new SessionLoginEvidence(primary.customerId(), primary.customer(),
-                    primary.device(), keys, primary.generation(), LoginConfirmation.PRIMARY_PASSWORD);
-            SessionLoginResult issued = sessions.issue(command.operation().operationId(), command.now(), evidence);
-            if (issued instanceof SessionLoginResult.Active active) {
-                return new PasswordLoginResult.Active(active.session());
-            }
-            return issued instanceof SessionLoginResult.Rejected
-                    ? new PasswordLoginResult.Rejected()
-                    : new PasswordLoginResult.TemporarilyUnavailable();
-        }
-        if (verified instanceof PasswordLoginAssessment.OtherTrusted other) {
-            StartTotpLoginResult started = totp.start(command, other);
-            if (started instanceof StartTotpLoginResult.Ready ready) {
-                return new PasswordLoginResult.TotpRequired(ready.authenticationId(),
-                        ready.challengeId(), ready.expiresAt(), ready.token());
-            }
-            return started instanceof StartTotpLoginResult.NeedsRecovery
-                    ? new PasswordLoginResult.Rejected()
-                    : new PasswordLoginResult.TemporarilyUnavailable();
-        }
-        if (verified instanceof PasswordLoginAssessment.Rejected) {
-            return new PasswordLoginResult.Rejected();
-        }
-        // NEW_DEVICE is deliberately unavailable until provider MFA and reset ACK are wired.
-        return new PasswordLoginResult.TemporarilyUnavailable();
+        return switch (proofs.admit(command)) {
+            case PasswordProofAdmissionResult.Denied(var why) -> denied(why);
+            case PasswordProofAdmissionResult.Admitted(var proof) -> confirmOwner(command, proof);
+        };
+    }
+
+    /**
+     * Replay markers are reserved: from here this password is dispatched exactly once.
+     */
+    private PasswordLoginResult confirmOwner(PasswordLoginCommand command, AdmittedProof proof) {
+        return switch (identities.confirm(command)) {
+            case PasswordIdentityResult.Denied(var why) -> denied(why);
+            case PasswordIdentityResult.Verified(var subject, var customer) ->
+                    routeDevice(command, proof, subject, customer);
+        };
+    }
+
+    /**
+     * The owner is accepted; the device decides whether this login can complete now.
+     */
+    private PasswordLoginResult routeDevice(PasswordLoginCommand command, AdmittedProof proof,
+                                            SubjectId subject, CustomerAuthenticationState customer) {
+        return switch (devices.decide(subject, command, proof.proofs())) {
+            case DeviceTrustResult.Denied(var why) -> denied(why);
+            // NEW_DEVICE stays closed until provider MFA and the reset acknowledgement are wired.
+            case DeviceTrustResult.NewDevice() -> denied(LoginDenial.UNAVAILABLE);
+            case DeviceTrustResult.LastTrusted(var device) ->
+                    issueSession(command, new AuthenticatedLogin(subject, customer, device, proof));
+            case DeviceTrustResult.OtherTrusted(var device) ->
+                    startMfa(command, new AuthenticatedLogin(subject, customer, device, proof));
+        };
+    }
+
+    private PasswordLoginResult issueSession(PasswordLoginCommand command, AuthenticatedLogin login) {
+        VerifiedPasswordProofs verified = login.proof().proofs();
+        SessionLoginEvidence evidence = new SessionLoginEvidence(login.subject(), login.customer(),
+                login.device(),
+                new SessionKeyBindings(verified.requestKey().digest(), verified.requestPublicJwk(),
+                        verified.responsePublicJwk(), verified.deviceKeyThumbprint()),
+                login.proof().generation(), LoginConfirmation.PRIMARY_PASSWORD);
+        return switch (sessions.issue(command.operation().operationId(), command.now(), evidence)) {
+            case SessionLoginResult.Active(var session) -> new PasswordLoginResult.Active(session);
+            case SessionLoginResult.Rejected() -> denied(LoginDenial.REJECTED);
+            case SessionLoginResult.Unavailable() -> denied(LoginDenial.UNAVAILABLE);
+        };
+    }
+
+    private PasswordLoginResult startMfa(PasswordLoginCommand command, AuthenticatedLogin login) {
+        return switch (mfa.start(command, login)) {
+            case StartMfaLoginResult.Ready(
+                    var authenticationId, var transactionId,
+                    var expiresAt, var token
+            ) -> new PasswordLoginResult.MfaRequired(authenticationId, transactionId,
+                    expiresAt, token);
+            // No enrolled factor cannot be recovered in the App; it is a rejected login here.
+            case StartMfaLoginResult.NoUsableFactor() -> denied(LoginDenial.REJECTED);
+            case StartMfaLoginResult.Unavailable() -> denied(LoginDenial.UNAVAILABLE);
+        };
+    }
+
+    /**
+     * The single translation from an internal denial to the published BFF contract.
+     */
+    private static PasswordLoginResult denied(LoginDenial why) {
+        return switch (why) {
+            case REJECTED -> new PasswordLoginResult.Rejected();
+            case UNAVAILABLE -> new PasswordLoginResult.TemporarilyUnavailable();
+        };
     }
 }

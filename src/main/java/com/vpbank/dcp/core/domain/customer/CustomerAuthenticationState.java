@@ -7,7 +7,7 @@ import java.util.Objects;
  * A verified Customer snapshot, not a banking-session authorization decision.
  */
 public record CustomerAuthenticationState(
-        String customerId,
+        CustomerNumber customerNumber,
         CustomerStatus status,
         long statusVersion,
         long lastAccessBlockVersion,
@@ -16,8 +16,7 @@ public record CustomerAuthenticationState(
     private static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
 
     public CustomerAuthenticationState {
-        if (customerId == null || !customerId.matches("[A-Za-z0-9._:-]{1,128}")
-                || status == null || checkedAt == null
+        if (customerNumber == null || status == null || checkedAt == null
                 || statusVersion > MAX_SAFE_INTEGER
                 || lastAccessBlockVersion < 0 || lastAccessBlockVersion > statusVersion
                 || (!status.allowsLogin() && lastAccessBlockVersion != statusVersion)) {

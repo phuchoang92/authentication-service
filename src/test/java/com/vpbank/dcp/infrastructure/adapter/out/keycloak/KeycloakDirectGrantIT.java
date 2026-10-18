@@ -8,7 +8,7 @@ import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.util.Base64URL;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerifierUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.testsupport.ContractVectors;
 import java.net.URI;
@@ -76,7 +76,7 @@ class KeycloakDirectGrantIT {
         assertThat(identity.subject()).isNotBlank();
         assertThatThrownBy(() -> new KeycloakIdTokenVerifier("authentication-service", ISSUER, "wrong-kid",
                 signingKey, new StrictJoseJson(), Clock.systemUTC()).verify(idToken))
-                .isInstanceOf(KeycloakVerificationUnavailableException.class);
+                .isInstanceOf(PasswordVerifierUnavailableException.class);
 
         assertThat(token("alice", "wrong-password", assertions.issue(Clock.systemUTC().instant()))
                 .statusCode()).isEqualTo(400);

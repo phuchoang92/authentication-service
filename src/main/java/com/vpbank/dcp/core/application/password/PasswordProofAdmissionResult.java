@@ -1,19 +1,9 @@
 package com.vpbank.dcp.core.application.password;
 
-import com.vpbank.dcp.core.port.out.password.VerifiedPasswordProofs;
-import java.util.Objects;
-import java.util.UUID;
-
+/** App signatures verified and replay markers reserved, or the login ends here. */
 public sealed interface PasswordProofAdmissionResult {
-    record Admitted(VerifiedPasswordProofs proofs, UUID generation)
-            implements PasswordProofAdmissionResult {
-        public Admitted {
-            Objects.requireNonNull(proofs, "proofs");
-            Objects.requireNonNull(generation, "generation");
-        }
-    }
 
-    record Rejected() implements PasswordProofAdmissionResult { }
+    record Admitted(AdmittedProof proof) implements PasswordProofAdmissionResult { }
 
-    record Unavailable() implements PasswordProofAdmissionResult { }
+    record Denied(LoginDenial why) implements PasswordProofAdmissionResult { }
 }

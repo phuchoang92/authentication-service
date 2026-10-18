@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
-import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakClientAuthentication;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakClientSecretAuthentication;
@@ -41,7 +41,7 @@ class KeycloakPrivateClientConfigurationTest {
         context.withPropertyValues(PREFIX + "authentication-method=CLIENT_SECRET_POST",
                 PREFIX + "client-id=bank-auth-secret", PREFIX + "client-secret=test-only-secret")
                 .run(started -> {
-                    assertThat(started).hasNotFailed().hasSingleBean(DirectGrantPasswordVerifier.class);
+                    assertThat(started).hasNotFailed().hasSingleBean(PasswordVerifier.class);
                     assertThat(started.getBean(KeycloakClientAuthentication.class))
                             .isInstanceOf(KeycloakClientSecretAuthentication.class);
                     var properties = started.getBean(KeycloakPrivateClientProperties.class);
@@ -54,7 +54,7 @@ class KeycloakPrivateClientConfigurationTest {
     @Test
     void defaultsPreservePrivateKeyJwtAndExistingClientIdWithoutRequiringSecret() {
         context.withPropertyValues(PREFIX + "private-jwk=" + privateJwk).run(started -> {
-            assertThat(started).hasNotFailed().hasSingleBean(DirectGrantPasswordVerifier.class);
+            assertThat(started).hasNotFailed().hasSingleBean(PasswordVerifier.class);
             assertThat(started.getBean(KeycloakClientAuthentication.class))
                     .isInstanceOf(KeycloakPrivateKeyJwtAuthentication.class);
             var properties = started.getBean(KeycloakPrivateClientProperties.class);

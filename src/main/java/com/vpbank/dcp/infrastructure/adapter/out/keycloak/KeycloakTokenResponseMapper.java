@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.out.keycloak;
 
-import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerifierUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import tools.jackson.databind.JsonNode;
 
@@ -14,7 +14,7 @@ final class KeycloakTokenResponseMapper {
         JsonNode body = response.successBody();
         JsonNode identityToken = body.path("id_token");
         if (!body.isObject() || !identityToken.isString() || identityToken.asString().isBlank()) {
-            throw new KeycloakVerificationUnavailableException();
+            throw new PasswordVerifierUnavailableException();
         }
         return identityToken.asString();
     }
@@ -23,7 +23,7 @@ final class KeycloakTokenResponseMapper {
         JsonNode errorBody = response.errorBody();
         JsonNode errorCode = errorBody.path("error");
         if (!errorBody.isObject() || !errorCode.isString()) {
-            throw new KeycloakVerificationUnavailableException();
+            throw new PasswordVerifierUnavailableException();
         }
         return response.status() == 400 && "invalid_grant".equals(errorCode.asString());
     }

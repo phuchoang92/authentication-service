@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
@@ -80,13 +82,13 @@ class JpaCustomerOwnerAdapterIT {
         String customerId = "customer-" + UUID.randomUUID();
         VerifiedProviderIdentity identity = new VerifiedProviderIdentity("https://keycloak.test/realms/bank", "subject-" + UUID.randomUUID());
         Instant firstCheck = Instant.parse("2026-10-13T07:00:00Z");
-        CustomerAuthenticationState first = new CustomerAuthenticationState(customerId,
+        CustomerAuthenticationState first = new CustomerAuthenticationState(new CustomerNumber(customerId),
                 CustomerStatus.ELIGIBLE, 1, 0, firstCheck);
 
         CustomerOwnerAcceptance created = customers.accept(identity, first, "test-policy");
         assertThat(created).isInstanceOf(CustomerOwnerAcceptance.Accepted.class);
-        UUID storedId = ((CustomerOwnerAcceptance.Accepted) created).subjectId();
-        CustomerAuthenticationState newer = new CustomerAuthenticationState(customerId,
+        SubjectId storedId = ((CustomerOwnerAcceptance.Accepted) created).subject();
+        CustomerAuthenticationState newer = new CustomerAuthenticationState(new CustomerNumber(customerId),
                 CustomerStatus.ELIGIBLE, 2, 0, firstCheck.plusSeconds(30));
         assertThat(customers.accept(identity, newer, "test-policy"))
                 .isEqualTo(new CustomerOwnerAcceptance.Accepted(storedId));
@@ -99,7 +101,7 @@ class JpaCustomerOwnerAdapterIT {
     @Test
     void differentVerifiedIdentityCannotClaimExistingCustomer() {
         String customerId = "customer-" + UUID.randomUUID();
-        CustomerAuthenticationState snapshot = new CustomerAuthenticationState(customerId,
+        CustomerAuthenticationState snapshot = new CustomerAuthenticationState(new CustomerNumber(customerId),
                 CustomerStatus.ELIGIBLE, 1, 0, Instant.parse("2026-10-13T07:00:00Z"));
         customers.accept(new VerifiedProviderIdentity("https://keycloak.test/realms/bank", "owner"), snapshot, "test-policy");
 

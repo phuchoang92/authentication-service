@@ -6,11 +6,10 @@ import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginResponse;
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordTotpRequiredResponse;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordMfaRequiredResponse;
 import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.UUID;
 
 import org.jspecify.annotations.NonNull;
 import org.springframework.http.CacheControl;
@@ -26,7 +25,7 @@ public final class PasswordLoginResponseMapper {
         this.clock = clock;
     }
 
-    public ResponseEntity<PasswordLoginResponse> map(UUID operationId, PasswordLoginResult result) {
+    public ResponseEntity<PasswordLoginResponse> map(PasswordLoginResult result) {
         if (result instanceof PasswordLoginResult.Active(PreparedSession session)) {
             if (!clock.instant().isBefore(session.deadlines().idleExpiresAt())) {
                 return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
@@ -37,15 +36,18 @@ public final class PasswordLoginResponseMapper {
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                     .header("DPoP-Nonce", session.delivery().dpopNonce()).body(body);
         }
-        if (result instanceof PasswordLoginResult.TotpRequired pending) {
+        if (result instanceof PasswordLoginResult.MfaRequired pending) {
             if (!clock.instant().isBefore(pending.expiresAt())) {
                 return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
             }
-            var body = new PasswordTotpRequiredResponse("MFA_REQUIRED", pending.authenticationId(),
-                    new PasswordTotpRequiredResponse.Challenge(pending.challengeId(), "TOTP",
-                            pending.expiresAt()), pending.token().tokenEnvelope(),
-                    pending.token().receipt(), "authentication:mfa");
-            return ResponseEntity.status(HttpStatus.ACCEPTED).cacheControl(CacheControl.noStore()).body(body);
+            var body = new PasswordMfaRequiredResponse("MFA_REQUIRED", pending.authenticationId(),
+                    pending.expiresAt(), pending.mfaTransactionId(),
+                    pending.token().tokenEnvelope(), pending.token().receipt(),
+                    Math.max(1, Math.min(900,
+                            Duration.between(clock.instant(), pending.expiresAt()).toSeconds())));
+            // The nonce is Auth's own authentication id; the MFA transaction is not a DPoP nonce.
+            return ResponseEntity.status(HttpStatus.ACCEPTED).cacheControl(CacheControl.noStore())
+                    .header("DPoP-Nonce", pending.authenticationId()).body(body);
         }
         if (result instanceof PasswordLoginResult.Rejected) {
             return problem(HttpStatus.UNAUTHORIZED, "REQUEST_REJECTED");
@@ -56,13 +58,21 @@ public final class PasswordLoginResponseMapper {
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
     }
 
+    /** The MFA service has not accepted the transaction yet; the App may elevate and retry. */
+    public ResponseEntity<PasswordLoginResponse> mfaNotPassed(String authenticationId) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).cacheControl(CacheControl.noStore())
+                .header("DPoP-Nonce", authenticationId)
+                .body(new PasswordLoginErrorResponse("MFA_NOT_PASSED", "Complete MFA and retry",
+                        java.util.UUID.randomUUID(), "RETRY_MFA"));
+    }
+
     private @NonNull PasswordLoginResponse getLoginResponse(PreparedSession session, long seconds) {
         SessionActivationSnapshot snapshot = session.snapshot();
         return new PasswordLoginActiveResponse("ACTIVE",
                 session.delivery().tokenEnvelope(), session.delivery().receipt(), Math.min(seconds, 3600), "banking",
                 new PasswordLoginActiveResponse.Session(session.deadlines().idleExpiresAt(),
                         session.deadlines().absoluteExpiresAt()),
-                new PasswordLoginActiveResponse.Security(true, bindingIds.encode(snapshot.context().bindingId()),
+                new PasswordLoginActiveResponse.Security(true, bindingIds.encode(snapshot.context().bindingId().value()),
                         snapshot.biometricLoginEnabled(), new PasswordLoginActiveResponse.Assurance(
                         snapshot.assurance().devicePossession().code(), snapshot.assurance().platformEvidence().code(),
                         snapshot.assurance().biometricEnforcement().code())));
@@ -74,6 +84,6 @@ public final class PasswordLoginResponseMapper {
                 : "The request was rejected";
         return ResponseEntity.status(status).cacheControl(CacheControl.noStore())
                 .body(new PasswordLoginErrorResponse(code, message,
-                        UUID.randomUUID(), "START_NEW_LOGIN"));
+                        java.util.UUID.randomUUID(), "START_NEW_LOGIN"));
     }
 }

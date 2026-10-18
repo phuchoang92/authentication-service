@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
@@ -109,55 +111,66 @@ class JpaLoginDeviceAdapterIT {
 
     @Test
     void currentDeviceRequiresOwnerChannelAndInstallation() {
-        UUID customerId = UUID.randomUUID();
-        UUID bindingId = UUID.randomUUID();
-        ProtectedDeviceId protectedId = deviceIds.protect(customerId, CHANNEL, bindingId, INSTALLATION);
-        seed(customerId, bindingId, protectedId);
-        String externalId = publicIds.encode(bindingId);
+        SubjectId subject = new SubjectId(UUID.randomUUID());
+        BindingId bindingId = new BindingId(UUID.randomUUID());
+        ProtectedDeviceId protectedId = deviceIds.protect(subject.value(), CHANNEL, bindingId.value(), INSTALLATION);
+        seed(subject, bindingId, protectedId);
+        String externalId = publicIds.encode(bindingId.value());
 
-        assertThat(devices.current(customerId, CHANNEL, INSTALLATION, externalId))
+        assertThat(devices.current(subject, CHANNEL, INSTALLATION, externalId))
                 .get().satisfies(device -> {
                     assertThat(device.primary()).isTrue();
                     assertThat(device.installationMatches()).isTrue();
                     assertThat(device.bindingId()).isEqualTo(bindingId);
                 });
-        assertThat(devices.current(customerId, CHANNEL, "different-installation-123456", externalId))
+        assertThat(devices.current(subject, CHANNEL, "different-installation-123456", externalId))
                 .get().satisfies(device -> assertThat(device.installationMatches()).isFalse());
-        assertThat(devices.current(UUID.randomUUID(), CHANNEL, INSTALLATION, externalId)).isEmpty();
-        assertThat(devices.current(customerId, "different-channel", INSTALLATION, externalId)).isEmpty();
+        assertThat(devices.currentByBinding(subject, CHANNEL, INSTALLATION, bindingId))
+                .get().satisfies(device -> assertThat(device.installationMatches()).isTrue());
+        assertThat(devices.currentByBinding(new SubjectId(UUID.randomUUID()), CHANNEL, INSTALLATION, bindingId)).isEmpty();
+        assertThat(devices.current(new SubjectId(UUID.randomUUID()), CHANNEL, INSTALLATION, externalId)).isEmpty();
+        assertThat(devices.current(subject, "different-channel", INSTALLATION, externalId)).isEmpty();
         assertThat(devices.keyForProof(externalId)).isPresent();
-        assertThat(devices.keyForProof(bindingId.toString())).isEmpty();
-        assertThat(sessionSecurity.current(customerId, bindingId, CHANNEL))
+        assertThat(devices.keyForProof(bindingId.value().toString())).isEmpty();
+        assertThat(sessionSecurity.current(subject, bindingId, CHANNEL))
                 .get().satisfies(security -> {
-                    assertThat(security.customerEligible()).isTrue();
-                    assertThat(security.deviceActive()).isTrue();
-                    assertThat(security.primary()).isTrue();
-                    assertThat(security.customerStatusVersion()).isEqualTo(1);
+                    assertThat(security.customer().eligible()).isTrue();
+                    assertThat(security.device().active()).isTrue();
+                    assertThat(security.device().primary()).isTrue();
+                    assertThat(security.customer().statusVersion()).isEqualTo(1);
+                    // Distinct seeded values: proves each aliased column maps to its own
+                    // component. Equal values would hide a swap between same-typed columns.
+                    assertThat(security.versions().customerSecurityVersion()).isEqualTo(11);
+                    assertThat(security.versions().credentialSecurityVersion()).isEqualTo(22);
+                    assertThat(security.versions().deviceSecurityVersion()).isEqualTo(33);
                     assertThat(security.biometricEnabled()).isFalse();
                 });
     }
 
-    private void seed(UUID customerId, UUID bindingId, ProtectedDeviceId protectedId) {
+    private void seed(SubjectId subject, BindingId bindingId, ProtectedDeviceId protectedId) {
         jdbc.update("""
                 INSERT INTO auth_customer
-                  (id, customer_id, customer_status_version, customer_status_checked_at,
+                  (id, customer_id, customer_status_version, customer_security_version,
+                   credential_security_version, customer_status_checked_at,
                    status, policy_version, created_at, updated_at)
-                VALUES (UUID_TO_BIN(?), ?, 1, UTC_TIMESTAMP(6), 'ELIGIBLE', 'test',
+                VALUES (UUID_TO_BIN(?), ?, 1, 11, 22, UTC_TIMESTAMP(6), 'ELIGIBLE', 'test',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, customerId.toString(), "customer-" + customerId);
+                """, subject.toString(), "customer-" + subject);
         jdbc.update("""
                 INSERT INTO auth_trusted_device
                   (id, auth_customer_id, channel, device_id_lookup, device_id_lookup_key_id,
                    device_id_ciphertext, device_id_key_id, platform, label, status,
                    device_public_key, device_public_key_hash, device_key_algorithm,
                    trust_method, trust_policy_version, possession_assurance,
+                   device_security_version,
                    trusted_at, expires_at, is_primary, created_at, updated_at)
                 VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, ?, ?, ?, 'ANDROID',
                         'Test device', 'ACTIVE', X'01020304', UNHEX(SHA2(?, 256)),
                         'ES256', 'NFC_FACE_SMS_OTP', 'test-policy', 'MFA_KEY_POSSESSION',
+                        33,
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 90 DAY, 1,
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, bindingId.toString(), customerId.toString(), CHANNEL,
+                """, bindingId.toString(), subject.toString(), CHANNEL,
                 protectedId.lookup().bytes(), protectedId.lookupKeyId(),
                 protectedId.ciphertext(), protectedId.encryptionKeyId(), "public-key-" + bindingId);
     }

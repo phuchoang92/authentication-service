@@ -14,9 +14,9 @@ import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
-import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
-import com.vpbank.dcp.core.port.out.keycloak.PasswordVerificationOutcome;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerifierUnavailableException;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerification;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerificationOutcome;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import java.time.Clock;
@@ -52,7 +52,7 @@ class KeycloakDirectGrantPasswordVerifierTest {
         var verifier = new KeycloakDirectGrantPasswordVerifier(client,
                 mock(KeycloakIdTokenVerifier.class));
 
-        assertThrows(KeycloakVerificationUnavailableException.class,
+        assertThrows(PasswordVerifierUnavailableException.class,
                 () -> verifier.verify(new PasswordVerification("alice", "private-password")));
     }
 
@@ -84,7 +84,7 @@ class KeycloakDirectGrantPasswordVerifierTest {
         assertEquals("immutable-sub", ((PasswordVerificationOutcome.Verified) result)
                 .identity().subject());
         ExternalHttpClient.Response<JsonNode, JsonNode> missingIdentity = successReply(null);
-        assertThrows(KeycloakVerificationUnavailableException.class, () -> {
+        assertThrows(PasswordVerifierUnavailableException.class, () -> {
             when(client.requestTokens(any(), any())).thenReturn(missingIdentity);
             gateway.verify(new PasswordVerification("alice", "private-password"));
         });

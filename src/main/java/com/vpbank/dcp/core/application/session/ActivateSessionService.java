@@ -1,5 +1,6 @@
 package com.vpbank.dcp.core.application.session;
 
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.port.in.session.ActivateSessionCommand;
 import com.vpbank.dcp.core.port.in.session.ActivateSessionUseCase;
@@ -34,11 +35,11 @@ public final class ActivateSessionService implements ActivateSessionUseCase {
     public SessionActivationResult activate(ActivateSessionCommand command) {
         Objects.requireNonNull(command, "command");
         UUID operationId = command.operationId();
-        UUID subjectId = command.subjectId();
+        SubjectId subject = command.subject();
         PreparedSession candidate = store.prepared(operationId).orElse(null);
         if (candidate == null) {
-            SessionActivationSnapshot snapshot = store.currentSnapshot(operationId, subjectId).orElse(null);
-            if (snapshot == null || !snapshot.context().subjectId().equals(subjectId)) {
+            SessionActivationSnapshot snapshot = store.currentSnapshot(operationId, subject).orElse(null);
+            if (snapshot == null || !snapshot.context().subject().equals(subject)) {
                 return new SessionActivationResult.Rejected();
             }
             UUID generation = authority.currentGeneration().orElse(null);
@@ -55,7 +56,7 @@ public final class ActivateSessionService implements ActivateSessionUseCase {
             candidate = prepared instanceof PrepareSessionResult.Existing(PreparedSession session)
                     ? session : ((PrepareSessionResult.Prepared) prepared).session();
         }
-        if (!candidate.snapshot().context().subjectId().equals(subjectId)
+        if (!candidate.snapshot().context().subject().equals(subject)
                 || !clock.instant().isBefore(candidate.delivery().deliveryDeadline())) {
             return new SessionActivationResult.Rejected();
         }

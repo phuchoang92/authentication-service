@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
 import com.vpbank.dcp.core.port.out.device.LoginDeviceSnapshot;
 import com.vpbank.dcp.core.port.out.device.LoginDeviceUnavailableException;
@@ -43,21 +45,21 @@ public final class JpaLoginDeviceAdapter implements LoginDeviceRepository {
     }
 
     @Override
-    public Optional<LoginDeviceSnapshot> current(UUID customerId, String channel,
+    public Optional<LoginDeviceSnapshot> current(SubjectId owner, String channel,
                                                  String installationId, String publicBindingId) {
         Optional<UUID> bindingId = publicIds.decode(publicBindingId);
         if (bindingId.isEmpty()) {
             return Optional.empty();
         }
-        return currentByBinding(customerId, channel, installationId, bindingId.get());
+        return currentByBinding(owner, channel, installationId, new BindingId(bindingId.get()));
     }
 
     @Override
-    public Optional<LoginDeviceSnapshot> currentByBinding(UUID customerId, String channel,
-                                                           String installationId, UUID bindingId) {
+    public Optional<LoginDeviceSnapshot> currentByBinding(SubjectId owner, String channel,
+                                                           String installationId, BindingId bindingId) {
         try {
             return Objects.requireNonNull(transactions.execute(ignored -> devices.lockCurrent(
-                    customerId, channel, bindingId).map(device -> toSnapshot(device, installationId))));
+                    owner.value(), channel, bindingId.value()).map(device -> toSnapshot(device, installationId))));
         } catch (DataAccessException | TransactionException failure) {
             throw new LoginDeviceUnavailableException(failure);
         }
@@ -72,7 +74,7 @@ public final class JpaLoginDeviceAdapter implements LoginDeviceRepository {
                 matches = true;
             }
         }
-        return new LoginDeviceSnapshot(device.bindingId(), device.customerId(), device.channel(),
+        return new LoginDeviceSnapshot(new BindingId(device.bindingId()), new SubjectId(device.customerId()), device.channel(),
                 device.platform(), matches, "ACTIVE".equals(device.status()), device.primary(),
                 device.expiresAt(), device.securityVersion(), new StoredDeviceKey(
                 device.publicKey(), com.vpbank.dcp.core.domain.security.Digest32.fromBytes(

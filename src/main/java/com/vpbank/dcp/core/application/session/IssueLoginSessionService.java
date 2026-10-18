@@ -17,7 +17,6 @@ import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
 import com.vpbank.dcp.core.port.out.session.SessionAuthority;
 import com.vpbank.dcp.core.port.out.session.SessionCryptography;
-import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -52,7 +51,7 @@ public final class IssueLoginSessionService implements IssueLoginSessionUseCase 
         if (before == null) {
             return new SessionLoginResult.Unavailable();
         }
-        if (!eligible(before, evidence, now)) {
+        if (eligible(before, evidence, now)) {
             return new SessionLoginResult.Rejected();
         }
         UUID generation = authority.currentGeneration().orElse(null);
@@ -68,7 +67,7 @@ public final class IssueLoginSessionService implements IssueLoginSessionUseCase 
             return new SessionLoginResult.Unavailable();
         }
         LoginSessionSecurity after = current(evidence);
-        if (after == null || !after.equals(before) || !eligible(after, evidence, now)
+        if (after == null || !after.equals(before) || eligible(after, evidence, now)
                 || !authority.deliverable(prepared)) {
             authority.revoke(prepared);
             return new SessionLoginResult.Unavailable();
@@ -78,7 +77,7 @@ public final class IssueLoginSessionService implements IssueLoginSessionUseCase 
 
     private LoginSessionSecurity current(SessionLoginEvidence evidence) {
         try {
-            return security.current(evidence.customerId(), evidence.device().bindingId(),
+            return security.current(evidence.subject(), evidence.device().bindingId(),
                     evidence.device().channel()).orElse(null);
         } catch (LoginSessionSecurityUnavailableException failure) {
             return null;
@@ -88,23 +87,22 @@ public final class IssueLoginSessionService implements IssueLoginSessionUseCase 
     private boolean eligible(LoginSessionSecurity current, SessionLoginEvidence evidence, Instant now) {
         Instant customerDeadline = evidence.customer().checkedAt().plus(customerStatusMaximumAge);
         boolean primaryAllowed = evidence.confirmation() != LoginConfirmation.PRIMARY_PASSWORD
-                || current.primary();
-        return current.customerEligible() && current.deviceActive() && primaryAllowed
-                && now.isBefore(current.deviceExpiresAt())
-                && now.isBefore(customerDeadline)
-                && current.customerStatusVersion() == evidence.customer().statusVersion()
-                && current.deviceSecurityVersion() == evidence.device().securityVersion();
+                || current.device().primary();
+        return !current.customer().eligible() || !current.device().active() || !primaryAllowed
+                || !now.isBefore(current.device().expiresAt())
+                || !now.isBefore(customerDeadline)
+                || current.customer().statusVersion() != evidence.customer().statusVersion()
+                || current.versions().deviceSecurityVersion() != evidence.device().securityVersion();
     }
 
     private SessionActivationSnapshot snapshot(UUID operationId, SessionLoginEvidence evidence,
                                                LoginSessionSecurity current) {
         return new SessionActivationSnapshot(
-                new SessionActivationContext(operationId, evidence.customerId(),
+                new SessionActivationContext(operationId, evidence.subject(),
                         evidence.device().channel(), evidence.device().bindingId()),
                 evidence.keys(),
-                new SessionSecurityVersions(current.customerSecurityVersion(),
-                        current.credentialSecurityVersion(), current.deviceSecurityVersion()),
-                new CustomerStatusFreshness(current.customerStatusVersion(),
+                current.versions(),
+                new CustomerStatusFreshness(current.customer().statusVersion(),
                         evidence.customer().checkedAt().plus(customerStatusMaximumAge)),
                 new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
                         SessionAssurance.PlatformEvidence.NONE,

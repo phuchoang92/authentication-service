@@ -1,5 +1,6 @@
 package com.vpbank.dcp.infrastructure.config;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -33,7 +34,7 @@ class CustomerLoginConfigurationTest {
             verifyNoInteractions(directory);
             var identity = new VerifiedProviderIdentity("https://auth.bank.test/realms/mobile", "kc-a");
             Instant checkedAt = Instant.parse("2026-10-13T00:00:00Z");
-            var customer = new CustomerAuthenticationState("CUST-1", CustomerStatus.ELIGIBLE, 1, 0, checkedAt);
+            var customer = new CustomerAuthenticationState(new CustomerNumber("CUST-1"), CustomerStatus.ELIGIBLE, 1, 0, checkedAt);
             when(directory.resolve(identity)).thenReturn(new CustomerResolution.Found(customer));
             var customers = started.getBean(CheckCustomerLoginEligibilityUseCase.class);
             assertThat(customers.checkEligibility(identity, checkedAt.plusMillis(999)))

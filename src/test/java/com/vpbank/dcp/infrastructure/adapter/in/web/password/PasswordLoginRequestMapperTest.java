@@ -63,7 +63,7 @@ class PasswordLoginRequestMapperTest {
         }
         json = builder.build();
         Clock clock = Clock.fixed(Instant.parse("2026-10-12T00:00:00Z"), ZoneOffset.UTC);
-        var mapper = new PasswordLoginRequestMapper(new PasswordFlowProperties("k1", "unused", "v1", 120_000, 300_000), json, clock);
+        var mapper = new PasswordLoginRequestMapper(new PasswordFlowProperties("v1", 120_000, 300_000), json, clock);
         DpopProofDecoder decoder = mock(DpopProofDecoder.class);
         when(decoder.verify(any(), any())).thenReturn(dpop);
         validator.afterPropertiesSet();

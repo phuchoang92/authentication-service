@@ -8,11 +8,15 @@ import com.vpbank.dcp.infrastructure.persistence.projection.DeviceRevocationAudi
 import com.vpbank.dcp.infrastructure.persistence.projection.TrustedDeviceStateView;
 import com.vpbank.dcp.infrastructure.persistence.repository.SecurityAuditPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.TrustedDeviceRevocationPersistenceRepository;
-import java.util.Objects;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** Records only the SQL transition; a caller must confirm live denial before reporting revoke success. */
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * Records only the SQL transition; a caller must confirm live denial before reporting revoke success.
+ */
 @Repository
 public class JpaDeviceRevocationAdapter implements DeviceRevocationRepository {
     private final TrustedDeviceRevocationPersistenceRepository devices;
@@ -43,7 +47,9 @@ public class JpaDeviceRevocationAdapter implements DeviceRevocationRepository {
         if (!devices.lockCustomer(command)) {
             return new DeviceRevocationRecordResult.Conflict();
         }
-        boolean primaryTarget = command.bindingId().equals(devices.findPrimary(command));
+        // findPrimary stays a raw UUID: only adapters may build core value types (ArchUnit).
+        UUID currentPrimary = devices.findPrimary(command);
+        boolean primaryTarget = command.bindingId().value().equals(currentPrimary);
         TrustedDeviceStateView device = devices.lockDevice(command);
         if (device == null) {
             return new DeviceRevocationRecordResult.Conflict();

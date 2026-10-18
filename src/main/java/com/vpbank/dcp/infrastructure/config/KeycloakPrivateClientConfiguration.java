@@ -2,7 +2,7 @@ package com.vpbank.dcp.infrastructure.config;
 
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.JWK;
-import com.vpbank.dcp.core.port.out.keycloak.DirectGrantPasswordVerifier;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalEndpoint;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
@@ -49,7 +49,7 @@ public class KeycloakPrivateClientConfiguration {
     }
 
     @Bean
-    DirectGrantPasswordVerifier directGrantPasswordVerifier(HttpClient workloadHttpClient,
+    PasswordVerifier directGrantPasswordVerifier(HttpClient workloadHttpClient,
                                                             KeycloakPrivateClientProperties properties,
                                                             KeycloakIdTokenTrustProperties trust,
                                                             KeycloakClientAuthentication authentication,

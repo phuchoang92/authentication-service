@@ -1,5 +1,6 @@
 package com.vpbank.dcp.core.domain.customer;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -43,6 +44,6 @@ class CustomerStateOrderTest {
     }
 
     private CustomerAuthenticationState state(CustomerStatus status, long version, long block) {
-        return new CustomerAuthenticationState("CUST-001", status, version, block, checkedAt);
+        return new CustomerAuthenticationState(new CustomerNumber("CUST-001"), status, version, block, checkedAt);
     }
 }

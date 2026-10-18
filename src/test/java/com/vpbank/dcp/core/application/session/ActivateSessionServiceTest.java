@@ -1,5 +1,7 @@
 package com.vpbank.dcp.core.application.session;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
@@ -45,14 +47,14 @@ class ActivateSessionServiceTest {
     private final SessionAuthority authority = mock(SessionAuthority.class);
     private final ActivateSessionService service = new ActivateSessionService(repository,
             cryptography, authority, Clock.fixed(NOW, ZoneOffset.UTC));
-    private final ActivateSessionCommand command = new ActivateSessionCommand(UUID.randomUUID(), UUID.randomUUID());
+    private final ActivateSessionCommand command = new ActivateSessionCommand(UUID.randomUUID(), new SubjectId(UUID.randomUUID()));
     private final UUID generation = UUID.randomUUID();
-    private final SessionActivationSnapshot snapshot = snapshot(command.subjectId());
+    private final SessionActivationSnapshot snapshot = snapshot(command.subject());
     private final PreparedSession candidate = candidate(snapshot, NOW.plusSeconds(120));
 
     @Test
     void preparesDurablyBeforePublishingAndReauthorizesBeforeDelivery() {
-        when(repository.currentSnapshot(command.operationId(), command.subjectId())).thenReturn(Optional.of(snapshot));
+        when(repository.currentSnapshot(command.operationId(), command.subject())).thenReturn(Optional.of(snapshot));
         when(authority.currentGeneration()).thenReturn(Optional.of(generation));
         when(cryptography.prepare(snapshot, generation, SessionDeadlines.createdAt(NOW), NOW.plusSeconds(120)))
                 .thenReturn(candidate);
@@ -63,7 +65,7 @@ class ActivateSessionServiceTest {
 
         var order = inOrder(repository, cryptography, authority);
         order.verify(repository).prepared(command.operationId());
-        order.verify(repository).currentSnapshot(command.operationId(), command.subjectId());
+        order.verify(repository).currentSnapshot(command.operationId(), command.subject());
         order.verify(authority).currentGeneration();
         order.verify(cryptography).prepare(snapshot, generation, SessionDeadlines.createdAt(NOW), NOW.plusSeconds(120));
         order.verify(repository).prepare(candidate);
@@ -89,7 +91,7 @@ class ActivateSessionServiceTest {
     @Test
     void losingPreparationPublishesTheOriginalWinnerAndDiscardsItsOwnCandidate() {
         PreparedSession winner = candidate(snapshot, NOW.plusSeconds(100));
-        when(repository.currentSnapshot(command.operationId(), command.subjectId())).thenReturn(Optional.of(snapshot));
+        when(repository.currentSnapshot(command.operationId(), command.subject())).thenReturn(Optional.of(snapshot));
         when(authority.currentGeneration()).thenReturn(Optional.of(generation));
         when(cryptography.prepare(any(), any(), any(), any())).thenReturn(candidate);
         when(repository.prepare(candidate)).thenReturn(new PrepareSessionResult.Existing(winner));
@@ -108,8 +110,8 @@ class ActivateSessionServiceTest {
 
     @Test
     void wrongCurrentOwnerCannotCreateASession() {
-        when(repository.currentSnapshot(command.operationId(), command.subjectId()))
-                .thenReturn(Optional.of(snapshot(UUID.randomUUID())));
+        when(repository.currentSnapshot(command.operationId(), command.subject()))
+                .thenReturn(Optional.of(snapshot(new SubjectId(UUID.randomUUID()))));
         assertThat(service.activate(command)).isInstanceOf(SessionActivationResult.Rejected.class);
         verifyNoInteractions(cryptography, authority);
     }
@@ -117,7 +119,7 @@ class ActivateSessionServiceTest {
     @Test
     void wrongStoredOwnerCannotPublishOrDeliver() {
         when(repository.prepared(command.operationId()))
-                .thenReturn(Optional.of(candidate(snapshot(UUID.randomUUID()), NOW.plusSeconds(120))));
+                .thenReturn(Optional.of(candidate(snapshot(new SubjectId(UUID.randomUUID())), NOW.plusSeconds(120))));
         assertThat(service.activate(command)).isInstanceOf(SessionActivationResult.Rejected.class);
         verifyNoInteractions(cryptography, authority);
         verify(repository, never()).markApplied(any(), any());
@@ -132,7 +134,7 @@ class ActivateSessionServiceTest {
 
     @Test
     void missingGenerationRemainsProcessingWithoutPreparingAToken() {
-        when(repository.currentSnapshot(command.operationId(), command.subjectId())).thenReturn(Optional.of(snapshot));
+        when(repository.currentSnapshot(command.operationId(), command.subject())).thenReturn(Optional.of(snapshot));
         assertThat(service.activate(command)).isInstanceOf(SessionActivationResult.Processing.class);
         verifyNoInteractions(cryptography);
         verify(repository, never()).prepare(any());
@@ -141,7 +143,7 @@ class ActivateSessionServiceTest {
 
     @Test
     void rejectedDurablePreparationCannotPublish() {
-        when(repository.currentSnapshot(command.operationId(), command.subjectId())).thenReturn(Optional.of(snapshot));
+        when(repository.currentSnapshot(command.operationId(), command.subject())).thenReturn(Optional.of(snapshot));
         when(authority.currentGeneration()).thenReturn(Optional.of(generation));
         when(cryptography.prepare(any(), any(), any(), any())).thenReturn(candidate);
         when(repository.prepare(candidate)).thenReturn(new PrepareSessionResult.Rejected());
@@ -182,10 +184,10 @@ class ActivateSessionServiceTest {
         when(authority.deliverable(session)).thenReturn(true);
     }
 
-    private SessionActivationSnapshot snapshot(UUID subjectId) {
+    private SessionActivationSnapshot snapshot(SubjectId subject) {
         return new SessionActivationSnapshot(
-                new SessionActivationContext(command.operationId(), subjectId,
-                        "mobile", UUID.randomUUID()),
+                new SessionActivationContext(command.operationId(), subject,
+                        "mobile", new BindingId(UUID.randomUUID())),
                 new SessionKeyBindings(digest(1), "request-jwk", "response-jwk", digest(2)),
                 new SessionSecurityVersions(1, 2, 3),
                 new CustomerStatusFreshness(4, NOW.plusSeconds(300)),

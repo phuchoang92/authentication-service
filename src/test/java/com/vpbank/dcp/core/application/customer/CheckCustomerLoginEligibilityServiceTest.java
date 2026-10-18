@@ -1,5 +1,6 @@
 package com.vpbank.dcp.core.application.customer;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -87,6 +88,6 @@ class CheckCustomerLoginEligibilityServiceTest {
 
     private CustomerAuthenticationState customer(CustomerStatus status, Instant checkedAt) {
         long blockVersion = status == CustomerStatus.ELIGIBLE ? 0 : 1;
-        return new CustomerAuthenticationState("CUST-001", status, 1, blockVersion, checkedAt);
+        return new CustomerAuthenticationState(new CustomerNumber("CUST-001"), status, 1, blockVersion, checkedAt);
     }
 }

@@ -11,7 +11,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
-import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerifierUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import java.text.ParseException;
 import java.time.Clock;
@@ -72,7 +72,7 @@ public final class KeycloakIdTokenVerifier {
                     || token.getHeader().getX509CertURL() != null
                     || token.getHeader().getCriticalParams() != null
                     || !token.verify(signatureVerifier)) {
-                throw new KeycloakVerificationUnavailableException();
+                throw new PasswordVerifierUnavailableException();
             }
             JWTClaimsSet claims = token.getJWTClaimsSet();
             Instant now = clock.instant();
@@ -87,11 +87,11 @@ public final class KeycloakIdTokenVerifier {
                     || !claims.getExpirationTime().toInstant().isAfter(now)
                     || (claims.getNotBeforeTime() != null
                             && claims.getNotBeforeTime().toInstant().isAfter(now.plusSeconds(5)))) {
-                throw new KeycloakVerificationUnavailableException();
+                throw new PasswordVerifierUnavailableException();
             }
             return new VerifiedProviderIdentity(issuer, claims.getSubject());
         } catch (ParseException | JOSEException | IllegalArgumentException failure) {
-            throw new KeycloakVerificationUnavailableException(failure);
+            throw new PasswordVerifierUnavailableException(failure);
         }
     }
 }

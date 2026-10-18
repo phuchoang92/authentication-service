@@ -5,6 +5,7 @@ import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginRequestMapper;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -14,7 +15,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.time.Clock;
 
 /**
- * Password admission is closed until the replacement flow uses the new device schema.
+ * Integration-only password composition. Production remains fail-closed.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication
@@ -33,7 +34,10 @@ public class PasswordFlowConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "auth.native-session", name = "integration-activation-enabled",
+            havingValue = "false", matchIfMissing = true)
     PasswordLoginUseCase passwordLoginUseCase() {
         return new PasswordLoginUnavailableService();
     }
+
 }

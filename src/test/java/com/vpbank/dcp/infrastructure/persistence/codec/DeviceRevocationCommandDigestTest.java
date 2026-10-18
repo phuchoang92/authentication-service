@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.codec;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.core.domain.device.DeviceOwnership;
@@ -21,14 +23,14 @@ class DeviceRevocationCommandDigestTest {
         assertThat(expected).hasSize(32).isEqualTo(digests.calculate(original));
 
         assertDifferent(original, new RecordDeviceRevocation(
-                new DeviceOwnership(UUID.randomUUID(), original.owner().channel()),
+                new DeviceOwnership(new SubjectId(UUID.randomUUID()), original.owner().channel()),
                 original.bindingId(), original.operationId(), original.expectedVersion(),
                 original.reason(), original.actor(), original.occurredAt()));
         assertDifferent(original, new RecordDeviceRevocation(
-                new DeviceOwnership(original.owner().customerId(), "another-channel"),
+                new DeviceOwnership(original.owner().subject(), "another-channel"),
                 original.bindingId(), original.operationId(), original.expectedVersion(),
                 original.reason(), original.actor(), original.occurredAt()));
-        assertDifferent(original, new RecordDeviceRevocation(original.owner(), UUID.randomUUID(),
+        assertDifferent(original, new RecordDeviceRevocation(original.owner(), new BindingId(UUID.randomUUID()),
                 original.operationId(), original.expectedVersion(), original.reason(),
                 original.actor(), original.occurredAt()));
         assertDifferent(original, new RecordDeviceRevocation(original.owner(), original.bindingId(),
@@ -58,8 +60,8 @@ class DeviceRevocationCommandDigestTest {
     }
 
     private RecordDeviceRevocation command() {
-        return new RecordDeviceRevocation(new DeviceOwnership(UUID.randomUUID(), "neo-mobile"),
-                UUID.randomUUID(), UUID.randomUUID(), 7,
+        return new RecordDeviceRevocation(new DeviceOwnership(new SubjectId(UUID.randomUUID()), "neo-mobile"),
+                new BindingId(UUID.randomUUID()), UUID.randomUUID(), 7,
                 DeviceRevocationReason.CUSTOMER_REQUEST,
                 new SecurityActor(SecurityActorType.CUSTOMER, "customer-1"),
                 Instant.parse("2026-10-13T02:00:00.123456789Z"));

@@ -1,5 +1,6 @@
 package com.vpbank.dcp.core.domain.customer;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
@@ -28,6 +29,6 @@ class CustomerOwnerPolicyTest {
     }
 
     private CustomerAuthenticationState state(CustomerStatus status, long version, long block) {
-        return new CustomerAuthenticationState("CUST-1", status, version, block, now);
+        return new CustomerAuthenticationState(new CustomerNumber("CUST-1"), status, version, block, now);
     }
 }

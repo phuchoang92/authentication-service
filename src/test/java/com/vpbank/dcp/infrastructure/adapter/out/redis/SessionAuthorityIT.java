@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
+import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.domain.device.BindingId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
@@ -46,8 +48,8 @@ class SessionAuthorityIT {
     private LettuceConnectionFactory factory;
     private StringRedisTemplate redis;
     private RedisSessionAuthority authority;
-    private UUID subjectId;
-    private UUID bindingId;
+    private SubjectId subjectId;
+    private BindingId bindingId;
 
     @BeforeEach
     void connect() {
@@ -59,8 +61,8 @@ class SessionAuthorityIT {
         redis.getConnectionFactory().getConnection().serverCommands().flushDb();
         RedisServerIdentity identity = new RedisServerIdentity(redis, new RuntimeKeys(SCOPE));
         identity.initialize();
-        subjectId = UUID.randomUUID();
-        bindingId = UUID.randomUUID();
+        subjectId = new SubjectId(UUID.randomUUID());
+        bindingId = new BindingId(UUID.randomUUID());
         authority = new RedisSessionAuthority(redis, identity, SCOPE,
                 Duration.ofSeconds(60), Clock.systemUTC());
     }

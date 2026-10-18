@@ -1,5 +1,7 @@
 package com.vpbank.dcp.core.port.out.device;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.port.out.password.StoredDeviceKey;
 import java.util.Optional;
 import java.util.UUID;
@@ -8,9 +10,9 @@ import java.util.UUID;
 public interface LoginDeviceRepository {
     Optional<StoredDeviceKey> keyForProof(String publicBindingId);
 
-    Optional<LoginDeviceSnapshot> current(UUID customerId, String channel,
+    Optional<LoginDeviceSnapshot> current(SubjectId owner, String channel,
                                           String installationId, String publicBindingId);
 
-    Optional<LoginDeviceSnapshot> currentByBinding(UUID customerId, String channel,
-                                                   String installationId, UUID bindingId);
+    Optional<LoginDeviceSnapshot> currentByBinding(SubjectId owner, String channel,
+                                                   String installationId, BindingId bindingId);
 }

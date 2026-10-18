@@ -42,7 +42,7 @@ public class CustomerOwnerPersistenceRepository {
         LocalDateTime checkedAt = utc(customer.checkedAt());
         int changed = entityManager.createNativeQuery(CustomerOwnerSql.INSERT_CUSTOMER)
                 .setParameter("id", id.toString())
-                .setParameter("customerId", customer.customerId())
+                .setParameter("customerId", customer.customerNumber().value())
                 .setParameter("providerId", identity.issuer())
                 .setParameter("providerSubject", identity.subject())
                 .setParameter("statusVersion", customer.statusVersion())

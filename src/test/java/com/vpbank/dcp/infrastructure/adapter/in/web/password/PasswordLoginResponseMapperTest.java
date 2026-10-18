@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
+import com.vpbank.dcp.core.domain.device.BindingId;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -33,13 +35,13 @@ import tools.jackson.databind.json.JsonMapper;
 class PasswordLoginResponseMapperTest {
     private static final Instant NOW = Instant.parse("2026-10-12T00:00:00Z");
     private static final UUID OPERATION = UUID.fromString("44444444-4444-4444-8444-444444444444");
-    private static final UUID BINDING = UUID.fromString("22222222-2222-4222-8222-222222222222");
+    private static final BindingId BINDING = new BindingId(UUID.fromString("22222222-2222-4222-8222-222222222222"));
     private final PasswordLoginResponseMapper mapper = new PasswordLoginResponseMapper(Clock.fixed(NOW, ZoneOffset.UTC));
     private final JsonMapper json = new JsonMapper();
 
     @Test
     void activeDtoPreservesPublicJsonFieldsHeadersAndSafeOutput() {
-        var response = mapper.map(OPERATION, new PasswordLoginResult.Active(session(
+        var response = mapper.map(new PasswordLoginResult.Active(session(
                 NOW.plusSeconds(900), NOW.plusSeconds(3600))));
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).isInstanceOf(PasswordLoginActiveResponse.class);
@@ -55,7 +57,7 @@ class PasswordLoginResponseMapperTest {
                  "security":{"deviceTrusted":true,"deviceBindingId":"%s",
                  "biometricLoginEnabled":true,"assurance":{"devicePossession":"MFA_KEY_POSSESSION",
                 "platformEvidence":"NONE","biometricEnforcement":"NOT_APPLICABLE"}}}
-                """.formatted(new OpaqueBindingIdCodec().encode(BINDING))));
+                """.formatted(new OpaqueBindingIdCodec().encode(BINDING.value()))));
         assertThat(response.getBody().toString()).doesNotContain("encrypted-envelope", "signed-receipt");
         assertThat(body.toString()).doesNotContain("password", "lookupDigest", "generation", "sessionId", "dpopNonce");
     }
@@ -73,7 +75,7 @@ class PasswordLoginResponseMapperTest {
     void restrictedTotpResponseContainsNoPlaintextTokenOrSessionId() {
         var token = new PreparedPendingToken(new SessionTokenLookup(new LookupKeyVersion("v1"),
                 Digest32.fromBytes(new byte[32])), "encrypted-pending-token", "signed-pending-receipt");
-        var response = mapper.map(OPERATION, new PasswordLoginResult.TotpRequired(
+        var response = mapper.map(new PasswordLoginResult.TotpRequired(
                 "authentication-opaque", "challenge-opaque", NOW.plusSeconds(120), token));
 
         assertThat(response.getStatusCode().value()).isEqualTo(202);
@@ -81,14 +83,15 @@ class PasswordLoginResponseMapperTest {
         JsonNode body = json.readTree(json.writeValueAsString(response.getBody()));
         assertThat(body.path("status").asText()).isEqualTo("MFA_REQUIRED");
         assertThat(body.path("scope").asText()).isEqualTo("authentication:mfa");
-        assertThat(body.path("challenge").path("method").asText()).isEqualTo("TOTP");
+        assertThat(body.path("challenge").path("type").asText()).isEqualTo("MFA_CONFIRMED");
+        assertThat(body.path("challenge").path("proofFormat").asText()).isEqualTo("TOTP_JWE");
         assertThat(body.toString()).doesNotContain("sessionId", "lookupDigest", "secret", "password");
         assertThat(response.getBody().toString()).doesNotContain("encrypted-pending-token");
     }
 
     @Test
     void remainingExpiryIsStillBoundedAndDatesRemainStringsWithFractionalSeconds() {
-        var response = mapper.map(OPERATION, new PasswordLoginResult.Active(session(
+        var response = mapper.map(new PasswordLoginResult.Active(session(
                 NOW.plusSeconds(30).plusNanos(123456000), NOW.plusSeconds(90))));
         JsonNode body = json.readTree(json.writeValueAsString(response.getBody()));
         assertThat(body.path("expires_in").asLong()).isEqualTo(90);
@@ -96,7 +99,7 @@ class PasswordLoginResponseMapperTest {
     }
 
     private void problem(PasswordLoginResult result, int status, String code) {
-        var response = mapper.map(OPERATION, result);
+        var response = mapper.map(result);
         assertThat(response.getStatusCode().value()).isEqualTo(status);
         assertThat(response.getBody()).isInstanceOf(PasswordLoginErrorResponse.class);
         JsonNode body = json.readTree(json.writeValueAsString(response.getBody()));
@@ -114,7 +117,7 @@ class PasswordLoginResponseMapperTest {
     private PreparedSession session(Instant idle, Instant absolute) {
         var snapshot = mock(SessionActivationSnapshot.class);
         when(snapshot.context()).thenReturn(new SessionActivationContext(UUID.randomUUID(),
-                UUID.randomUUID(), "mobile", BINDING));
+                new SubjectId(UUID.randomUUID()), "mobile", BINDING));
         when(snapshot.biometricLoginEnabled()).thenReturn(true);
         when(snapshot.assurance()).thenReturn(new SessionAssurance(SessionAssurance.DevicePossession.MFA_KEY_POSSESSION,
                 SessionAssurance.PlatformEvidence.NONE, SessionAssurance.BiometricEnforcement.NOT_APPLICABLE));

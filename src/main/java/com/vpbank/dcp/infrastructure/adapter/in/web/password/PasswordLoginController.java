@@ -40,6 +40,6 @@ public final class PasswordLoginController {
                                                        @Valid @RequestBody PasswordLoginRequest body,
                                                        @RequestAttribute(DpopRequestAttributes.VERIFIED_DPOP_PROOF) VerifiedDpopProof dpop) {
         var command = requests.map(PasswordLoginHeaders.from(headers), body, dpop);
-        return responses.map(command.operation().operationId(), passwords.login(command));
+        return responses.map(passwords.login(command));
     }
 }

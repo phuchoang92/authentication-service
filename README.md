@@ -1,4 +1,16 @@
-# Authentication Service v1 — database simplification in progress
+# Authentication Service v1 — integration-only login build
+
+**Implementation status (2026-10-13):** With `AUTH_INTEGRATION_ACTIVE_ENABLED=false` (the
+default), password login remains closed and production admission cannot issue a banking
+token. Enabling it is only for an isolated integration environment. The new-schema
+password use case now verifies Kreq/Kdev, dispatches one Keycloak Direct Grant and
+checks Customer/device state. `LAST_TRUSTED` can publish an encrypted ACTIVE session;
+`OTHER_TRUSTED` can issue a restricted TOTP challenge and consume one verified code
+before session issuance. These branches have unit and component coverage, but **not**
+yet a demonstrated whole HTTP-to-Keycloak-to-MySQL/Redis end-to-end test. `NEW_DEVICE`
+still fails closed: NFC/face/SMS, durable reset ACK, trust activation and automatic
+TOTP enrollment are not connected. No runtime claim should be inferred from the design
+OpenAPI. BFF/mobile integration and production Customer-event policy remain out of scope.
 
 **Current warning:** V11 retires the old journey/operation/device-key storage cluster;
 V12 removes `auth_customer_app` on an empty isolated device schema. Current device rows
@@ -6,18 +18,17 @@ use `channel` instead of `app_id` and `is_primary` instead of a separate primary
 V13 adds an Auth-owned, encrypted TOTP credential for each trusted device. V14 adds a
 credential-wide failed-attempt budget and timed lockout. The verifier accepts six-digit
 SHA-1 codes at 30-second intervals with a ±1-step window, consumes each matched step
-once in MySQL, and refuses a revoked/expired binding. It is **not** an enabled login,
-trust, or transfer factor: enrollment/provisioning, challenge binding, an active login
-session and transfer-policy integration are not implemented. The lockout limit must be
-supplied by validated configuration before this verifier is wired into a public flow.
+once in MySQL, and refuses a revoked/expired binding. It is **not** a complete login,
+trust, or transfer capability: enrollment/provisioning and transfer-policy integration
+are not implemented. Its integration-only TOTP login branch requires configured lockout limits.
 The old password/device/session persistence path has been removed.
-The password endpoint now returns a safe
+By default the password endpoint returns a safe
 `TEMPORARILY_UNAVAILABLE` response; it does not call Keycloak or issue a banking token.
-It does not write a failure row or lock an operation. This is **not** a working login flow.
+It does not write a failure row or lock an operation. This is **not** a production-ready login flow.
 Do not deploy this build or use it for login until a replacement password flow and its
 tests are completed. V11 rejects populated old tables and is not a data migration.
 V11/V12 migration and DB-only revoke tests pass on isolated MySQL 8.4. This does not
-prove a replacement password login; that flow remains unavailable.
+prove the replacement password login end-to-end; that acceptance is still pending.
 
 This is the isolated, clean-build G1 source tree, renamed from `authentication-service-rebuild` after the old project was removed. It is not connected to the running database, Redis, deployment, or Maven reactor. The design input is `../docs/DD/target` and the coding authority is `../docs/authentication-documentation/docs/design-v1/code-design-rules-and-patterns.md`.
 

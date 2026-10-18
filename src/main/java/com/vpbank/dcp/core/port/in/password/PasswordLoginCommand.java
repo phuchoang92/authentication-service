@@ -1,6 +1,6 @@
 package com.vpbank.dcp.core.port.in.password;
 
-import com.vpbank.dcp.core.port.out.keycloak.PasswordVerification;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerification;
 import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
 import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
 

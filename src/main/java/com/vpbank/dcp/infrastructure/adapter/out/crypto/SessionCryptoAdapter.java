@@ -68,7 +68,7 @@ public final class SessionCryptoAdapter implements SessionCryptography {
             byte[] candidateBytes = encoding.encode(List.of("PASSWORD_ACTIVE_V1",
                     context.operationId().toString(), intentId.toString(), sessionId.toString(),
                     generation.toString(), lookupVersion.value(), lookupDigest.base64Url(),
-                    context.subjectId().toString(), context.bindingId().toString(),
+                    context.subject().value().toString(), context.bindingId().value().toString(),
                     keys.requestKey().base64Url(),
                     Long.toString(deadlines.idleExpiresAt().toEpochMilli()),
                     Long.toString(deadlines.absoluteExpiresAt().toEpochMilli()),

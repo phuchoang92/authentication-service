@@ -1,5 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.out.customer;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
@@ -38,7 +39,8 @@ public final class CustomerDirectoryAdapter implements CustomerDirectory {
     }
 
     @Override
-    public CustomerAuthenticationState currentStatus(String customerId) {
+    public CustomerAuthenticationState currentStatus(CustomerNumber customerNumber) {
+        String customerId = customerNumber.value();
         if (!CustomerHttpEndpoints.isValidCustomerId(customerId)) {
             throw new CustomerDirectoryUnavailableException();
         }

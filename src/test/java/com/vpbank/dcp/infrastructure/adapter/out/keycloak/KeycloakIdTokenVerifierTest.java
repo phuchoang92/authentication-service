@@ -11,7 +11,7 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.port.out.keycloak.KeycloakVerificationUnavailableException;
+import com.vpbank.dcp.core.port.out.credential.PasswordVerifierUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import java.time.Clock;
 import java.time.Instant;
@@ -39,10 +39,10 @@ class KeycloakIdTokenVerifierTest {
     void wrongAudienceAndForgedSigningKeyFailClosed() throws Exception {
         var verifier = verifier(signingKey);
         ECKey attacker = new ECKeyGenerator(Curve.P_256).keyID("kc-signing").generate();
-        assertThrows(KeycloakVerificationUnavailableException.class,
+        assertThrows(PasswordVerifierUnavailableException.class,
                 () -> verifier.verify(token(signingKey, "other-client",
                         "https://kc.bank.test/realms/mobile-banking")));
-        assertThrows(KeycloakVerificationUnavailableException.class,
+        assertThrows(PasswordVerifierUnavailableException.class,
                 () -> verifier.verify(token(attacker, "authentication-service",
                         "https://kc.bank.test/realms/mobile-banking")));
     }
@@ -54,10 +54,10 @@ class KeycloakIdTokenVerifierTest {
                 new StrictJoseJson(), Clock.fixed(NOW, ZoneOffset.UTC));
         assertEquals("customer-subject", verifier.verify(token(signingKey, "bank-auth-secret",
                 "https://kc.bank.test/realms/mobile-banking")).subject());
-        assertThrows(KeycloakVerificationUnavailableException.class,
+        assertThrows(PasswordVerifierUnavailableException.class,
                 () -> verifier.verify(token(signingKey, "authentication-service",
                         "https://kc.bank.test/realms/mobile-banking")));
-        assertThrows(KeycloakVerificationUnavailableException.class,
+        assertThrows(PasswordVerifierUnavailableException.class,
                 () -> verifier.verify(token(signingKey, "bank-auth-secret",
                         "https://kc.bank.test/realms/mobile-banking", "other-client")));
     }
@@ -75,7 +75,7 @@ class KeycloakIdTokenVerifierTest {
                 .keyID("kc-signing").build(), claims);
         token.sign(new ECDSASigner(signingKey));
 
-        assertThrows(KeycloakVerificationUnavailableException.class,
+        assertThrows(PasswordVerifierUnavailableException.class,
                 () -> verifier(signingKey).verify(token.serialize()));
     }
 

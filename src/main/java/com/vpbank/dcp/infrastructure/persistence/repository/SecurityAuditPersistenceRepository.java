@@ -22,7 +22,7 @@ public class SecurityAuditPersistenceRepository {
 
     public DeviceRevocationAuditView findDeviceRevocation(RecordDeviceRevocation command,
                                                            byte[] commandDigest) {
-        return events.findRevocation(command.bindingId(), command.owner().customerId(),
+        return events.findRevocation(command.bindingId().value(), command.owner().subject().value(),
                         command.owner().channel())
                 .filter(event -> event.commandDigest() != null)
                 .filter(event -> MessageDigest.isEqual(event.commandDigest(), commandDigest))
@@ -34,24 +34,24 @@ public class SecurityAuditPersistenceRepository {
     public void insertDeviceRevoked(RecordDeviceRevocation command, long securityVersion,
                                     byte[] commandDigest) {
         SecurityAuditEventEntity event = SecurityAuditEventEntity.deviceRevoked(
-                header(command, 1), command.bindingId(), securityVersion,
+                header(command, 1), command.bindingId().value(), securityVersion,
                 command.reason().code(), commandDigest);
         events.saveAndFlush(event);
     }
 
     public void insertPrimaryCleared(RecordDeviceRevocation command) {
         SecurityAuditEventEntity event = SecurityAuditEventEntity.primaryCleared(
-                header(command, 2), command.bindingId());
+                header(command, 2), command.bindingId().value());
         events.saveAndFlush(event);
     }
 
     private boolean hasPrimaryClear(RecordDeviceRevocation command) {
-        return events.hasPrimaryClear(command.operationId(), command.owner().customerId(),
-                command.owner().channel(), command.bindingId());
+        return events.hasPrimaryClear(command.operationId(), command.owner().subject().value(),
+                command.owner().channel(), command.bindingId().value());
     }
 
     private SecurityAuditEventHeader header(RecordDeviceRevocation command, int sequence) {
-        return new SecurityAuditEventHeader(UUID.randomUUID(), command.owner().customerId(),
+        return new SecurityAuditEventHeader(UUID.randomUUID(), command.owner().subject().value(),
                 command.owner().channel(), command.operationId(), sequence,
                 command.actor().type().code(), command.actor().id(), command.occurredAt(),
                 clock.instant());

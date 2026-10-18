@@ -1,5 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.out.customer;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -100,7 +101,7 @@ class CustomerDirectoryAdapterTest {
         assertThrows(CustomerDirectoryUnavailableException.class,
                 () -> directoryWithReply(404,
                         "{\"code\":\"CUSTOMER_NOT_FOUND\",\"correlationId\":\"corr-1\"}")
-                        .currentStatus("CUST-001"));
+                        .currentStatus(new CustomerNumber("CUST-001")));
     }
 
     @Test
@@ -121,7 +122,7 @@ class CustomerDirectoryAdapterTest {
         var directory = directory(client, URI.create("https://customer.internal"));
 
         assertThrows(CustomerDirectoryUnavailableException.class,
-                () -> directory.currentStatus("CUST-001"));
+                () -> directory.currentStatus(new CustomerNumber("CUST-001")));
     }
 
     @Test
@@ -150,7 +151,7 @@ class CustomerDirectoryAdapterTest {
 
         var customer = ((CustomerResolution.Found) directory.resolve(identity())).customer();
 
-        assertEquals("CUST-001", customer.customerId());
+        assertEquals(new CustomerNumber("CUST-001"), customer.customerNumber());
         assertEquals(CustomerStatus.ELIGIBLE, customer.status());
         ArgumentCaptor<HttpRequest> sent = ArgumentCaptor.forClass(HttpRequest.class);
         verify(client).sendAsync(sent.capture(), any(HttpResponse.BodyHandler.class));

@@ -7,8 +7,6 @@ import org.springframework.validation.annotation.Validated;
 
 @Validated
 @ConfigurationProperties(prefix = "auth.password-flow")
-public record PasswordFlowProperties(@NotBlank String commandKeyId,
-                                     @NotBlank String commandHmacBase64,
-                                     @NotBlank String customerPolicyVersion,
+public record PasswordFlowProperties(@NotBlank String customerPolicyVersion,
                                      @Positive long credentialDeadlineMs,
                                      @Positive long journeyDeadlineMs) { }

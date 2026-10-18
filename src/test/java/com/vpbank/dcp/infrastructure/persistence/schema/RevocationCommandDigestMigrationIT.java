@@ -1,5 +1,6 @@
 package com.vpbank.dcp.infrastructure.persistence.schema;
 
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.UUID;
@@ -27,7 +28,7 @@ class RevocationCommandDigestMigrationIT {
                 .isEqualTo(15);
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword()));
-        UUID customerId = UUID.randomUUID();
+        SubjectId subject = new SubjectId(UUID.randomUUID());
         UUID deviceId = UUID.randomUUID();
         UUID operationId = UUID.randomUUID();
         jdbc.update("""
@@ -36,7 +37,7 @@ class RevocationCommandDigestMigrationIT {
                    status, policy_version, created_at, updated_at)
                 VALUES (UUID_TO_BIN(?), ?, 1, UTC_TIMESTAMP(6), 'ELIGIBLE', 'test',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, customerId.toString(), "customer-" + customerId);
+                """, subject.toString(), "customer-" + subject);
         jdbc.update("""
                 INSERT INTO auth_trusted_device
                   (id, auth_customer_id, channel, device_id_lookup, device_id_lookup_key_id,
@@ -50,7 +51,7 @@ class RevocationCommandDigestMigrationIT {
                         'NFC_FACE_SMS_OTP', 'test-policy', 'MFA_KEY_POSSESSION',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 90 DAY,
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, deviceId.toString(), customerId.toString(), deviceId.toString(),
+                """, deviceId.toString(), subject.toString(), deviceId.toString(),
                 "public-key-" + deviceId);
         jdbc.update("""
                 INSERT INTO auth_security_audit_event
@@ -61,7 +62,7 @@ class RevocationCommandDigestMigrationIT {
                         'DEVICE_REVOKED', UUID_TO_BIN(?), 1, 'CUSTOMER_REQUEST',
                         'CUSTOMER', 'customer-test',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, UUID.randomUUID().toString(), customerId.toString(),
+                """, UUID.randomUUID().toString(), subject.toString(),
                 operationId.toString(), deviceId.toString());
 
         Flyway current = flyway(null);

@@ -1,5 +1,6 @@
 package com.vpbank.dcp.infrastructure.persistence.schema;
 
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -91,21 +92,21 @@ class TrustedDeviceSchemaMigrationIT {
                 .dataSource(POPULATED.getJdbcUrl(), POPULATED.getUsername(), POPULATED.getPassword())
                 .target(MigrationVersion.fromVersion("9")).load();
         assertThat(previous.migrate().migrationsExecuted).isEqualTo(9);
-        UUID customerId = UUID.randomUUID();
+        SubjectId subject = new SubjectId(UUID.randomUUID());
         jdbc(POPULATED).update("""
                 INSERT INTO auth_customer
                   (id, customer_id, customer_status_version, customer_status_checked_at,
                    status, policy_version, created_at, updated_at)
                 VALUES (UUID_TO_BIN(?), 'legacy-customer', 1, UTC_TIMESTAMP(6),
                         'ELIGIBLE', 'test', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, customerId.toString());
+                """, subject.toString());
 
         assertThatThrownBy(() -> flyway(POPULATED).migrate())
                 .isInstanceOf(RuntimeException.class)
                 .hasStackTraceContaining("ck_v10_empty_source");
         assertThat(jdbc(POPULATED).queryForObject("""
                 SELECT COUNT(*) FROM auth_customer WHERE id = UUID_TO_BIN(?)
-                """, Integer.class, customerId.toString())).isEqualTo(1);
+                """, Integer.class, subject.toString())).isEqualTo(1);
         assertThat(jdbc(POPULATED).queryForObject("""
                 SELECT COUNT(*) FROM information_schema.TABLES
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_trusted_device'
@@ -121,22 +122,22 @@ class TrustedDeviceSchemaMigrationIT {
                 mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword()));
     }
 
-    private static void insertCustomerAndApp(JdbcTemplate jdbc, UUID customerId, String businessId) {
+    private static void insertCustomerAndApp(JdbcTemplate jdbc, UUID subject, String businessId) {
         jdbc.update("""
                 INSERT INTO auth_customer
                   (id, customer_id, customer_status_version, customer_status_checked_at,
                    status, policy_version, created_at, updated_at)
                 VALUES (UUID_TO_BIN(?), ?, 1, UTC_TIMESTAMP(6), 'ELIGIBLE', 'test',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, customerId.toString(), businessId);
+                """, subject.toString(), businessId);
         jdbc.update("""
                 INSERT INTO auth_customer_app
                   (auth_customer_id, app_id, status, created_at, updated_at)
                 VALUES (UUID_TO_BIN(?), 'neo-mobile', 'ACTIVE', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, customerId.toString());
+                """, subject.toString());
     }
 
-    private static void insertDevice(JdbcTemplate jdbc, UUID customerId, UUID deviceId) {
+    private static void insertDevice(JdbcTemplate jdbc, UUID subject, UUID deviceId) {
         jdbc.update("""
                 INSERT INTO auth_trusted_device
                   (id, auth_customer_id, app_id, device_id_lookup, device_id_lookup_key_id,
@@ -150,10 +151,10 @@ class TrustedDeviceSchemaMigrationIT {
                         'ES256', 'NFC_FACE_SMS_OTP', 'test-policy', 'MFA_KEY_POSSESSION',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 90 DAY,
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, deviceId.toString(), customerId.toString());
+                """, deviceId.toString(), subject.toString());
     }
 
-    private static void insertAudit(JdbcTemplate jdbc, UUID customerId, UUID deviceId,
+    private static void insertAudit(JdbcTemplate jdbc, UUID subject, UUID deviceId,
                                     UUID operationId, int sequence, String eventType) {
         jdbc.update("""
                 INSERT INTO auth_security_audit_event
@@ -163,7 +164,7 @@ class TrustedDeviceSchemaMigrationIT {
                 VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), 'neo-mobile', UUID_TO_BIN(?), ?, ?,
                         UUID_TO_BIN(?), 1, 'CUSTOMER_REQUEST', 'CUSTOMER', 'test-actor',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
-                """, UUID.randomUUID().toString(), customerId.toString(),
+                """, UUID.randomUUID().toString(), subject.toString(),
                 operationId.toString(), sequence, eventType, deviceId.toString());
     }
 }

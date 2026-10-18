@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
+import com.vpbank.dcp.core.domain.customer.CustomerNumber;
+import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
 import com.vpbank.dcp.core.domain.customer.CustomerOwnerDecision;
 import com.vpbank.dcp.core.domain.customer.CustomerOwnerPolicy;
@@ -49,11 +51,11 @@ public final class JpaCustomerOwnerAdapter implements CustomerOwnerRepository {
         if (snapshot.status() != CustomerStatus.ELIGIBLE) {
             return new CustomerOwnerAcceptance.Rejected();
         }
-        Optional<CustomerOwnerView> existing = customers.lockByCustomerId(snapshot.customerId());
+        Optional<CustomerOwnerView> existing = customers.lockByCustomerId(snapshot.customerNumber().value());
         if (existing.isEmpty()) {
-            UUID customerId = UUID.randomUUID();
-            customers.insert(customerId, identity, snapshot, policyVersion);
-            return new CustomerOwnerAcceptance.Accepted(customerId);
+            UUID subjectId = UUID.randomUUID();
+            customers.insert(subjectId, identity, snapshot, policyVersion);
+            return new CustomerOwnerAcceptance.Accepted(new SubjectId(subjectId));
         }
         CustomerOwnerView stored = existing.get();
         if (!identity.issuer().equals(stored.providerId())
@@ -61,13 +63,13 @@ public final class JpaCustomerOwnerAdapter implements CustomerOwnerRepository {
             return new CustomerOwnerAcceptance.Rejected();
         }
         CustomerAuthenticationState current = new CustomerAuthenticationState(
-                stored.customerId(), status(stored.status()), stored.statusVersion(),
+                new CustomerNumber(stored.customerId()), status(stored.status()), stored.statusVersion(),
                 stored.lastBlockVersion(), stored.checkedAt());
         if (policy.decide(current, snapshot) != CustomerOwnerDecision.ACCEPT) {
             return new CustomerOwnerAcceptance.ReconciliationRequired();
         }
         return customers.update(stored, identity, snapshot)
-                ? new CustomerOwnerAcceptance.Accepted(stored.id())
+                ? new CustomerOwnerAcceptance.Accepted(new SubjectId(stored.id()))
                 : new CustomerOwnerAcceptance.Conflict();
     }
 
