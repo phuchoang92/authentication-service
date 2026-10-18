@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 
 import com.vpbank.dcp.core.application.password.PasswordLoginUnavailableService;
 import com.vpbank.dcp.core.application.password.PasswordLoginService;
+import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
 import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
@@ -30,8 +31,6 @@ class PasswordFlowConfigurationTest {
                 .withBean(JsonMapper.class, JsonMapper::new)
                 .withBean(Clock.class, Clock::systemUTC)
                 .withPropertyValues(
-                        "auth.password-flow.command-key-id=test",
-                        "auth.password-flow.command-hmac-base64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                         "auth.password-flow.customer-policy-version=test",
                         "auth.password-flow.credential-deadline-ms=1000",
                         "auth.password-flow.journey-deadline-ms=1000")
@@ -58,14 +57,13 @@ class PasswordFlowConfigurationTest {
                 .withBean(LoginSessionSecurityStore.class, () -> mock(LoginSessionSecurityStore.class))
                 .withBean(SessionCryptography.class, () -> mock(SessionCryptography.class))
                 .withBean(SessionAuthority.class, () -> mock(SessionAuthority.class))
+                .withBean(TrustedDeviceSessions.class, () -> mock(TrustedDeviceSessions.class))
                 .withBean(CustomerLoginEligibilityProperties.class,
                         () -> new CustomerLoginEligibilityProperties(30000))
                 .withPropertyValues(
                         "spring.profiles.active=integration",
                         "auth.native-session.integration-activation-enabled=true",
                         "auth.customer.status-max-age-ms=30000",
-                        "auth.password-flow.command-key-id=test",
-                        "auth.password-flow.command-hmac-base64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                         "auth.password-flow.customer-policy-version=test",
                         "auth.password-flow.credential-deadline-ms=1000",
                         "auth.password-flow.journey-deadline-ms=900000")
@@ -84,8 +82,6 @@ class PasswordFlowConfigurationTest {
                 .withBean(Clock.class, Clock::systemUTC)
                 .withPropertyValues(
                         "auth.native-session.integration-activation-enabled=true",
-                        "auth.password-flow.command-key-id=test",
-                        "auth.password-flow.command-hmac-base64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                         "auth.password-flow.customer-policy-version=test",
                         "auth.password-flow.credential-deadline-ms=1000",
                         "auth.password-flow.journey-deadline-ms=1000")

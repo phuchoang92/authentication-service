@@ -25,4 +25,10 @@ public final class ReplayKeys {
         return "enrollment:used:v1:" + scope.value() + ":"
                 + requestKey.digest().base64Url() + ":" + proofIdDigest.base64Url();
     }
+
+    /** One BFF assertion ({@code jti}); the BFF is the only issuer, so no key dimension. */
+    public String forBffAssertion(Digest32 assertionIdDigest) {
+        Objects.requireNonNull(assertionIdDigest, "assertionIdDigest");
+        return "bff-assertion:used:v1:" + scope.value() + ":" + assertionIdDigest.base64Url();
+    }
 }

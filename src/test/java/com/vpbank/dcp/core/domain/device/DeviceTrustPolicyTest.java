@@ -43,8 +43,33 @@ class DeviceTrustPolicyTest {
                         candidate(owner, false, true), now));
     }
 
+    @Test
+    void revokedOrExpiredProvenBindingLapsesInsteadOfBeingRejected() {
+        assertEquals(DeviceTrustDecision.TRUST_LAPSED, routing.decide(owner, "neo-mobile",
+                "ANDROID", candidate(owner, true, true, false, now.plusSeconds(60)), now));
+        assertEquals(DeviceTrustDecision.TRUST_LAPSED, routing.decide(owner, "neo-mobile",
+                "ANDROID", candidate(owner, true, false, true, now), now));
+    }
+
+    /** Lapsing never skips the identity checks: a foreign or unproven binding is rejected. */
+    @Test
+    void lapsedBindingThatIsForeignOrUnprovenIsStillRejected() {
+        Instant expired = now.minusSeconds(1);
+        assertEquals(DeviceTrustDecision.REJECTED, routing.decide(owner, "neo-mobile", "ANDROID",
+                candidate(new SubjectId(UUID.randomUUID()), true, true, false, expired), now));
+        assertEquals(DeviceTrustDecision.REJECTED, routing.decide(owner, "neo-mobile", "ANDROID",
+                candidate(owner, false, true, false, expired), now));
+        assertEquals(DeviceTrustDecision.REJECTED, routing.decide(owner, "other-channel",
+                "ANDROID", candidate(owner, true, true, false, expired), now));
+    }
+
     private DeviceCandidate candidate(SubjectId candidateOwner, boolean proof, boolean primary) {
+        return candidate(candidateOwner, proof, primary, true, now.plusSeconds(60));
+    }
+
+    private DeviceCandidate candidate(SubjectId candidateOwner, boolean proof, boolean primary,
+                                      boolean active, Instant expiresAt) {
         return new DeviceCandidate(binding, candidateOwner, "neo-mobile", "ANDROID", true,
-                true, primary, now.plusSeconds(60), proof);
+                active, primary, expiresAt, proof);
     }
 }

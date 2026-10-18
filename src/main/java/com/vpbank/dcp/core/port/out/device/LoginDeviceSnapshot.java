@@ -10,7 +10,7 @@ import java.util.UUID;
 
 /** Current database facts; possession and owner policy are evaluated in the use case. */
 public record LoginDeviceSnapshot(BindingId bindingId, SubjectId owner, String channel,
-                                  String platform, boolean installationMatches,
+                                  String platform, boolean deviceIdMatches,
                                   boolean active, boolean primary, Instant expiresAt,
                                   long securityVersion, StoredDeviceKey deviceKey) {
     public LoginDeviceSnapshot {

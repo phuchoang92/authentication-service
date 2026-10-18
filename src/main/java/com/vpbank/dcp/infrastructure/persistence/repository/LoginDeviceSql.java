@@ -1,12 +1,14 @@
 package com.vpbank.dcp.infrastructure.persistence.repository;
 
 final class LoginDeviceSql {
+    /**
+     * Any status: a revoked or expired binding still proves its own key, and DeviceTrustPolicy
+     * then routes it to the trusted-device flow instead of rejecting it before the password.
+     */
     static final String KEY_FOR_PROOF = """
             SELECT device_public_key, device_public_key_hash
               FROM auth_trusted_device
              WHERE id = UUID_TO_BIN(:bindingId)
-               AND status = 'ACTIVE'
-               AND expires_at > UTC_TIMESTAMP(6)
             """;
 
     static final String CURRENT = """

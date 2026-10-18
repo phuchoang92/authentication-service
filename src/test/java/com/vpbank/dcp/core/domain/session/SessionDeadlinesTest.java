@@ -18,7 +18,7 @@ class SessionDeadlinesTest {
         var touched = initial.afterEligibleAdmission(createdAt.plusSeconds(60));
 
         assertEquals(createdAt.plusSeconds(960), touched.idleExpiresAt());
-        assertEquals(createdAt.plusSeconds(3600), touched.absoluteExpiresAt());
+        assertEquals(createdAt.plusSeconds(1200), touched.absoluteExpiresAt());
     }
 
     @Test

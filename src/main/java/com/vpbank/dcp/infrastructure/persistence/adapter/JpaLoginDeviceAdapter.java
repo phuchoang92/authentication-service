@@ -46,31 +46,31 @@ public final class JpaLoginDeviceAdapter implements LoginDeviceRepository {
 
     @Override
     public Optional<LoginDeviceSnapshot> current(SubjectId owner, String channel,
-                                                 String installationId, String publicBindingId) {
+                                                 String deviceId, String publicBindingId) {
         Optional<UUID> bindingId = publicIds.decode(publicBindingId);
         if (bindingId.isEmpty()) {
             return Optional.empty();
         }
-        return currentByBinding(owner, channel, installationId, new BindingId(bindingId.get()));
+        return currentByBinding(owner, channel, deviceId, new BindingId(bindingId.get()));
     }
 
     @Override
     public Optional<LoginDeviceSnapshot> currentByBinding(SubjectId owner, String channel,
-                                                           String installationId, BindingId bindingId) {
+                                                           String deviceId, BindingId bindingId) {
         try {
             return Objects.requireNonNull(transactions.execute(ignored -> devices.lockCurrent(
-                    owner.value(), channel, bindingId.value()).map(device -> toSnapshot(device, installationId))));
+                    owner.value(), channel, bindingId.value()).map(device -> toSnapshot(device, deviceId))));
         } catch (DataAccessException | TransactionException failure) {
             throw new LoginDeviceUnavailableException(failure);
         }
     }
 
-    private LoginDeviceSnapshot toSnapshot(LoginDeviceView device, String installationId) {
+    private LoginDeviceSnapshot toSnapshot(LoginDeviceView device, String deviceId) {
         boolean matches = false;
         for (DeviceIdLookup candidate : deviceIds.lookupCandidates(
-                device.customerId(), device.channel(), installationId)) {
-            if (candidate.keyId().equals(device.installationLookupKeyId())
-                    && MessageDigest.isEqual(candidate.digest().bytes(), device.installationLookup())) {
+                device.customerId(), device.channel(), deviceId)) {
+            if (candidate.keyId().equals(device.deviceIdLookupKeyId())
+                    && MessageDigest.isEqual(candidate.digest().bytes(), device.deviceIdLookup())) {
                 matches = true;
             }
         }

@@ -9,7 +9,7 @@ import java.util.UUID;
 public record PasswordOperationContext(UUID operationId,
                                        String appId,
                                        String platform,
-                                       String installationId,
+                                       String deviceId,
                                        String username,
                                        String claimedBindingId) {
 
@@ -17,9 +17,9 @@ public record PasswordOperationContext(UUID operationId,
         Objects.requireNonNull(operationId, "operationId");
         Objects.requireNonNull(appId, "appId");
         Objects.requireNonNull(platform, "platform");
-        Objects.requireNonNull(installationId, "installationId");
+        Objects.requireNonNull(deviceId, "installationId");
         Objects.requireNonNull(username, "username");
-        if (appId.isBlank() || installationId.isBlank() || username.isBlank()
+        if (appId.isBlank() || deviceId.isBlank() || username.isBlank()
                 || !("ANDROID".equals(platform) || "IOS".equals(platform))) {
             throw new InvalidPasswordOperationException();
         }

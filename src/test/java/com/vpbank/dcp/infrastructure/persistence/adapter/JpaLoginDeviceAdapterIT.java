@@ -120,13 +120,13 @@ class JpaLoginDeviceAdapterIT {
         assertThat(devices.current(subject, CHANNEL, INSTALLATION, externalId))
                 .get().satisfies(device -> {
                     assertThat(device.primary()).isTrue();
-                    assertThat(device.installationMatches()).isTrue();
+                    assertThat(device.deviceIdMatches()).isTrue();
                     assertThat(device.bindingId()).isEqualTo(bindingId);
                 });
         assertThat(devices.current(subject, CHANNEL, "different-installation-123456", externalId))
-                .get().satisfies(device -> assertThat(device.installationMatches()).isFalse());
+                .get().satisfies(device -> assertThat(device.deviceIdMatches()).isFalse());
         assertThat(devices.currentByBinding(subject, CHANNEL, INSTALLATION, bindingId))
-                .get().satisfies(device -> assertThat(device.installationMatches()).isTrue());
+                .get().satisfies(device -> assertThat(device.deviceIdMatches()).isTrue());
         assertThat(devices.currentByBinding(new SubjectId(UUID.randomUUID()), CHANNEL, INSTALLATION, bindingId)).isEmpty();
         assertThat(devices.current(new SubjectId(UUID.randomUUID()), CHANNEL, INSTALLATION, externalId)).isEmpty();
         assertThat(devices.current(subject, "different-channel", INSTALLATION, externalId)).isEmpty();
@@ -145,6 +145,28 @@ class JpaLoginDeviceAdapterIT {
                     assertThat(security.versions().deviceSecurityVersion()).isEqualTo(33);
                     assertThat(security.biometricEnabled()).isFalse();
                 });
+    }
+
+    /**
+     * A revoked binding still proves its own key, so login can route it to the trusted-device
+     * flow instead of rejecting it before the password. The snapshot reports it inactive.
+     */
+    @Test
+    void revokedBindingStillProvesItsKeyButIsReportedInactive() {
+        SubjectId subject = new SubjectId(UUID.randomUUID());
+        BindingId bindingId = new BindingId(UUID.randomUUID());
+        seed(subject, bindingId, deviceIds.protect(subject.value(), CHANNEL, bindingId.value(),
+                INSTALLATION));
+        jdbc.update("UPDATE auth_trusted_device SET status = 'REVOKED', is_primary = 0, "
+                + "revoked_at = UTC_TIMESTAMP(6), revoked_reason = 'LOST', "
+                + "revoked_by_type = 'CUSTOMER', revoked_by_id = 'customer-test' "
+                + "WHERE id = UUID_TO_BIN(?)",
+                bindingId.value().toString());
+        String externalId = publicIds.encode(bindingId.value());
+
+        assertThat(devices.keyForProof(externalId)).isPresent();
+        assertThat(devices.current(subject, CHANNEL, INSTALLATION, externalId))
+                .get().satisfies(device -> assertThat(device.active()).isFalse());
     }
 
     private void seed(SubjectId subject, BindingId bindingId, ProtectedDeviceId protectedId) {

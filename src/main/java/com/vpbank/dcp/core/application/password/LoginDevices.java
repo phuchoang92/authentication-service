@@ -31,7 +31,7 @@ public final class LoginDevices {
         LoginDeviceSnapshot stored;
         try {
             stored = devices.current(owner, command.operation().appId(),
-                    command.operation().installationId(), claimedId).orElse(null);
+                    command.operation().deviceId(), claimedId).orElse(null);
         } catch (LoginDeviceUnavailableException failure) {
             return new DeviceTrustResult.Denied(LoginDenial.UNAVAILABLE);
         }
@@ -39,7 +39,7 @@ public final class LoginDevices {
             return new DeviceTrustResult.Denied(LoginDenial.REJECTED);
         }
         DeviceCandidate candidate = new DeviceCandidate(stored.bindingId(), stored.owner(),
-                stored.channel(), stored.platform(), stored.installationMatches(),
+                stored.channel(), stored.platform(), stored.deviceIdMatches(),
                 stored.active(), stored.primary(), stored.expiresAt(),
                 stored.deviceKeyThumbprint().equals(proofs.deviceKeyThumbprint()));
         DeviceTrustDecision decision = policy.decide(owner, command.operation().appId(),
@@ -47,6 +47,7 @@ public final class LoginDevices {
         return switch (decision) {
             case LAST_TRUSTED -> new DeviceTrustResult.LastTrusted(stored);
             case OTHER_TRUSTED -> new DeviceTrustResult.OtherTrusted(stored);
+            case TRUST_LAPSED -> new DeviceTrustResult.Lapsed(stored);
             case REJECTED, NEW_DEVICE -> new DeviceTrustResult.Denied(LoginDenial.REJECTED);
         };
     }

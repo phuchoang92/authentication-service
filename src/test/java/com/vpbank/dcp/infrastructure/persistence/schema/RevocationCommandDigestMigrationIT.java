@@ -66,7 +66,8 @@ class RevocationCommandDigestMigrationIT {
                 operationId.toString(), deviceId.toString());
 
         Flyway current = flyway(null);
-        assertThat(current.migrate().migrationsExecuted).isEqualTo(2);
+        // V16 to V19: V18 drops the empty credential table without touching audit rows.
+        assertThat(current.migrate().migrationsExecuted).isEqualTo(4);
         assertThat(jdbc.queryForObject("""
                 SELECT command_digest FROM auth_security_audit_event
                  WHERE operation_id = UUID_TO_BIN(?)

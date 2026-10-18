@@ -15,6 +15,7 @@ import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.domain.session.SessionAssurance;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordNeedTrustedDeviceResponse;
 import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
 import java.time.Clock;
 import java.time.Instant;
@@ -73,6 +74,30 @@ class PasswordLoginResponseMapperTest {
         JsonNode body = json.readTree(json.writeValueAsString(response.getBody()));
         assertThat(body.path("expires_in").asLong()).isEqualTo(90);
         assertThat(body.path("session").path("idleExpiresAt").asText()).isEqualTo("2026-10-12T00:00:30.123456Z");
+    }
+
+    /** Exact public fields; no DPoP-Nonce, because the next calls use the BFF's JWT. */
+    @Test
+    void needTrustedDeviceCarriesOnlyTheRestrictedTokenAndNoNonce() {
+        var response = mapper.map(new PasswordLoginResult.NeedTrustedDevice(
+                "restricted-envelope", "restricted-receipt", NOW.plusSeconds(600)));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).isInstanceOf(PasswordNeedTrustedDeviceResponse.class);
+        JsonNode body = json.readTree(json.writeValueAsString(response.getBody()));
+        assertThat(fields(body)).containsExactlyInAnyOrder("status", "tokenEnvelope", "receipt",
+                "expires_in");
+        assertThat(body.path("status").asText()).isEqualTo("NEED_TRUSTED_DEVICE");
+        assertThat(body.path("expires_in").asLong()).isEqualTo(600);
+        assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
+        assertThat(response.getHeaders().getFirst("DPoP-Nonce")).isNull();
+        assertThat(response.getBody().toString()).doesNotContain("restricted-envelope");
+    }
+
+    @Test
+    void expiredRestrictedSessionIsNeverDelivered() {
+        problem(new PasswordLoginResult.NeedTrustedDevice("restricted-envelope",
+                "restricted-receipt", NOW), 503, "TEMPORARILY_UNAVAILABLE");
     }
 
     private void problem(PasswordLoginResult result, int status, String code) {

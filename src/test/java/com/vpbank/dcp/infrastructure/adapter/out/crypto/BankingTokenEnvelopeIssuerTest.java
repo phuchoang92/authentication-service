@@ -103,7 +103,7 @@ class BankingTokenEnvelopeIssuerTest {
         var issuer = new BankingTokenEnvelopeIssuer("https://auth.bank.test", receiptKey,
                 JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC));
         var context = new TokenDeliveryContext(UUID.randomUUID(), "neo-mobile",
-                BankingTokenStatus.PENDING_MFA, "request-jkt", null, NOW.plusSeconds(120));
+                BankingTokenStatus.NEED_TRUSTED_DEVICE, "request-jkt", null, NOW.plusSeconds(120));
 
         assertThrows(InvalidCryptographicInputException.class,
                 () -> issuer.issue(new OpaqueBankingToken("k1.private-token"), recipient, context));

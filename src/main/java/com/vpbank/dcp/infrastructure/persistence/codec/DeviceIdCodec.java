@@ -16,7 +16,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-/** Protects an App installation ID for Auth storage; neither output proves device possession. */
+/** Protects the App device ID for Auth storage; neither output proves device possession. */
 public final class DeviceIdCodec {
     private static final byte FORMAT_VERSION = 1;
     private static final int NONCE_BYTES = 12;
@@ -34,12 +34,12 @@ public final class DeviceIdCodec {
     }
 
     public ProtectedDeviceId protect(UUID customerId, String channel,
-                                     UUID bindingId, String installationId) {
-        requireIdentity(customerId, channel, installationId);
+                                     UUID bindingId, String deviceId) {
+        requireIdentity(customerId, channel, deviceId);
         Objects.requireNonNull(bindingId);
         String lookupKeyId = lookupKeys.activeKeyId();
         String encryptionKeyId = encryptionKeys.activeKeyId();
-        Digest32 lookup = lookup(customerId, channel, installationId, lookupKeyId);
+        Digest32 lookup = lookup(customerId, channel, deviceId, lookupKeyId);
         byte[] nonce = new byte[NONCE_BYTES];
         random.nextBytes(nonce);
         try {
@@ -48,7 +48,7 @@ public final class DeviceIdCodec {
                     new SecretKeySpec(encryptionKeys.key(encryptionKeyId), "AES"),
                     new GCMParameterSpec(TAG_BITS, nonce));
             cipher.updateAAD(aad(customerId, channel, bindingId));
-            byte[] encrypted = cipher.doFinal(utf8(installationId));
+            byte[] encrypted = cipher.doFinal(utf8(deviceId));
             byte[] envelope = ByteBuffer.allocate(1 + NONCE_BYTES + encrypted.length)
                     .put(FORMAT_VERSION).put(nonce).put(encrypted).array();
             return new ProtectedDeviceId(lookup, lookupKeyId, envelope, encryptionKeyId);
@@ -83,23 +83,23 @@ public final class DeviceIdCodec {
     }
 
     public List<DeviceIdLookup> lookupCandidates(UUID customerId, String channel,
-                                                  String installationId) {
-        requireIdentity(customerId, channel, installationId);
+                                                  String deviceId) {
+        requireIdentity(customerId, channel, deviceId);
         List<DeviceIdLookup> candidates = new ArrayList<>();
         for (String keyId : lookupKeys.acceptedKeyIds()) {
             candidates.add(new DeviceIdLookup(keyId,
-                    lookup(customerId, channel, installationId, keyId)));
+                    lookup(customerId, channel, deviceId, keyId)));
         }
         return List.copyOf(candidates);
     }
 
-    private Digest32 lookup(UUID customerId, String channel, String installationId,
+    private Digest32 lookup(UUID customerId, String channel, String deviceId,
                             String keyId) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(lookupKeys.key(keyId), "HmacSHA256"));
             return Digest32.fromBytes(mac.doFinal(encode(
-                    "BANK_DEVICE_ID_LOOKUP_V1", customerId.toString(), channel, installationId)));
+                    "BANK_DEVICE_ID_LOOKUP_V1", customerId.toString(), channel, deviceId)));
         } catch (GeneralSecurityException failure) {
             throw new InvalidDeviceIdProtectionException(failure);
         }
@@ -128,14 +128,14 @@ public final class DeviceIdCodec {
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
-    private static void requireIdentity(UUID customerId, String channel, String installationId) {
+    private static void requireIdentity(UUID customerId, String channel, String deviceId) {
         Objects.requireNonNull(customerId);
         if (channel == null || channel.isBlank() || channel.length() > 64
-                || installationId == null || installationId.length() < 16
-                || installationId.length() > 300) {
+                || deviceId == null || deviceId.length() < 16
+                || deviceId.length() > 300) {
             throw new InvalidDeviceIdProtectionException();
         }
         utf8(channel);
-        utf8(installationId);
+        utf8(deviceId);
     }
 }

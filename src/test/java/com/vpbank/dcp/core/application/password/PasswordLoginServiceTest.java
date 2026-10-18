@@ -32,6 +32,14 @@ import com.vpbank.dcp.core.port.out.password.StoredDeviceKey;
 import com.vpbank.dcp.core.port.out.password.VerifiedPasswordProofs;
 import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
+import com.vpbank.dcp.core.application.trusteddevice.RestrictedSessionResult;
+import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
+import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
+import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
+import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
+import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
+import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
+import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -43,6 +51,7 @@ class PasswordLoginServiceTest {
     private final CustomerIdentities identities = mock(CustomerIdentities.class);
     private final LoginDevices devices = mock(LoginDevices.class);
     private final IssueLoginSessionUseCase sessions = mock(IssueLoginSessionUseCase.class);
+    private final TrustedDeviceSessions trustedDevices = mock(TrustedDeviceSessions.class);
 
     private final Instant now = Instant.parse("2026-10-13T00:00:00Z");
     private final Digest32 digest = Digest32.fromBytes(new byte[32]);
@@ -139,32 +148,70 @@ class PasswordLoginServiceTest {
         assertThat(service(true).login(command)).isInstanceOf(PasswordLoginResult.Rejected.class);
     }
 
-    /**
-     * Flow 01: a non-primary trusted device fails closed with START_NEW_LOGIN until the
-     * trusted-device continuation has an approved contract. It must never become ACTIVE.
-     */
+    /** A non-primary binding must be trusted again: restricted token only, never ACTIVE. */
     @Test
-    void otherTrustedFailsClosedAndNeverIssuesASession() {
-        admitted();
-        verified();
-        when(devices.decide(subject, command, verifiedProofs()))
-                .thenReturn(new DeviceTrustResult.OtherTrusted(device(false)));
+    void otherTrustedReceivesARestrictedSessionAndNeverAnActiveOne() {
+        LoginDeviceSnapshot device = device(false);
+        RestrictedSession pinned = restrictedFor(new DeviceTrustResult.OtherTrusted(device));
 
-        assertThat(service(true).login(command))
-                .isInstanceOf(PasswordLoginResult.TemporarilyUnavailable.class);
+        assertThat(pinned.target()).isEqualTo(new TrustTarget.KnownDevice(device.bindingId(),
+                device.deviceKeyThumbprint(), device.securityVersion()));
+        assertThat(pinned.owner()).isEqualTo(subject);
+        assertThat(pinned.customerNumber()).isEqualTo(customer.customerNumber());
+        assertThat(pinned.customerStatusVersion()).isEqualTo(customer.statusVersion());
+        assertThat(pinned.deviceId()).isEqualTo(command.operation().deviceId());
+        assertThat(pinned.keys()).isEqualTo(new LoginKeys("request-jwk", digest, "response-jwk"));
+        assertThat(pinned.platform()).isEqualTo("ANDROID");
+        assertThat(pinned.generation()).isEqualTo(generation);
+        verify(sessions, never()).issue(any(), any(), any());
+    }
+
+    /** A revoked or expired binding keeps its stored key and goes through the same flow. */
+    @Test
+    void lapsedBindingReceivesARestrictedSessionForTheSameBinding() {
+        LoginDeviceSnapshot device = device(true);
+        RestrictedSession pinned = restrictedFor(new DeviceTrustResult.Lapsed(device));
+
+        assertThat(pinned.target()).isEqualTo(new TrustTarget.KnownDevice(device.bindingId(),
+                device.deviceKeyThumbprint(), device.securityVersion()));
         verify(sessions, never()).issue(any(), any(), any());
     }
 
     @Test
-    void newDeviceCannotReceiveActiveWithoutMfa() {
+    void newDeviceReceivesARestrictedSessionWithNoBinding() {
+        RestrictedSession pinned = restrictedFor(new DeviceTrustResult.NewDevice());
+
+        assertThat(pinned.target()).isEqualTo(new TrustTarget.NewDevice());
+        verify(sessions, never()).issue(any(), any(), any());
+    }
+
+    @Test
+    void restrictedSessionThatCannotBeStoredIsTemporarilyUnavailable() {
         admitted();
         verified();
         when(devices.decide(subject, command, verifiedProofs()))
                 .thenReturn(new DeviceTrustResult.NewDevice());
+        when(trustedDevices.open(any(), any()))
+                .thenReturn(new RestrictedSessionResult.Unavailable());
 
         assertThat(service(true).login(command))
                 .isInstanceOf(PasswordLoginResult.TemporarilyUnavailable.class);
-        verify(sessions, never()).issue(any(), any(), any());
+    }
+
+    private RestrictedSession restrictedFor(DeviceTrustResult route) {
+        admitted();
+        verified();
+        when(devices.decide(subject, command, verifiedProofs())).thenReturn(route);
+        ArgumentCaptor<RestrictedSession> pinned = ArgumentCaptor.forClass(RestrictedSession.class);
+        when(trustedDevices.open(pinned.capture(), eq(now)))
+                .thenAnswer(call -> new RestrictedSessionResult.Opened(new PreparedRestrictedSession(
+                        call.getArgument(0), UUID.randomUUID(),
+                        new SessionTokenLookup(new LookupKeyVersion("v1"), digest), digest,
+                        now.plusSeconds(600), "restricted-envelope", "restricted-receipt")));
+
+        assertThat(service(true).login(command)).isEqualTo(new PasswordLoginResult.NeedTrustedDevice(
+                "restricted-envelope", "restricted-receipt", now.plusSeconds(600)));
+        return pinned.getValue();
     }
 
     private void admitted() {
@@ -178,7 +225,7 @@ class PasswordLoginServiceTest {
     }
 
     private PasswordLoginService service(boolean enabled) {
-        return new PasswordLoginService(proofs, identities, devices, sessions,
+        return new PasswordLoginService(proofs, identities, devices, sessions, trustedDevices,
                 new PasswordAvailabilityPolicy(enabled));
     }
 

@@ -70,6 +70,9 @@ public class SecurityAuditEventEntity {
     @Column(name = "command_digest", columnDefinition = "binary(32)")
     private byte[] commandDigest;
 
+    @Column(name = "mfa_receipt_digest", columnDefinition = "binary(32)")
+    private byte[] mfaReceiptDigest;
+
     protected SecurityAuditEventEntity() {
     }
 
@@ -94,6 +97,37 @@ public class SecurityAuditEventEntity {
         event.deviceSecurityVersion = securityVersion;
         event.reasonCode = reasonCode;
         event.commandDigest = commandDigest.clone();
+        return event;
+    }
+
+    /** A binding trusted after MFA; the receipt that authorised it is recorded. */
+    public static SecurityAuditEventEntity deviceTrusted(SecurityAuditEventHeader header,
+                                                          UUID bindingId, long securityVersion,
+                                                          byte[] mfaReceiptDigest) {
+        SecurityAuditEventEntity event = new SecurityAuditEventEntity(header, "DEVICE_TRUSTED");
+        event.trustedDeviceId = bindingId;
+        event.deviceSecurityVersion = securityVersion;
+        event.mfaReceiptDigest = mfaReceiptDigest.clone();
+        return event;
+    }
+
+    /** A revocation the service made itself, such as REPLACED or DEVICE_LIMIT. */
+    public static SecurityAuditEventEntity deviceRevokedBySystem(SecurityAuditEventHeader header,
+                                                                  UUID bindingId, long securityVersion,
+                                                                  String reasonCode) {
+        SecurityAuditEventEntity event = new SecurityAuditEventEntity(header, "DEVICE_REVOKED");
+        event.trustedDeviceId = bindingId;
+        event.deviceSecurityVersion = securityVersion;
+        event.reasonCode = reasonCode;
+        return event;
+    }
+
+    /** {@code previous} is null when the customer had no primary before. */
+    public static SecurityAuditEventEntity primaryChanged(SecurityAuditEventHeader header,
+                                                           UUID previous, UUID next) {
+        SecurityAuditEventEntity event = new SecurityAuditEventEntity(header, "PRIMARY_DEVICE_CHANGED");
+        event.previousPrimaryDeviceId = previous;
+        event.newPrimaryDeviceId = next;
         return event;
     }
 

@@ -84,9 +84,21 @@ class LoginDevicesTest {
                 .isEqualTo(new DeviceTrustResult.Denied(LoginDenial.UNAVAILABLE));
     }
 
-    private LoginDeviceSnapshot snapshot(boolean primary, boolean installationMatches) {
+    /** A revoked binding that still proves its key must be trusted again, not rejected. */
+    @Test
+    void revokedBindingProvenByItsKeyIsLapsed() {
+        LoginDeviceSnapshot revoked = new LoginDeviceSnapshot(bindingId, subject, "neo-mobile",
+                "ANDROID", true, false, true, now.plusSeconds(60), 1,
+                new StoredDeviceKey(new byte[] {1}, digest));
+        when(devices.current(subject, "neo-mobile", "installation-1234567890", BINDING_ID))
+                .thenReturn(Optional.of(revoked));
+        assertThat(service.decide(subject, command(BINDING_ID), proofs(true)))
+                .isEqualTo(new DeviceTrustResult.Lapsed(revoked));
+    }
+
+    private LoginDeviceSnapshot snapshot(boolean primary, boolean deviceIdMatches) {
         return new LoginDeviceSnapshot(bindingId, subject, "neo-mobile", "ANDROID",
-                installationMatches, true, primary, now.plusSeconds(60), 1,
+                deviceIdMatches, true, primary, now.plusSeconds(60), 1,
                 new StoredDeviceKey(new byte[] {1}, digest));
     }
 

@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
+import com.vpbank.dcp.infrastructure.adapter.in.web.BoundedJsonBodyAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginRequest;
 import com.vpbank.dcp.infrastructure.adapter.in.web.security.DpopProofFilter;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,7 +73,7 @@ class PasswordLoginRequestMapperTest {
                         new PasswordLoginResponseMapper(clock)))
                 .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
                 .setValidator(validator)
-                .setControllerAdvice(new PasswordLoginBodyAdvice(), new ApiErrorHandler())
+                .setControllerAdvice(new BoundedJsonBodyAdvice(), new ApiErrorHandler())
                 .addFilter(new DpopProofFilter(decoder, new ExternalUriPolicy("https://api.bank.example"),
                         clock, new SecurityErrorResponse(json))).build();
         when(passwords.login(any())).thenReturn(new PasswordLoginResult.Rejected());
@@ -207,9 +209,9 @@ class PasswordLoginRequestMapperTest {
     @Test
     void boundsBodyEvenWithoutContentLength() {
         var input = new MockHttpInputMessage(new byte[65_537]);
-        assertThatThrownBy(() -> new PasswordLoginBodyAdvice().beforeBodyRead(input, null,
+        assertThatThrownBy(() -> new BoundedJsonBodyAdvice().beforeBodyRead(input, null,
                 PasswordLoginRequest.class, JacksonJsonHttpMessageConverter.class))
-                .isInstanceOf(InvalidPasswordLoginRequestException.class);
+                .isInstanceOf(HttpMessageNotReadableException.class);
     }
 
     private static String validBody() {

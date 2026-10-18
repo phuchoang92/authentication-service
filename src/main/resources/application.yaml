@@ -94,6 +94,28 @@ auth:
     status-max-age-ms: ${AUTH_CUSTOMER_STATUS_MAX_AGE_MS}
     origin: ${AUTH_CUSTOMER_ORIGIN}
     request-timeout-ms: ${AUTH_CUSTOMER_REQUEST_TIMEOUT_MS}
+  trusted-device:
+    restricted-session-ttl-seconds: ${AUTH_TRUSTED_DEVICE_RESTRICTED_SESSION_TTL_SECONDS:600}
+    verify-max-attempts: ${AUTH_TRUSTED_DEVICE_VERIFY_MAX_ATTEMPTS:3}
+    trust-lifetime-days: ${AUTH_TRUSTED_DEVICE_TRUST_LIFETIME_DAYS:90}
+    # Bank policy, deliberately without a default.
+    maximum-active-devices: ${AUTH_TRUSTED_DEVICE_MAXIMUM_ACTIVE_DEVICES:}
+    trust-policy-version: ${AUTH_TRUSTED_DEVICE_TRUST_POLICY_VERSION:}
+    server-key-wrapping:
+      active-key-id: ${AUTH_TRUSTED_DEVICE_SERVER_KEY_ACTIVE_ID:}
+      # One entry per wrapping key ID, e.g. AUTH_TRUSTED_DEVICE_SERVERKEYWRAPPING_KEYSBASE64_K1.
+      # Retired IDs stay until no stored Ksrv is wrapped with them.
+    bff-assertion:
+      issuer: ${AUTH_TRUSTED_DEVICE_BFF_ISSUER:mobile-bff}
+      key-id: ${AUTH_TRUSTED_DEVICE_BFF_KEY_ID:}
+      public-jwk: ${AUTH_TRUSTED_DEVICE_BFF_PUBLIC_JWK:}
+    mfa:
+      origin: ${AUTH_MFA_ORIGIN:}
+      request-timeout-ms: ${AUTH_MFA_REQUEST_TIMEOUT_MS:3000}
+      receipt:
+        issuer: ${AUTH_MFA_RECEIPT_ISSUER:}
+        key-id: ${AUTH_MFA_RECEIPT_KEY_ID:}
+        public-jwk: ${AUTH_MFA_RECEIPT_PUBLIC_JWK:}
   device-id:
     lookup-key-id: ${AUTH_DEVICE_ID_LOOKUP_KEY_ID:}
     lookup-key-base64: ${AUTH_DEVICE_ID_LOOKUP_KEY_BASE64:}

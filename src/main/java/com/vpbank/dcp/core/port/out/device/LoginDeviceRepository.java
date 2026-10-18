@@ -11,8 +11,8 @@ public interface LoginDeviceRepository {
     Optional<StoredDeviceKey> keyForProof(String publicBindingId);
 
     Optional<LoginDeviceSnapshot> current(SubjectId owner, String channel,
-                                          String installationId, String publicBindingId);
+                                          String deviceId, String publicBindingId);
 
     Optional<LoginDeviceSnapshot> currentByBinding(SubjectId owner, String channel,
-                                                   String installationId, BindingId bindingId);
+                                                   String deviceId, BindingId bindingId);
 }

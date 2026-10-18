@@ -6,6 +6,7 @@ import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginResponse;
+import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordNeedTrustedDeviceResponse;
 import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
 import java.time.Clock;
 import java.time.Duration;
@@ -26,14 +27,18 @@ public final class PasswordLoginResponseMapper {
 
     public ResponseEntity<PasswordLoginResponse> map(PasswordLoginResult result) {
         if (result instanceof PasswordLoginResult.Active(PreparedSession session)) {
-            if (!clock.instant().isBefore(session.deadlines().idleExpiresAt())) {
+            return active(session);
+        }
+        if (result instanceof PasswordLoginResult.NeedTrustedDevice restricted) {
+            if (!clock.instant().isBefore(restricted.expiresAt())) {
                 return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
             }
             long seconds = Math.max(1, Duration.between(clock.instant(),
-                    session.deadlines().absoluteExpiresAt()).toSeconds());
-            PasswordLoginResponse body = getLoginResponse(session, seconds);
+                    restricted.expiresAt()).toSeconds());
+            // No DPoP-Nonce: the trusted-device API is called with the BFF's JWT, not DPoP.
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                    .header("DPoP-Nonce", session.delivery().dpopNonce()).body(body);
+                    .body(new PasswordNeedTrustedDeviceResponse("NEED_TRUSTED_DEVICE",
+                            restricted.tokenEnvelope(), restricted.receipt(), seconds));
         }
         if (result instanceof PasswordLoginResult.Rejected) {
             return problem(HttpStatus.UNAUTHORIZED, "REQUEST_REJECTED");
@@ -42,6 +47,18 @@ public final class PasswordLoginResponseMapper {
             return problem(HttpStatus.CONFLICT, "STATE_CONFLICT");
         }
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
+    }
+
+    /** The ACTIVE body, shared by password login and a confirmed trusted device. */
+    public ResponseEntity<PasswordLoginResponse> active(PreparedSession session) {
+        if (!clock.instant().isBefore(session.deadlines().idleExpiresAt())) {
+            return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
+        }
+        long seconds = Math.max(1, Duration.between(clock.instant(),
+                session.deadlines().absoluteExpiresAt()).toSeconds());
+        PasswordLoginResponse body = getLoginResponse(session, seconds);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .header("DPoP-Nonce", session.delivery().dpopNonce()).body(body);
     }
 
     private @NonNull PasswordLoginResponse getLoginResponse(PreparedSession session, long seconds) {

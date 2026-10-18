@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,6 +31,8 @@ class PendingTotpMigrationIT {
     void pendingEnrollmentRequiresExpiryAndOccupiesCurrentCredentialSlot() {
         Flyway flyway = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                // V18 drops this table; V17 still runs on every fresh database first.
+                .target(MigrationVersion.fromVersion("17"))
                 .load();
         assertThat(flyway.migrate().migrationsExecuted).isEqualTo(17);
         JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(

@@ -37,7 +37,7 @@ class RetiredLoginStorageMigrationIT {
     @Test
     void freshDatabaseRetainsOnlyCurrentCustomerAndDeviceTables() {
         Flyway flyway = flyway(FRESH);
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(17);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(19);
 
         JdbcTemplate jdbc = jdbc(FRESH);
         Set<String> tables = Set.copyOf(jdbc.queryForList("""
@@ -47,7 +47,7 @@ class RetiredLoginStorageMigrationIT {
         assertThat(tables).containsExactlyInAnyOrder(
                 "auth_customer", "auth_trusted_device",
                 "auth_device_push_registration", "auth_biometric_login",
-                "auth_security_audit_event", "auth_device_credential", "auth_device_trust_reset");
+                "auth_security_audit_event", "auth_device_trust_reset");
         assertThat(jdbc.queryForObject("""
                 SELECT COUNT(*) FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_trusted_device'

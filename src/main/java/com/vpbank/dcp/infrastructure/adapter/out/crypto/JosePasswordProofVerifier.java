@@ -81,7 +81,7 @@ public final class JosePasswordProofVerifier implements PasswordProofVerifier {
         ECKey responseKey = recipientKey(request.wire().responsePublicJwk());
         Digest32 responseThumbprint = thumbprint(responseKey);
         String installationHash = digests.sha256(
-                operation.installationId().getBytes(StandardCharsets.UTF_8)).base64Url();
+                operation.deviceId().getBytes(StandardCharsets.UTF_8)).base64Url();
 
         Digest32 requestProofId = verifyTypedProof(request.wire().requestKeyProof(),
                 requestKey, "bank-password-key-proof+jwt", "PASSWORD_LOGIN_KEY_BINDING",

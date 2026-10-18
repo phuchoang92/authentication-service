@@ -9,8 +9,8 @@ public final class LoginDeviceView {
     private final UUID customerId;
     private final String channel;
     private final String platform;
-    private final byte[] installationLookup;
-    private final String installationLookupKeyId;
+    private final byte[] deviceIdLookup;
+    private final String deviceIdLookupKeyId;
     private final String status;
     private final boolean primary;
     private final Instant expiresAt;
@@ -19,15 +19,15 @@ public final class LoginDeviceView {
     private final byte[] publicKeyHash;
 
     public LoginDeviceView(UUID bindingId, UUID customerId, String channel, String platform,
-                           byte[] installationLookup, String installationLookupKeyId,
+                           byte[] deviceIdLookup, String deviceIdLookupKeyId,
                            String status, boolean primary, Instant expiresAt,
                            long securityVersion, byte[] publicKey, byte[] publicKeyHash) {
         this.bindingId = Objects.requireNonNull(bindingId);
         this.customerId = Objects.requireNonNull(customerId);
         this.channel = Objects.requireNonNull(channel);
         this.platform = Objects.requireNonNull(platform);
-        this.installationLookup = installationLookup.clone();
-        this.installationLookupKeyId = Objects.requireNonNull(installationLookupKeyId);
+        this.deviceIdLookup = deviceIdLookup.clone();
+        this.deviceIdLookupKeyId = Objects.requireNonNull(deviceIdLookupKeyId);
         this.status = Objects.requireNonNull(status);
         this.primary = primary;
         this.expiresAt = Objects.requireNonNull(expiresAt);
@@ -40,8 +40,8 @@ public final class LoginDeviceView {
     public UUID customerId() { return customerId; }
     public String channel() { return channel; }
     public String platform() { return platform; }
-    public byte[] installationLookup() { return installationLookup.clone(); }
-    public String installationLookupKeyId() { return installationLookupKeyId; }
+    public byte[] deviceIdLookup() { return deviceIdLookup.clone(); }
+    public String deviceIdLookupKeyId() { return deviceIdLookupKeyId; }
     public String status() { return status; }
     public boolean primary() { return primary; }
     public Instant expiresAt() { return expiresAt; }

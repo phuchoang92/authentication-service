@@ -5,7 +5,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 public record DeviceCandidate(BindingId bindingId, SubjectId owner, String channel, String platform,
-                              boolean installationMatches, boolean active, boolean primary,
+                              boolean deviceIdMatches, boolean active, boolean primary,
                               Instant expiresAt, boolean possessionVerified) {
 
     public DeviceCandidate {

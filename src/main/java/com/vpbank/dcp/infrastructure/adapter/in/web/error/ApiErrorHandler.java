@@ -2,6 +2,7 @@ package com.vpbank.dcp.infrastructure.adapter.in.web.error;
 
 import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.InvalidPasswordLoginRequestException;
+import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.RejectedBffCallerException;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,11 @@ public class ApiErrorHandler {
     @ExceptionHandler(InvalidPasswordLoginRequestException.class)
     public ResponseEntity<ApiError> invalidPasswordRequest(InvalidPasswordLoginRequestException ignored) {
         return safe(HttpStatus.BAD_REQUEST, "REQUEST_REJECTED", "The request was rejected", ignored);
+    }
+
+    @ExceptionHandler(RejectedBffCallerException.class)
+    public ResponseEntity<ApiError> rejectedCaller(RejectedBffCallerException ignored) {
+        return safe(HttpStatus.UNAUTHORIZED, "REQUEST_REJECTED", "The request was rejected", ignored);
     }
 
     @ExceptionHandler(ReplayAuthorityUnavailableException.class)

@@ -10,7 +10,7 @@ import java.util.Objects;
 public record SessionDeadlines(Instant idleExpiresAt, Instant absoluteExpiresAt) {
 
     public static final Duration IDLE_LIMIT = Duration.ofMinutes(15);
-    public static final Duration ABSOLUTE_LIMIT = Duration.ofHours(1);
+    public static final Duration ABSOLUTE_LIMIT = Duration.ofMinutes(20);
 
     public SessionDeadlines {
         Objects.requireNonNull(idleExpiresAt, "idleExpiresAt");

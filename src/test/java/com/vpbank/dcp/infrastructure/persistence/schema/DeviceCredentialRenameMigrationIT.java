@@ -68,7 +68,8 @@ class DeviceCredentialRenameMigrationIT {
                         UTC_TIMESTAMP(6), 2)
                 """, credentialId.toString(), bindingId.toString(), ciphertext);
 
-        Flyway after = flyway(null);
+        // Stop before V18, which drops this table and refuses to run on a populated one.
+        Flyway after = flyway(MigrationVersion.fromVersion("17"));
         assertThat(after.migrate().migrationsExecuted).isEqualTo(3);
         assertThat(jdbc.queryForObject("""
                 SELECT COUNT(*) FROM information_schema.TABLES

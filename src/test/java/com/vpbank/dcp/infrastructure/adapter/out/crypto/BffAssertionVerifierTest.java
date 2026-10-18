@@ -1,0 +1,138 @@
+package com.vpbank.dcp.infrastructure.adapter.out.crypto;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.nimbusds.jose.JOSEObjectType;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.ECDSASigner;
+import com.nimbusds.jose.jwk.Curve;
+import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+import com.vpbank.dcp.core.domain.security.Digest32;
+import java.net.URI;
+import java.time.Instant;
+import java.util.Date;
+import org.junit.jupiter.api.Test;
+
+class BffAssertionVerifierTest {
+    private static final Instant NOW = Instant.parse("2026-10-18T00:00:00Z");
+    private static final String SID = "k1:" + Digest32.fromBytes(new byte[32]).base64Url();
+    private final ECKey bffKey;
+    private final BffAssertionVerifier verifier;
+
+    BffAssertionVerifierTest() throws Exception {
+        bffKey = new ECKeyGenerator(Curve.P_256).keyID("bff-v1").generate();
+        verifier = new BffAssertionVerifier("mobile-bff", "bff-v1", bffKey.toPublicJWK(),
+                new StrictJoseJson(), new Sha256Digests());
+    }
+
+    @Test
+    void acceptsTheExactAssertion() throws Exception {
+        VerifiedBffAssertion verified = verifier.verify(sign(header(), claims()), NOW);
+
+        assertThat(verified.session().version().value()).isEqualTo("k1");
+        assertThat(verified.session().digest()).isEqualTo(Digest32.fromBytes(new byte[32]));
+        assertThat(verified.channel()).isEqualTo("neo-mobile");
+        assertThat(verified.deviceId()).isEqualTo("device-id-1234567890");
+        assertThat(verified.expiresAt()).isEqualTo(NOW.plusSeconds(30));
+        assertThat(verified.assertionIdDigest()).isEqualTo(new Sha256Digests().ofProofId("jti-1"));
+    }
+
+    @Test
+    void anotherKeyIsRejected() throws Exception {
+        ECKey attacker = new ECKeyGenerator(Curve.P_256).keyID("bff-v1").generate();
+        SignedJWT forged = new SignedJWT(header().build(), claims().build());
+        forged.sign(new ECDSASigner(attacker));
+
+        rejected(forged.serialize());
+    }
+
+    /** A key carried inside the token must never be used to verify it. */
+    @Test
+    void embeddedKeyIsRejectedEvenWhenItIsThePinnedOne() throws Exception {
+        rejected(sign(header().jwk(bffKey.toPublicJWK()), claims()));
+        rejected(sign(header().jwkURL(URI.create("https://evil.test/jwks")), claims()));
+    }
+
+    /** Without explicit typing, any other JWT the BFF signs could be replayed here. */
+    @Test
+    void missingOrWrongTypeIsRejected() throws Exception {
+        rejected(sign(new JWSHeader.Builder(JWSAlgorithm.ES256).keyID("bff-v1"), claims()));
+        rejected(sign(header().type(new JOSEObjectType("JWT")), claims()));
+    }
+
+    @Test
+    void wrongKeyIdIsRejected() throws Exception {
+        rejected(sign(header().keyID("bff-v2"), claims()));
+    }
+
+    @Test
+    void wrongIssuerOrAudienceIsRejected() throws Exception {
+        rejected(sign(header(), claims().issuer("other-bff")));
+        rejected(sign(header(), claims().audience("other-service")));
+        rejected(sign(header(), claims().audience(java.util.List.of("authentication-service", "x"))));
+    }
+
+    /** Exact claim set: an extra claim is as wrong as a missing one. */
+    @Test
+    void extraOrMissingClaimIsRejected() throws Exception {
+        rejected(sign(header(), claims().claim("scope", "banking")));
+        rejected(sign(header(), without(claims(), "deviceId")));
+        rejected(sign(header(), without(claims(), "jti")));
+        rejected(sign(header(), without(claims(), "sid")));
+    }
+
+    @Test
+    void expiredFutureOrOverlyLongAssertionIsRejected() throws Exception {
+        rejected(sign(header(), claims().expirationTime(Date.from(NOW))));
+        rejected(sign(header(), claims().issueTime(Date.from(NOW.plusSeconds(10)))
+                .expirationTime(Date.from(NOW.plusSeconds(40)))));
+        rejected(sign(header(), claims().issueTime(Date.from(NOW.minusSeconds(1)))
+                .expirationTime(Date.from(NOW.plusSeconds(60)))));
+    }
+
+    @Test
+    void malformedSessionReferenceIsRejected() throws Exception {
+        rejected(sign(header(), claims().claim("sid", "not-a-lookup")));
+        rejected(sign(header(), claims().claim("sid", "k1:short")));
+        rejected(sign(header(), claims().claim("deviceId", "short")));
+    }
+
+    private void rejected(String compact) {
+        assertThatThrownBy(() -> verifier.verify(compact, NOW))
+                .isInstanceOf(InvalidCryptographicInputException.class);
+    }
+
+    private JWSHeader.Builder header() {
+        return new JWSHeader.Builder(JWSAlgorithm.ES256).keyID("bff-v1")
+                .type(new JOSEObjectType("bff-assertion+jwt"));
+    }
+
+    private JWTClaimsSet.Builder claims() {
+        return new JWTClaimsSet.Builder().issuer("mobile-bff").audience("authentication-service")
+                .claim("sid", SID).claim("channel", "neo-mobile")
+                .claim("deviceId", "device-id-1234567890")
+                .issueTime(Date.from(NOW)).expirationTime(Date.from(NOW.plusSeconds(30)))
+                .jwtID("jti-1");
+    }
+
+    private static JWTClaimsSet.Builder without(JWTClaimsSet.Builder builder, String name) {
+        JWTClaimsSet.Builder copy = new JWTClaimsSet.Builder();
+        builder.build().getClaims().forEach((key, value) -> {
+            if (!key.equals(name)) {
+                copy.claim(key, value);
+            }
+        });
+        return copy;
+    }
+
+    private String sign(JWSHeader.Builder header, JWTClaimsSet.Builder claims) throws Exception {
+        SignedJWT jwt = new SignedJWT(header.build(), claims.build());
+        jwt.sign(new ECDSASigner(bffKey));
+        return jwt.serialize();
+    }
+}
