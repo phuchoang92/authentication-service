@@ -55,8 +55,6 @@ auth:
     credential-deadline-ms: ${AUTH_PASSWORD_CREDENTIAL_DEADLINE_MS}
     journey-deadline-ms: ${AUTH_PASSWORD_JOURNEY_DEADLINE_MS}
   native-session:
-    lookup-key-version: ${AUTH_TOKEN_LOOKUP_KEY_VERSION}
-    lookup-hmac-base64: ${AUTH_TOKEN_LOOKUP_HMAC_BASE64}
     nonce-validity-ms: ${AUTH_DPOP_NONCE_VALIDITY_MS}
     integration-activation-enabled: ${AUTH_INTEGRATION_ACTIVE_ENABLED:false}
   session-extension:

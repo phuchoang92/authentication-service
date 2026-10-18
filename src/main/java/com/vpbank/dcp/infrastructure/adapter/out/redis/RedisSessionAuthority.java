@@ -10,9 +10,10 @@ import com.vpbank.dcp.core.port.out.session.CustomerStatusFreshness;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
 import com.vpbank.dcp.core.port.out.session.SessionAuthority;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.NonceKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.RedisOperations;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -30,16 +31,14 @@ public final class RedisSessionAuthority implements SessionAuthority {
     private final StringRedisTemplate redis;
     private final RedisServerIdentity identity;
     private final SessionKeys sessions = new SessionKeys();
-    private final NonceKeys nonces;
     private final Duration nonceValidity;
     private final Clock clock;
     private final Sha256Digests digests = new Sha256Digests();
 
     public RedisSessionAuthority(StringRedisTemplate redis, RedisServerIdentity identity,
-                                 AuthorityScope scope, Duration nonceValidity, Clock clock) {
+                                 Duration nonceValidity, Clock clock) {
         this.redis = Objects.requireNonNull(redis);
         this.identity = Objects.requireNonNull(identity);
-        this.nonces = new NonceKeys(Objects.requireNonNull(scope));
         this.nonceValidity = Objects.requireNonNull(nonceValidity);
         this.clock = Objects.requireNonNull(clock);
         if (nonceValidity.toMillis() < 1000 || nonceValidity.toMillis() > 120000) {
@@ -56,6 +55,11 @@ public final class RedisSessionAuthority implements SessionAuthority {
         }
     }
 
+    /**
+     * Writes the session, its nonce family and its entry in the Customer's session list in one
+     * {@code MULTI/EXEC}, so no key ever exists without its TTL (draft doc 21 §4). A retry of
+     * the same intent finds the session already written and only checks it.
+     */
     @Override
     public SessionApplyResult apply(PreparedSession session) {
         Objects.requireNonNull(session);
@@ -63,21 +67,39 @@ public final class RedisSessionAuthority implements SessionAuthority {
             if (isCurrent(session)) {
                 return SessionApplyResult.AUTHORITY_CLOSED;
             }
-            String sessionKey = sessionKey(session);
-            if (Boolean.TRUE.equals(redis.hasKey(sessionKey))) {
+            UUID sessionId = session.candidate().sessionId();
+            String sessionKey = sessions.forSession(sessionId);
+            String nonceKey = sessions.forNonceFamily(sessionId);
+            String listKey = sessions.forSubjectSessions(session.snapshot().context().appId(),
+                    session.snapshot().context().subject());
+            Map<String, String> listEntry = Map.of(sessionId.toString(),
+                    "v1|" + session.snapshot().context().bindingId().value());
+            Boolean written = redis.execute(new SessionCallback<Boolean>() {
+                @Override
+                @SuppressWarnings("unchecked")
+                public Boolean execute(RedisOperations operations) throws DataAccessException {
+                    RedisOperations<String, String> ops = operations;
+                    ops.watch(sessionKey);
+                    if (Boolean.TRUE.equals(ops.hasKey(sessionKey))) {
+                        ops.unwatch();
+                        return false;
+                    }
+                    ops.multi();
+                    ops.opsForHash().putAll(sessionKey, sessionFields(session));
+                    ops.expireAt(sessionKey, Date.from(session.deadlines().idleExpiresAt()));
+                    ops.opsForHash().putAll(nonceKey, nonceFields(session));
+                    ops.expireAt(nonceKey, Date.from(session.deadlines().absoluteExpiresAt()));
+                    // HSET + per-field HPEXPIREAT rather than HSETEX: same effect inside MULTI, and
+                    // available on every server this build is tested against.
+                    ops.opsForHash().putAll(listKey, listEntry);
+                    ops.opsForHash().expireAt(listKey, session.deadlines().absoluteExpiresAt(), List.<Object>copyOf(listEntry.keySet()));
+                    List<Object> applied = ops.exec();
+                    return applied != null && !applied.isEmpty();
+                }
+            });
+            if (!Boolean.TRUE.equals(written)) {
                 return deliverable(session) ? SessionApplyResult.ALREADY_APPLIED
                         : SessionApplyResult.AUTHORITY_CLOSED;
-            }
-            redis.opsForHash().putAll(sessionKey, sessionFields(session));
-            if (!Boolean.TRUE.equals(redis.expireAt(sessionKey,
-                    Date.from(session.deadlines().idleExpiresAt())))) {
-                return SessionApplyResult.AUTHORITY_CLOSED;
-            }
-            String nonceKey = nonces.forFamily(session.candidate().sessionId());
-            redis.opsForHash().putAll(nonceKey, nonceFields(session));
-            if (!Boolean.TRUE.equals(redis.expireAt(nonceKey,
-                    Date.from(session.deadlines().absoluteExpiresAt())))) {
-                return SessionApplyResult.AUTHORITY_CLOSED;
             }
             return deliverable(session) ? SessionApplyResult.APPLIED
                     : SessionApplyResult.AUTHORITY_CLOSED;
@@ -93,18 +115,18 @@ public final class RedisSessionAuthority implements SessionAuthority {
             if (isCurrent(session)) {
                 return false;
             }
-            Map<Object, Object> stored = redis.opsForHash().entries(sessionKey(session));
-            Map<Object, Object> nonce = redis.opsForHash().entries(
-                    nonces.forFamily(session.candidate().sessionId()));
-            Long sessionTtl = redis.getExpire(sessionKey(session), TimeUnit.MILLISECONDS);
-            Long nonceTtl = redis.getExpire(nonces.forFamily(session.candidate().sessionId()),
-                    TimeUnit.MILLISECONDS);
+            UUID sessionId = session.candidate().sessionId();
+            Map<Object, Object> stored = redis.opsForHash().entries(sessions.forSession(sessionId));
+            Map<Object, Object> nonce = redis.opsForHash().entries(sessions.forNonceFamily(sessionId));
+            Long sessionTtl = redis.getExpire(sessions.forSession(sessionId), TimeUnit.MILLISECONDS);
+            Long nonceTtl = redis.getExpire(sessions.forNonceFamily(sessionId), TimeUnit.MILLISECONDS);
             return sessionTtl != null && sessionTtl > 0
                     && nonceTtl != null && nonceTtl > 0
-                    && stored.size() == 23 && nonce.size() == 9
+                    && stored.size() == 24 && nonce.size() == 9
                     && "1".equals(stored.get("schemaVersion"))
                     && "ACTIVE".equals(stored.get("state"))
                     && session.candidate().sessionId().toString().equals(stored.get("sessionId"))
+                    && session.candidate().secretDigest().base64Url().equals(stored.get("secretDigest"))
                     && session.candidate().generation().toString().equals(stored.get("generation"))
                     && session.snapshot().context().subject().value().toString().equals(stored.get("subjectId"))
                     && session.snapshot().context().bindingId().value().toString().equals(stored.get("deviceBindingId"))
@@ -120,9 +142,13 @@ public final class RedisSessionAuthority implements SessionAuthority {
     public boolean revoke(PreparedSession session) {
         Objects.requireNonNull(session);
         try {
-            String sessionKey = sessionKey(session);
-            String nonceKey = nonces.forFamily(session.candidate().sessionId());
+            String sessionKey = sessions.forSession(session.candidate().sessionId());
+            String nonceKey = sessions.forNonceFamily(session.candidate().sessionId());
             redis.delete(List.of(sessionKey, nonceKey));
+            // The list entry is cleanup data only; it would expire with the session anyway.
+            redis.opsForHash().delete(sessions.forSubjectSessions(
+                    session.snapshot().context().appId(), session.snapshot().context().subject()),
+                    session.candidate().sessionId().toString());
             return !Boolean.TRUE.equals(redis.hasKey(sessionKey))
                     && !Boolean.TRUE.equals(redis.hasKey(nonceKey));
         } catch (RuntimeException failure) {
@@ -139,10 +165,6 @@ public final class RedisSessionAuthority implements SessionAuthority {
                 || !now.isBefore(session.snapshot().customerStatus().validUntil());
     }
 
-    private String sessionKey(PreparedSession session) {
-        return sessions.forLookup(session.candidate().lookup().version(), session.candidate().lookup().digest());
-    }
-
     private Map<String, String> sessionFields(PreparedSession session) {
         SessionActivationSnapshot snapshot = session.snapshot();
         SessionActivationContext context = snapshot.context();
@@ -153,10 +175,11 @@ public final class RedisSessionAuthority implements SessionAuthority {
         fields.put("schemaVersion", "1");
         fields.put("state", "ACTIVE");
         fields.put("sessionId", session.candidate().sessionId().toString());
+        fields.put("secretDigest", session.candidate().secretDigest().base64Url());
         fields.put("subjectId", context.subject().value().toString());
         fields.put("appId", context.appId());
         fields.put("audience", context.appId());
-        fields.put("channel", "MOBILE");
+        fields.put("channel", context.appId());
         fields.put("scope", "[\"banking\"]");
         fields.put("deviceBindingId", context.bindingId().value().toString());
         fields.put("requestKeyJkt", keys.requestKey().base64Url());

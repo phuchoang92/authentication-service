@@ -34,8 +34,6 @@ import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.application.trusteddevice.RestrictedSessionResult;
 import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
 import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
 import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
@@ -206,7 +204,7 @@ class PasswordLoginServiceTest {
         when(trustedDevices.open(pinned.capture(), eq(now)))
                 .thenAnswer(call -> new RestrictedSessionResult.Opened(new PreparedRestrictedSession(
                         call.getArgument(0), UUID.randomUUID(),
-                        new SessionTokenLookup(new LookupKeyVersion("v1"), digest), digest,
+                        digest, digest,
                         now.plusSeconds(600), "restricted-envelope", "restricted-receipt")));
 
         assertThat(service(true).login(command)).isEqualTo(new PasswordLoginResult.NeedTrustedDevice(

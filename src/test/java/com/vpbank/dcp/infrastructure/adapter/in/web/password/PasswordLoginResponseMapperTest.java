@@ -55,7 +55,7 @@ class PasswordLoginResponseMapperTest {
                 "platformEvidence":"NONE","biometricEnforcement":"NOT_APPLICABLE"}}}
                 """.formatted(new OpaqueBindingIdCodec().encode(BINDING.value()))));
         assertThat(response.getBody().toString()).doesNotContain("encrypted-envelope", "signed-receipt");
-        assertThat(body.toString()).doesNotContain("password", "lookupDigest", "generation", "sessionId", "dpopNonce");
+        assertThat(body.toString()).doesNotContain("password", "secretDigest", "generation", "sessionId", "dpopNonce");
     }
 
     @Test

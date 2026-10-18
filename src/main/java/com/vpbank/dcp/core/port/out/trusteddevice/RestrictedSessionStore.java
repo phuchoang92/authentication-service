@@ -1,6 +1,5 @@
 package com.vpbank.dcp.core.port.out.trusteddevice;
 
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,17 +16,17 @@ public interface RestrictedSessionStore {
     boolean create(PreparedRestrictedSession session);
 
     /** Empty when missing, expired, not NEED_TRUSTED_DEVICE or not exactly decodable. */
-    Optional<StoredRestrictedSession> find(SessionTokenLookup session);
+    Optional<StoredRestrictedSession> find(UUID sessionId);
 
     /** OPEN → KEY_EXCHANGE, once. False when init already ran or the session is gone. */
-    boolean beginKeyExchange(SessionTokenLookup session, KeyExchange exchange);
+    boolean beginKeyExchange(UUID sessionId, KeyExchange exchange);
 
     /** Counts one verify attempt and returns the new count, or -1 when the session is gone. */
-    int recordVerifyAttempt(SessionTokenLookup session);
+    int recordVerifyAttempt(UUID sessionId);
 
     /** KEY_EXCHANGE → MFA, once. False when verify already passed or the session is gone. */
-    boolean recordMfaTransaction(SessionTokenLookup session, String mfaTransactionId);
+    boolean recordMfaTransaction(UUID sessionId, String mfaTransactionId);
 
     /** Deletes the session. True for exactly one caller: the one allowed to finish it. */
-    boolean consume(SessionTokenLookup session);
+    boolean consume(UUID sessionId);
 }

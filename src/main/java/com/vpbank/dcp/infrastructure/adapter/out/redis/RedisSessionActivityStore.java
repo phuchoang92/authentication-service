@@ -3,7 +3,6 @@ package com.vpbank.dcp.infrastructure.adapter.out.redis;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.session.LiveSession;
 import com.vpbank.dcp.core.session.SessionActivityStore;
 import com.vpbank.dcp.core.session.SessionActivityUnavailableException;
@@ -34,7 +33,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class RedisSessionActivityStore implements SessionActivityStore {
     /** Exactly the fields {@link RedisSessionAuthority} writes; anything else is not ACTIVE. */
-    static final Set<String> ACTIVE_FIELDS = Set.of("schemaVersion", "state", "sessionId",
+    static final Set<String> ACTIVE_FIELDS = Set.of("schemaVersion", "state", "sessionId", "secretDigest",
             "subjectId", "appId", "audience", "channel", "scope", "deviceBindingId", "requestKeyJkt",
             "requestPublicJwk", "generation", "customerSecurityVersion", "credentialSecurityVersion",
             "deviceSecurityVersion", "sessionVersion", "customerStatusVersion",
@@ -60,9 +59,9 @@ public final class RedisSessionActivityStore implements SessionActivityStore {
     }
 
     @Override
-    public Optional<LiveSession> find(SessionTokenLookup lookup) {
-        Objects.requireNonNull(lookup);
-        String key = key(lookup);
+    public Optional<LiveSession> find(UUID sessionId) {
+        Objects.requireNonNull(sessionId);
+        String key = sessions.forSession(sessionId);
         Map<Object, Object> raw;
         Long ttl;
         try {
@@ -83,10 +82,10 @@ public final class RedisSessionActivityStore implements SessionActivityStore {
     }
 
     @Override
-    public boolean slideIdle(SessionTokenLookup lookup, long expectedVersion, Instant idleExpiresAt) {
-        Objects.requireNonNull(lookup);
+    public boolean slideIdle(UUID sessionId, long expectedVersion, Instant idleExpiresAt) {
+        Objects.requireNonNull(sessionId);
         Objects.requireNonNull(idleExpiresAt);
-        String key = key(lookup);
+        String key = sessions.forSession(sessionId);
         try {
             return Boolean.TRUE.equals(redis.execute(new SessionCallback<Boolean>() {
                 @Override
@@ -131,9 +130,5 @@ public final class RedisSessionActivityStore implements SessionActivityStore {
 
     private static Instant millis(Map<String, String> fields, String name) {
         return Instant.ofEpochMilli(Long.parseLong(fields.get(name)));
-    }
-
-    private String key(SessionTokenLookup lookup) {
-        return sessions.forLookup(lookup.version(), lookup.digest());
     }
 }

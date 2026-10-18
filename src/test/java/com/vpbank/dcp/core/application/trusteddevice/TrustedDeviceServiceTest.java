@@ -15,7 +15,6 @@ import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.device.BindingId;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.port.in.trusteddevice.ConfirmTrustedDeviceResult;
 import com.vpbank.dcp.core.port.in.trusteddevice.InitTrustedDeviceResult;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceCaller;
@@ -25,7 +24,6 @@ import com.vpbank.dcp.core.port.out.mfa.MfaStartResult;
 import com.vpbank.dcp.core.port.out.mfa.MfaTransactions;
 import com.vpbank.dcp.core.port.out.mfa.MfaUnavailableException;
 import com.vpbank.dcp.core.port.out.password.StoredDeviceKey;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.trusteddevice.DeviceKeyMaterial;
 import com.vpbank.dcp.core.port.out.trusteddevice.KeyExchange;
 import com.vpbank.dcp.core.port.out.trusteddevice.KeyExchangeStart;
@@ -57,7 +55,7 @@ class TrustedDeviceServiceTest {
 
     private final Digest32 digest = Digest32.fromBytes(new byte[32]);
     private final TrustedDeviceCaller caller = new TrustedDeviceCaller(
-            new SessionTokenLookup(new LookupKeyVersion("k1"), digest), "neo-mobile",
+            UUID.randomUUID(), "neo-mobile",
             "device-id-1234567890");
     private final SubjectId owner = new SubjectId(UUID.randomUUID());
     private final BindingId binding = new BindingId(UUID.randomUUID());

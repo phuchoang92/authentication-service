@@ -12,11 +12,11 @@ import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.device.BindingId;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
 import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
 import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
 import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
@@ -28,8 +28,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 class RestrictedSessionCryptoAdapterTest {
     private static final Instant NOW = Instant.parse("2026-10-18T00:00:00Z");
-    private final LookupKeyVersion version = new LookupKeyVersion("k1");
-    private final TokenLookupHasher lookup = new TokenLookupHasher(version, new byte[32]);
     private final JsonMapper json = JsonMapper.builder().build();
     private final ECKey kenc;
     private final RestrictedSessionCryptoAdapter adapter;
@@ -38,15 +36,15 @@ class RestrictedSessionCryptoAdapterTest {
         kenc = new ECKeyGenerator(Curve.P_256).keyID("app-kenc").generate();
         ECKey receiptKey = new ECKeyGenerator(Curve.P_256).keyID("receipt-v1").generate();
         adapter = new RestrictedSessionCryptoAdapter(
-                new BankingTokenIssuer(version, new SecureRandom()), lookup,
+                new BankingTokenIssuer(new SecureRandom(), new Sha256Digests()),
                 new BankingTokenEnvelopeIssuer("https://auth.bank.test", receiptKey, json,
                         Clock.fixed(NOW, ZoneOffset.UTC)),
-                version, new LengthPrefixedSigningInputEncoder(), new Sha256Digests());
+                new LengthPrefixedSigningInputEncoder(), new Sha256Digests());
     }
 
     /** The stored session is keyed by exactly the token the App can decrypt. */
     @Test
-    void storedLookupMatchesTheDeliveredToken() throws Exception {
+    void storedSessionIdAndSecretDigestMatchTheDeliveredToken() throws Exception {
         PreparedRestrictedSession prepared = adapter.prepare(session(
                 new SubjectId(UUID.randomUUID()), new TrustTarget.NewDevice()), NOW.plusSeconds(600));
 
@@ -55,7 +53,9 @@ class RestrictedSessionCryptoAdapterTest {
         JsonNode payload = json.readTree(envelope.getPayload().toString());
         String token = payload.path("accessToken").asText();
 
-        assertThat(lookup.digest(token)).isEqualTo(prepared.lookup().digest());
+        assertThat(token).startsWith(prepared.sessionId() + ".");
+        assertThat(new Sha256Digests().sha256(token.substring(37).getBytes(StandardCharsets.US_ASCII)))
+                .isEqualTo(prepared.secretDigest());
         assertThat(payload.path("status").asText()).isEqualTo("NEED_TRUSTED_DEVICE");
         assertThat(prepared.expiresAt()).isEqualTo(NOW.plusSeconds(600));
     }

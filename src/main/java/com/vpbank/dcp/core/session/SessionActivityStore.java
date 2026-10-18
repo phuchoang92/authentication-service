@@ -1,6 +1,5 @@
 package com.vpbank.dcp.core.session;
 
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -16,11 +15,11 @@ public interface SessionActivityStore {
     Optional<UUID> currentGeneration();
 
     /** Empty when missing, expired, not ACTIVE or not exactly decodable. */
-    Optional<LiveSession> find(SessionTokenLookup lookup);
+    Optional<LiveSession> find(UUID sessionId);
 
     /**
      * Sets the idle deadline and its TTL only if {@code sessionVersion} still equals
      * {@code expectedVersion}, then increments it. False when another write or a delete won.
      */
-    boolean slideIdle(SessionTokenLookup lookup, long expectedVersion, Instant idleExpiresAt);
+    boolean slideIdle(UUID sessionId, long expectedVersion, Instant idleExpiresAt);
 }

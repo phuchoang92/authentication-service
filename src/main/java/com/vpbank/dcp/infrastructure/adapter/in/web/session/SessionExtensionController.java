@@ -1,9 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.session;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.session.ExtendSessionCommand;
 import com.vpbank.dcp.core.session.ExtendSessionResult;
 import com.vpbank.dcp.core.session.ExtendSessionService;
@@ -84,13 +82,10 @@ public final class SessionExtensionController {
         };
     }
 
-    /** Empty when a value passes the wire pattern but is not a valid digest, key ID or instant. */
+    /** Empty when a value passes the wire pattern but is not a valid digest, ID or instant. */
     private static Optional<ExtendSessionCommand> command(SessionExtensionRequest body) {
         try {
-            var lookup = body.sessionLookup();
-            return Optional.of(new ExtendSessionCommand(
-                    new SessionTokenLookup(new LookupKeyVersion(lookup.lookupKeyVersion()),
-                            Digest32.fromBase64Url(lookup.lookupDigest())),
+            return Optional.of(new ExtendSessionCommand(UUID.fromString(body.sessionId()),
                     new RequestKeyThumbprint(Digest32.fromBase64Url(body.requestKeyJkt())),
                     body.routeId(), UUID.fromString(body.admissionId()),
                     Instant.parse(body.admittedAt())));

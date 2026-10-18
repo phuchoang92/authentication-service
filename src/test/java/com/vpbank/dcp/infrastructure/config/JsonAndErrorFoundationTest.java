@@ -4,14 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenIssuer;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
+import java.util.UUID;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.adapter.in.web.InvalidExternalUriException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.error.ApiErrorHandler;
 import com.vpbank.dcp.core.port.out.security.DpopExpectation;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.InvalidCryptographicInputException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.TokenLookupHasher;
 import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.infrastructure.config.properties.KeycloakContextTrustProperties;
 import java.net.URI;
@@ -69,9 +70,10 @@ class JsonAndErrorFoundationTest {
                         Digest32.fromBytes(new byte[32])), "nonce-value", token, Instant.now());
         assertThat(expectation.toString()).doesNotContain(token, "nonce-value");
         assertThat(Digest32.fromBytes(new byte[32]).toString()).doesNotContain("AAAAAAAA");
-        try (var hasher = new TokenLookupHasher(new LookupKeyVersion("k1"), new byte[32])) {
-            assertThat(hasher.toString()).doesNotContain(token);
-        }
+        var issued = new BankingTokenIssuer(new java.security.SecureRandom(), new Sha256Digests())
+                .issue(UUID.randomUUID());
+        assertThat(issued.toString()).doesNotContain(issued.token().exactValue(),
+                issued.secretDigest().base64Url());
     }
 
     @Test

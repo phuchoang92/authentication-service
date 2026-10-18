@@ -4,7 +4,6 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceService;
 import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
 import com.vpbank.dcp.core.application.trusteddevice.TrustedSessionIssuer;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.port.in.session.IssueLoginSessionUseCase;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
@@ -29,7 +28,6 @@ import com.vpbank.dcp.infrastructure.adapter.out.crypto.ServerKeyExchangeAdapter
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.ServerKeyWrappingKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.TokenLookupHasher;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;
 import com.vpbank.dcp.infrastructure.adapter.out.http.InvalidExternalHttpSettingsException;
@@ -81,10 +79,8 @@ public class TrustedDeviceConfiguration {
     @Bean
     RestrictedSessionCryptography restrictedSessionCryptography(
             BankingTokenEnvelopeIssuer envelopes, LengthPrefixedSigningInputEncoder encoding,
-            Sha256Digests digests, LookupKeyVersion version, TokenLookupHasher lookup,
-            SecureRandom random) {
-        return new RestrictedSessionCryptoAdapter(new BankingTokenIssuer(version, random), lookup,
-                envelopes, version, encoding, digests);
+            Sha256Digests digests, BankingTokenIssuer tokens) {
+        return new RestrictedSessionCryptoAdapter(tokens, envelopes, encoding, digests);
     }
 
     @Bean

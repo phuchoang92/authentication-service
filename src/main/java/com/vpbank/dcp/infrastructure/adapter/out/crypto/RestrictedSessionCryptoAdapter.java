@@ -3,8 +3,6 @@ package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 import com.nimbusds.jose.jwk.ECKey;
 import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
 import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
 import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionCryptography;
@@ -17,28 +15,23 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Issues the restricted token exactly like an ACTIVE one: random token, keyed lookup, Kenc JWE
+ * Issues the restricted token exactly like an ACTIVE one: {@code <sessionId>.<secret>}, Kenc JWE
  * and signed receipt. Only the receipt status differs, so the App cannot mistake it for ACTIVE.
  */
 public final class RestrictedSessionCryptoAdapter implements RestrictedSessionCryptography {
     private static final String DEVICE_ID_DIGEST_LABEL = "RESTRICTED_SESSION_DEVICE_ID_V1";
 
     private final BankingTokenIssuer tokens;
-    private final TokenLookupHasher lookup;
     private final BankingTokenEnvelopeIssuer envelopes;
-    private final LookupKeyVersion lookupVersion;
     private final LengthPrefixedSigningInputEncoder encoding;
     private final Sha256Digests digests;
 
-    public RestrictedSessionCryptoAdapter(BankingTokenIssuer tokens, TokenLookupHasher lookup,
+    public RestrictedSessionCryptoAdapter(BankingTokenIssuer tokens,
                                           BankingTokenEnvelopeIssuer envelopes,
-                                          LookupKeyVersion lookupVersion,
                                           LengthPrefixedSigningInputEncoder encoding,
                                           Sha256Digests digests) {
         this.tokens = Objects.requireNonNull(tokens);
-        this.lookup = Objects.requireNonNull(lookup);
         this.envelopes = Objects.requireNonNull(envelopes);
-        this.lookupVersion = Objects.requireNonNull(lookupVersion);
         this.encoding = Objects.requireNonNull(encoding);
         this.digests = Objects.requireNonNull(digests);
     }
@@ -48,18 +41,17 @@ public final class RestrictedSessionCryptoAdapter implements RestrictedSessionCr
         Objects.requireNonNull(session);
         Objects.requireNonNull(expiresAt);
         try {
-            OpaqueBankingToken token = tokens.issue();
-            Digest32 lookupDigest = lookup.digest(token.exactValue());
+            UUID sessionId = UUID.randomUUID();
+            BankingTokenIssuer.IssuedBankingToken token = tokens.issue(sessionId);
             String deviceKeyJkt = switch (session.target()) {
                 case TrustTarget.KnownDevice known -> known.deviceKeyThumbprint().base64Url();
                 case TrustTarget.NewDevice() -> null;
             };
-            EncryptedBankingToken encrypted = envelopes.issue(token, ECKey.parse(session.keys().responsePublicJwk()),
+            EncryptedBankingToken encrypted = envelopes.issue(token.token(), ECKey.parse(session.keys().responsePublicJwk()),
                     new TokenDeliveryContext(session.operationId(), session.channel(),
                             BankingTokenStatus.NEED_TRUSTED_DEVICE,
                             session.keys().requestKeyThumbprint().base64Url(), deviceKeyJkt, expiresAt));
-            return new PreparedRestrictedSession(session, UUID.randomUUID(),
-                    new SessionTokenLookup(lookupVersion, lookupDigest),
+            return new PreparedRestrictedSession(session, sessionId, token.secretDigest(),
                     deviceIdDigest(session.owner(), session.channel(), session.deviceId()),
                     expiresAt, encrypted.tokenEnvelope(), encrypted.receipt());
         } catch (ParseException failure) {

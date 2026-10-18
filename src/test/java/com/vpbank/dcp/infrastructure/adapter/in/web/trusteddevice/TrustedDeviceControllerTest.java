@@ -14,14 +14,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.port.in.trusteddevice.ConfirmTrustedDeviceResult;
 import com.vpbank.dcp.core.port.in.trusteddevice.InitTrustedDeviceResult;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceCaller;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
 import com.vpbank.dcp.core.port.in.trusteddevice.VerifyTrustedDeviceResult;
 import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
 import com.vpbank.dcp.infrastructure.adapter.in.web.BoundedJsonBodyAdvice;
 import com.vpbank.dcp.infrastructure.adapter.in.web.error.ApiErrorHandler;
@@ -31,6 +29,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
@@ -47,8 +46,7 @@ class TrustedDeviceControllerTest {
     private final BffCallerAssertions assertions = mock(BffCallerAssertions.class);
     private final TrustedDeviceUseCase useCase = mock(TrustedDeviceUseCase.class);
     private final TrustedDeviceCaller caller = new TrustedDeviceCaller(
-            new SessionTokenLookup(new LookupKeyVersion("k1"), Digest32.fromBytes(new byte[32])),
-            "neo-mobile", "device-id-1234567890");
+            UUID.randomUUID(), "neo-mobile", "device-id-1234567890");
     private final MockMvc mvc;
 
     TrustedDeviceControllerTest() {

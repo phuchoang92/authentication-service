@@ -11,10 +11,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.session.ExtendSessionResult.Extended;
 import com.vpbank.dcp.core.session.ExtendSessionResult.NotExtended;
 import com.vpbank.dcp.core.session.ExtendSessionResult.Reason;
@@ -37,8 +35,7 @@ class ExtendSessionServiceTest {
     private final ExtendSessionService service = new ExtendSessionService(store,
             Clock.fixed(NOW, ZoneOffset.UTC), Set.of("accounts.read"),
             Duration.ofSeconds(30), Duration.ofSeconds(2));
-    private final SessionTokenLookup lookup =
-            new SessionTokenLookup(new LookupKeyVersion("k1"), digest(1));
+    private final UUID sessionId = UUID.randomUUID();
     private final RequestKeyThumbprint requestKey = new RequestKeyThumbprint(digest(2));
 
     @Test
@@ -51,7 +48,7 @@ class ExtendSessionServiceTest {
         Instant expectedIdle = NOW.minusSeconds(1).plus(SessionDeadlines.IDLE_LIMIT);
         assertThat(result).isEqualTo(new Extended(
                 new SessionDeadlines(expectedIdle, CREATED.plus(SessionDeadlines.ABSOLUTE_LIMIT))));
-        verify(store).slideIdle(lookup, 4, expectedIdle);
+        verify(store).slideIdle(sessionId, 4, expectedIdle);
     }
 
     @Test
@@ -66,7 +63,7 @@ class ExtendSessionServiceTest {
 
     @Test
     void routeOutsideAllowlistIsRejectedWithoutReadingValkey() {
-        var command = new ExtendSessionCommand(lookup, requestKey, "health.read", UUID.randomUUID(), NOW);
+        var command = new ExtendSessionCommand(sessionId, requestKey, "health.read", UUID.randomUUID(), NOW);
 
         assertThat(service.extend(command)).isEqualTo(new NotExtended(Reason.INVALID_REQUEST));
         verifyNoInteractions(store);
@@ -92,7 +89,7 @@ class ExtendSessionServiceTest {
 
     @Test
     void missingSessionIsGone() {
-        when(store.find(lookup)).thenReturn(Optional.empty());
+        when(store.find(sessionId)).thenReturn(Optional.empty());
 
         assertThat(service.extend(command(NOW))).isEqualTo(new NotExtended(Reason.GONE));
     }
@@ -150,18 +147,18 @@ class ExtendSessionServiceTest {
     void lostRaceReReadsAndUsesTheNewVersion() {
         var deadlines = SessionDeadlines.createdAt(CREATED);
         when(store.currentGeneration()).thenReturn(Optional.of(GENERATION));
-        when(store.find(lookup)).thenReturn(Optional.of(live(deadlines, 1)), Optional.of(live(deadlines, 2)));
+        when(store.find(sessionId)).thenReturn(Optional.of(live(deadlines, 1)), Optional.of(live(deadlines, 2)));
         when(store.slideIdle(any(), anyLong(), any())).thenReturn(false, true);
 
         assertThat(service.extend(command(NOW))).isInstanceOf(Extended.class);
-        verify(store).slideIdle(lookup, 1, NOW.plus(SessionDeadlines.IDLE_LIMIT));
-        verify(store).slideIdle(lookup, 2, NOW.plus(SessionDeadlines.IDLE_LIMIT));
+        verify(store).slideIdle(sessionId, 1, NOW.plus(SessionDeadlines.IDLE_LIMIT));
+        verify(store).slideIdle(sessionId, 2, NOW.plus(SessionDeadlines.IDLE_LIMIT));
     }
 
     @Test
     void sessionDeletedDuringRaceIsGone() {
         when(store.currentGeneration()).thenReturn(Optional.of(GENERATION));
-        when(store.find(lookup)).thenReturn(
+        when(store.find(sessionId)).thenReturn(
                 Optional.of(live(SessionDeadlines.createdAt(CREATED), 1)), Optional.empty());
         when(store.slideIdle(any(), anyLong(), any())).thenReturn(false);
 
@@ -187,7 +184,7 @@ class ExtendSessionServiceTest {
     }
 
     private void storeHas(LiveSession live) {
-        when(store.find(lookup)).thenReturn(Optional.of(live));
+        when(store.find(sessionId)).thenReturn(Optional.of(live));
         when(store.currentGeneration()).thenReturn(Optional.of(GENERATION));
     }
 
@@ -197,7 +194,7 @@ class ExtendSessionServiceTest {
     }
 
     private ExtendSessionCommand command(Instant admittedAt) {
-        return new ExtendSessionCommand(lookup, requestKey, "accounts.read", UUID.randomUUID(), admittedAt);
+        return new ExtendSessionCommand(sessionId, requestKey, "accounts.read", UUID.randomUUID(), admittedAt);
     }
 
     private static Digest32 digest(int fill) {

@@ -4,7 +4,6 @@ import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.device.BindingId;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.trusteddevice.KeyExchange;
 import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
 import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
@@ -22,28 +21,33 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.RedisOperations;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
- * Restricted sessions live in the same {@code session:v1:<version>:<lookup>} key space as ACTIVE
- * ones, so the BFF finds either from the App token. {@code state=NEED_TRUSTED_DEVICE} is what
+ * Restricted sessions live in the same {@code session:v2:<sessionId>} key space as ACTIVE ones,
+ * so the BFF finds either from the App token. {@code state=NEED_TRUSTED_DEVICE} is what
  * tells them apart; nothing may treat a missing or unknown state as ACTIVE.
  *
  * <p>Integration-only, like {@link RedisSessionAuthority}: ordinary Redis commands, no script.
- * Each step is gated by one atomic command ({@code HSETNX}, {@code HINCRBY}, {@code DEL}). A gate
+ * Creation is one {@code MULTI/EXEC} with the session-list entry. Each later step is gated by
+ * one atomic command ({@code HSETNX}, {@code HINCRBY}, {@code DEL}). A gate
  * that ran on a key which had just expired would create a key without TTL; that key is deleted.
  */
 public final class RedisRestrictedSessionStore implements RestrictedSessionStore {
     static final String STATE = "NEED_TRUSTED_DEVICE";
 
     private static final Set<String> BASE_FIELDS = Set.of("schemaVersion", "state", "step",
-            "sessionId", "operationId", "subjectId", "customerNumber", "customerStatusVersion",
+            "sessionId", "secretDigest", "operationId", "subjectId", "customerNumber", "customerStatusVersion",
             "channel", "deviceIdDigest", "platform", "requestKeyJkt", "requestPublicJwk",
             "responsePublicJwk", "generation", "createdAtMs", "expiresAtMs", "verifyAttempts",
             "target");
@@ -75,35 +79,57 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
         }
     }
 
+    /** The session and its entry in the Customer's session list are written in one transaction. */
     @Override
     public boolean create(PreparedRestrictedSession prepared) {
         Objects.requireNonNull(prepared);
-        String key = key(prepared.lookup());
+        RestrictedSession session = prepared.session();
+        String key = key(prepared.sessionId());
+        String listKey = sessions.forSubjectSessions(session.channel(), session.owner());
+        String binding = switch (session.target()) {
+            case TrustTarget.KnownDevice known -> known.bindingId().value().toString();
+            case TrustTarget.NewDevice() -> "-";
+        };
+        Map<String, String> listEntry = Map.of(prepared.sessionId().toString(), "v1|" + binding);
+        Map<String, String> fields = fields(prepared);
         try {
-            if (!clock.instant().isBefore(prepared.expiresAt())
-                    || Boolean.TRUE.equals(redis.hasKey(key))) {
+            if (!clock.instant().isBefore(prepared.expiresAt())) {
                 return false;
             }
-            Map<String, String> fields = fields(prepared);
-            redis.opsForHash().putAll(key, fields);
-            if (!Boolean.TRUE.equals(redis.expireAt(key, Date.from(prepared.expiresAt())))
-                    || !stored(key, fields)) {
-                redis.delete(key);
-                return false;
-            }
-            return true;
+            Boolean written = redis.execute(new SessionCallback<Boolean>() {
+                @Override
+                @SuppressWarnings("unchecked")
+                public Boolean execute(RedisOperations operations) throws DataAccessException {
+                    RedisOperations<String, String> ops = operations;
+                    ops.watch(key);
+                    if (Boolean.TRUE.equals(ops.hasKey(key))) {
+                        ops.unwatch();
+                        return false;
+                    }
+                    ops.multi();
+                    ops.opsForHash().putAll(key, fields);
+                    ops.expireAt(key, Date.from(prepared.expiresAt()));
+                    // HSET + per-field HPEXPIREAT rather than HSETEX: same effect inside MULTI, and
+                    // available on every server this build is tested against.
+                    ops.opsForHash().putAll(listKey, listEntry);
+                    ops.opsForHash().expireAt(listKey, prepared.expiresAt(), List.<Object>copyOf(listEntry.keySet()));
+                    List<Object> applied = ops.exec();
+                    return applied != null && !applied.isEmpty();
+                }
+            });
+            return Boolean.TRUE.equals(written) && stored(key, fields);
         } catch (RuntimeException failure) {
-            deleteQuietly(key);
+            // EXEC may have run; a token that is never delivered cannot use what it left.
             return false;
         }
     }
 
     @Override
-    public Optional<StoredRestrictedSession> find(SessionTokenLookup session) {
-        Objects.requireNonNull(session);
+    public Optional<StoredRestrictedSession> find(UUID sessionId) {
+        Objects.requireNonNull(sessionId);
         Map<Object, Object> raw;
         try {
-            raw = redis.opsForHash().entries(key(session));
+            raw = redis.opsForHash().entries(key(sessionId));
         } catch (RuntimeException failure) {
             throw new RestrictedSessionUnavailableException(failure);
         }
@@ -116,10 +142,10 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
     }
 
     @Override
-    public boolean beginKeyExchange(SessionTokenLookup session, KeyExchange exchange) {
-        Objects.requireNonNull(session);
+    public boolean beginKeyExchange(UUID sessionId, KeyExchange exchange) {
+        Objects.requireNonNull(sessionId);
         Objects.requireNonNull(exchange);
-        String key = key(session);
+        String key = key(sessionId);
         try {
             if (!Boolean.TRUE.equals(redis.opsForHash().putIfAbsent(key, "keyExchangeStartedAtMs",
                     Long.toString(clock.millis())))) {
@@ -144,9 +170,9 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
     }
 
     @Override
-    public int recordVerifyAttempt(SessionTokenLookup session) {
-        Objects.requireNonNull(session);
-        String key = key(session);
+    public int recordVerifyAttempt(UUID sessionId) {
+        Objects.requireNonNull(sessionId);
+        String key = key(sessionId);
         try {
             Long attempts = redis.opsForHash().increment(key, "verifyAttempts", 1);
             if (attempts == null || !stillLive(key)) {
@@ -159,10 +185,10 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
     }
 
     @Override
-    public boolean recordMfaTransaction(SessionTokenLookup session, String mfaTransactionId) {
-        Objects.requireNonNull(session);
+    public boolean recordMfaTransaction(UUID sessionId, String mfaTransactionId) {
+        Objects.requireNonNull(sessionId);
         Objects.requireNonNull(mfaTransactionId);
-        String key = key(session);
+        String key = key(sessionId);
         try {
             if (!Boolean.TRUE.equals(redis.opsForHash().putIfAbsent(key, MFA_FIELD, mfaTransactionId))
                     || !stillLive(key)) {
@@ -176,10 +202,10 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
     }
 
     @Override
-    public boolean consume(SessionTokenLookup session) {
-        Objects.requireNonNull(session);
+    public boolean consume(UUID sessionId) {
+        Objects.requireNonNull(sessionId);
         try {
-            Long deleted = redis.delete(java.util.List.of(key(session)));
+            Long deleted = redis.delete(List.of(key(sessionId)));
             return deleted != null && deleted == 1;
         } catch (RuntimeException failure) {
             throw new RestrictedSessionUnavailableException(failure);
@@ -264,8 +290,8 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
         }
     }
 
-    private String key(SessionTokenLookup lookup) {
-        return sessions.forLookup(lookup.version(), lookup.digest());
+    private String key(UUID sessionId) {
+        return sessions.forSession(sessionId);
     }
 
     private static String base64(byte[] bytes) {
@@ -279,6 +305,7 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
         fields.put("state", STATE);
         fields.put("step", RestrictedSessionStep.OPEN.name());
         fields.put("sessionId", prepared.sessionId().toString());
+        fields.put("secretDigest", prepared.secretDigest().base64Url());
         fields.put("operationId", session.operationId().toString());
         fields.put("subjectId", session.owner().value().toString());
         fields.put("customerNumber", session.customerNumber().value());

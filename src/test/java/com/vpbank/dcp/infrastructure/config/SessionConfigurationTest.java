@@ -28,9 +28,7 @@ class SessionConfigurationTest {
             .withBean(StringRedisTemplate.class, () -> mock(StringRedisTemplate.class))
             .withBean(RedisServerIdentity.class, () -> mock(RedisServerIdentity.class))
             .withBean(AuthorityScope.class, () -> new AuthorityScope("bank-session-config-test"))
-            .withPropertyValues("auth.native-session.lookup-key-version=k1",
-                    "auth.native-session.lookup-hmac-base64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-                    "auth.native-session.nonce-validity-ms=60000");
+            .withPropertyValues("auth.native-session.nonce-validity-ms=60000");
 
     @Test
     void assemblesSessionCryptographyAndAuthority() {
@@ -40,15 +38,6 @@ class SessionConfigurationTest {
                     .hasSingleBean(SessionDeliveryEscrowCodec.class);
             assertThat(started.getBean(SessionCryptography.class)).isInstanceOf(SessionCryptoAdapter.class);
             assertThat(started.getBean(SessionAuthority.class)).isInstanceOf(RedisSessionAuthority.class);
-        });
-    }
-
-    @Test
-    void unsafeLookupSecretCannotAssembleTheSessionModule() {
-        context.withPropertyValues("auth.native-session.lookup-hmac-base64=AQ==").run(started -> {
-            assertThat(started).hasFailed();
-            assertThat(started.getStartupFailure())
-                    .hasRootCauseInstanceOf(InvalidSessionRuntimeConfigurationException.class);
         });
     }
 }

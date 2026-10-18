@@ -23,7 +23,7 @@ public sealed interface ExtendSessionResult {
     enum Reason {
         /** Route not counted as activity, or {@code admittedAt} outside the allowed window. */
         INVALID_REQUEST,
-        /** No ACTIVE session for this lookup, or a deadline has passed. */
+        /** No ACTIVE session with this ID, or a deadline has passed. */
         GONE,
         /** Wrong request key or generation, or other writes kept winning. */
         CONFLICT,

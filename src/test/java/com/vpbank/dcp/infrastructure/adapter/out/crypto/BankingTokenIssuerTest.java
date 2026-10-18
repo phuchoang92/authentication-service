@@ -1,32 +1,34 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
-import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class BankingTokenIssuerTest {
+    private final BankingTokenIssuer issuer = new BankingTokenIssuer(new SecureRandom(), new Sha256Digests());
 
     @Test
-    void tokenIsRandomRedactedAndNeverUsedAsRedisLookupKey() {
-        var version = new LookupKeyVersion("k1");
-        var issuer = new BankingTokenIssuer(version, new SecureRandom());
-        var first = issuer.issue();
-        var second = issuer.issue();
-        byte[] secret = new byte[32];
-        java.util.Arrays.fill(secret, (byte) 5);
+    void tokenIsTheSessionIdAndARandomSecret() {
+        UUID sessionId = UUID.randomUUID();
+        var first = issuer.issue(sessionId);
+        var second = issuer.issue(sessionId);
 
-        try (var hasher = new TokenLookupHasher(version, secret)) {
-            String lookup = new SessionKeys().forLookup(version, hasher.digest(first.exactValue()));
-            assertTrue(first.exactValue().matches("k1\\.[A-Za-z0-9_-]{43}"));
-            assertNotEquals(first.exactValue(), second.exactValue());
-            assertEquals("OpaqueBankingToken[redacted]", first.toString());
-            assertTrue(lookup.startsWith("session:v1:k1:"));
-            assertTrue(!lookup.contains(first.exactValue()));
-        }
+        assertThat(first.token().exactValue()).matches(sessionId + "\\.[A-Za-z0-9_-]{43}");
+        assertThat(first.token().exactValue()).isNotEqualTo(second.token().exactValue());
+        assertThat(first.token().toString()).isEqualTo("OpaqueBankingToken[redacted]");
+    }
+
+    /** Storage keeps only SHA-256 of the secret, so its data cannot rebuild the token. */
+    @Test
+    void secretDigestIsSha256OfTheSecretPartOnly() {
+        var issued = issuer.issue(UUID.randomUUID());
+        String secret = issued.token().exactValue().substring(37);
+
+        assertThat(issued.secretDigest())
+                .isEqualTo(new Sha256Digests().sha256(secret.getBytes(StandardCharsets.US_ASCII)));
+        assertThat(issued.secretDigest().base64Url()).isNotEqualTo(secret);
     }
 }

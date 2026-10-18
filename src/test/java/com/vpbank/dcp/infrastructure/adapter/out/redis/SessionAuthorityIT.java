@@ -14,16 +14,15 @@ import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
 import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionDelivery;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.session.SessionCandidate;
 import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.RuntimeKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +41,7 @@ class SessionAuthorityIT {
 
     @Container
     static final GenericContainer<?> REDIS = new GenericContainer<>(
-            "redis@sha256:3b73847e72874be07e6657b129a94761662b79bc0f679273757d4218573b2a98")
+            "valkey/valkey@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd")
             .withExposedPorts(6379);
 
     private LettuceConnectionFactory factory;
@@ -63,8 +62,8 @@ class SessionAuthorityIT {
         identity.initialize();
         subjectId = new SubjectId(UUID.randomUUID());
         bindingId = new BindingId(UUID.randomUUID());
-        authority = new RedisSessionAuthority(redis, identity, SCOPE,
-                Duration.ofSeconds(60), Clock.systemUTC());
+        authority = new RedisSessionAuthority(redis, identity, Duration.ofSeconds(60),
+                Clock.systemUTC());
     }
 
     @AfterEach
@@ -76,7 +75,7 @@ class SessionAuthorityIT {
     void publishesSessionWithBoundOwnerAndExpiry() {
         PreparedSession candidate = candidate();
         assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.APPLIED);
-        String key = new SessionKeys().forLookup(candidate.candidate().lookup().version(), candidate.candidate().lookup().digest());
+        String key = new SessionKeys().forSession(candidate.candidate().sessionId());
         var original = redis.opsForHash().entries(key);
         assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.ALREADY_APPLIED);
         assertThat(redis.opsForHash().entries(key)).isEqualTo(original);
@@ -91,6 +90,30 @@ class SessionAuthorityIT {
         assertThat(redis.getExpire(key)).isPositive();
     }
 
+    /** Session, nonce family and list entry are one write: none exists without its expiry. */
+    @Test
+    void publishesTheSessionNonceAndListEntryTogetherWithTheirExpiry() {
+        PreparedSession candidate = candidate();
+        assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.APPLIED);
+        SessionKeys keys = new SessionKeys();
+        UUID sessionId = candidate.candidate().sessionId();
+        String list = keys.forSubjectSessions("neo-mobile", subjectId);
+
+        assertThat(redis.opsForHash().get(keys.forSession(sessionId), "channel")).isEqualTo("neo-mobile");
+        assertThat(redis.opsForHash().get(keys.forSession(sessionId), "secretDigest"))
+                .isEqualTo(digest(3).base64Url());
+        assertThat(redis.getExpire(keys.forNonceFamily(sessionId))).isPositive();
+        assertThat(redis.opsForHash().get(list, sessionId.toString()))
+                .isEqualTo("v1|" + bindingId.value());
+        Long fieldTtl = redis.opsForHash().getTimeToLive(list, List.of(sessionId.toString()))
+                .expirationOf(sessionId.toString()).raw();
+        assertThat(fieldTtl).isPositive();
+        assertThat(redis.getExpire(list)).isEqualTo(-1L);
+
+        assertThat(authority.revoke(candidate)).isTrue();
+        assertThat(redis.opsForHash().hasKey(list, sessionId.toString())).isFalse();
+    }
+
     @Test
     void serializesAssuranceSuppliedByTheAuthenticationSource() {
         var original = candidate();
@@ -102,7 +125,7 @@ class SessionAuthorityIT {
                 old.biometricLoginEnabled());
         var supplied = new PreparedSession(snapshot, original.candidate(), original.delivery(), original.deadlines());
         assertThat(authority.apply(supplied)).isEqualTo(SessionApplyResult.APPLIED);
-        String key = new SessionKeys().forLookup(supplied.candidate().lookup().version(), supplied.candidate().lookup().digest());
+        String key = new SessionKeys().forSession(supplied.candidate().sessionId());
         assertThat(redis.opsForHash().get(key, "assurance")).isEqualTo(
                 "{\"biometricEnforcement\":\"CLIENT_ENFORCED\",\"devicePossession\":\"MFA_KEY_POSSESSION\",\"platformEvidence\":\"NONE\"}");
     }
@@ -122,8 +145,7 @@ class SessionAuthorityIT {
     void missingSessionExpiryDoesNotAuthorizeDelivery() {
         PreparedSession candidate = candidate();
         assertThat(authority.apply(candidate)).isEqualTo(SessionApplyResult.APPLIED);
-        String key = new SessionKeys().forLookup(candidate.candidate().lookup().version(),
-                candidate.candidate().lookup().digest());
+        String key = new SessionKeys().forSession(candidate.candidate().sessionId());
         redis.persist(key);
 
         assertThat(authority.deliverable(candidate)).isFalse();
@@ -151,7 +173,7 @@ class SessionAuthorityIT {
                 false);
         return new PreparedSession(snapshot,
                 new SessionCandidate(UUID.randomUUID(), UUID.randomUUID(), authority.currentGeneration().orElseThrow(),
-                        new SessionTokenLookup(new LookupKeyVersion("k1"), digest(3)), digest(4)),
+                        digest(3), digest(4)),
                 new SessionDelivery("encrypted-only", "signed-receipt", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", now.plusSeconds(120)),
                 SessionDeadlines.createdAt(now));
     }

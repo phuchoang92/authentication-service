@@ -12,8 +12,6 @@ import static org.mockito.Mockito.when;
 import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceCaller;
 import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
@@ -98,12 +96,12 @@ class TrustedDeviceSessionsTest {
     @Test
     void currentOnlyMatchesTheSameChannelDeviceAndGeneration() {
         Digest32 deviceDigest = Digest32.fromBytes(new byte[32]);
-        SessionTokenLookup lookup = new SessionTokenLookup(new LookupKeyVersion("v1"), deviceDigest);
+        UUID sessionId = UUID.randomUUID();
         StoredRestrictedSession stored = new StoredRestrictedSession(UUID.randomUUID(),
                 session.operationId(), session.owner(), session.customerNumber(), 3, "neo-mobile",
                 new TrustTarget.NewDevice(), deviceDigest, session.keys(), "ANDROID", generation,
                 now.plusSeconds(600), RestrictedSessionStep.OPEN, 0, null, null);
-        when(store.find(lookup)).thenReturn(Optional.of(stored));
+        when(store.find(sessionId)).thenReturn(Optional.of(stored));
         when(store.currentGeneration()).thenReturn(Optional.of(generation));
         when(cryptography.deviceIdDigest(session.owner(), "neo-mobile", "device-id-1234567890"))
                 .thenReturn(deviceDigest);
@@ -112,21 +110,21 @@ class TrustedDeviceSessionsTest {
                         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}));
 
-        assertThat(sessions.current(new TrustedDeviceCaller(lookup, "neo-mobile",
+        assertThat(sessions.current(new TrustedDeviceCaller(sessionId, "neo-mobile",
                 "device-id-1234567890"))).contains(stored);
-        assertThat(sessions.current(new TrustedDeviceCaller(lookup, "other-channel",
+        assertThat(sessions.current(new TrustedDeviceCaller(sessionId, "other-channel",
                 "device-id-1234567890"))).isEmpty();
-        assertThat(sessions.current(new TrustedDeviceCaller(lookup, "neo-mobile",
+        assertThat(sessions.current(new TrustedDeviceCaller(sessionId, "neo-mobile",
                 "other-device-1234567"))).isEmpty();
         when(store.currentGeneration()).thenReturn(Optional.of(UUID.randomUUID()));
-        assertThat(sessions.current(new TrustedDeviceCaller(lookup, "neo-mobile",
+        assertThat(sessions.current(new TrustedDeviceCaller(sessionId, "neo-mobile",
                 "device-id-1234567890"))).isEmpty();
     }
 
     private PreparedRestrictedSession prepared(Instant expiresAt) {
         Digest32 digest = Digest32.fromBytes(new byte[32]);
         return new PreparedRestrictedSession(session, UUID.randomUUID(),
-                new SessionTokenLookup(new LookupKeyVersion("v1"), digest), digest, expiresAt,
+                digest, digest, expiresAt,
                 "envelope", "receipt");
     }
 }

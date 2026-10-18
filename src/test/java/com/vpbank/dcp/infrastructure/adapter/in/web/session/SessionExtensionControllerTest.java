@@ -12,10 +12,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.session.ExtendSessionCommand;
 import com.vpbank.dcp.core.session.ExtendSessionResult.Extended;
 import com.vpbank.dcp.core.session.ExtendSessionResult.NotExtended;
@@ -38,7 +36,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class SessionExtensionControllerTest {
     private static final String PATH = "/internal/v1/auth/sessions/extend";
     private static final String BFF = "spiffe://bank/mobile-bff";
-    private static final String LOOKUP = "A".repeat(43);
+    private static final UUID SESSION = UUID.fromString("44444444-4444-4444-8444-444444444444");
     private static final String JKT = "B".repeat(42) + "A";
     private static final UUID ADMISSION = UUID.fromString("4cf11838-62df-4799-ac0a-6644a86188c5");
     private static final Instant ADMITTED = Instant.parse("2026-10-18T10:00:00.000Z");
@@ -64,7 +62,7 @@ class SessionExtensionControllerTest {
         ArgumentCaptor<ExtendSessionCommand> sent = ArgumentCaptor.forClass(ExtendSessionCommand.class);
         verify(service).extend(sent.capture());
         assertThat(sent.getValue()).isEqualTo(new ExtendSessionCommand(
-                new SessionTokenLookup(new LookupKeyVersion("k1"), Digest32.fromBase64Url(LOOKUP)),
+                SESSION,
                 new RequestKeyThumbprint(Digest32.fromBase64Url(JKT)), "accounts.read", ADMISSION,
                 ADMITTED));
     }
@@ -120,8 +118,8 @@ class SessionExtensionControllerTest {
 
     private static String body(String requestKeyJkt, String admittedAt) {
         return """
-                {"sessionLookup":{"lookupKeyVersion":"k1","lookupDigest":"%s"},
+                {"sessionId":"%s",
                  "admissionId":"%s","admittedAt":"%s","routeId":"accounts.read",
-                 "requestKeyJkt":"%s"}""".formatted(LOOKUP, ADMISSION, admittedAt, requestKeyJkt);
+                 "requestKeyJkt":"%s"}""".formatted(SESSION, ADMISSION, admittedAt, requestKeyJkt);
     }
 }

@@ -25,11 +25,12 @@ import com.vpbank.dcp.core.port.out.replay.ReplayReservation;
 import java.net.URI;
 import java.time.Instant;
 import java.util.Date;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class BffAssertionVerifierTest {
     private static final Instant NOW = Instant.parse("2026-10-18T00:00:00Z");
-    private static final String SID = "k1:" + Digest32.fromBytes(new byte[32]).base64Url();
+    private static final String SID = "abcdef12-3456-4789-8abc-def012345678";
     private final AssertionReplay replay = mock(AssertionReplay.class);
     private final ECKey bffKey;
     private final BffAssertionVerifier verifier;
@@ -79,8 +80,7 @@ class BffAssertionVerifierTest {
     void acceptsTheExactAssertion() throws Exception {
         VerifiedBffAssertion verified = verifier.verify(sign(header(), claims()), NOW);
 
-        assertThat(verified.session().version().value()).isEqualTo("k1");
-        assertThat(verified.session().digest()).isEqualTo(Digest32.fromBytes(new byte[32]));
+        assertThat(verified.sessionId()).isEqualTo(UUID.fromString(SID));
         assertThat(verified.channel()).isEqualTo("neo-mobile");
         assertThat(verified.deviceId()).isEqualTo("device-id-1234567890");
         assertThat(verified.expiresAt()).isEqualTo(NOW.plusSeconds(30));
@@ -142,8 +142,9 @@ class BffAssertionVerifierTest {
 
     @Test
     void malformedSessionReferenceIsRejected() throws Exception {
-        rejected(sign(header(), claims().claim("sid", "not-a-lookup")));
-        rejected(sign(header(), claims().claim("sid", "k1:short")));
+        rejected(sign(header(), claims().claim("sid", "not-a-session-id")));
+        rejected(sign(header(), claims().claim("sid", SID.toUpperCase())));
+        rejected(sign(header(), claims().claim("sid", "k1:" + Digest32.fromBytes(new byte[32]).base64Url())));
         rejected(sign(header(), claims().claim("deviceId", "short")));
     }
 

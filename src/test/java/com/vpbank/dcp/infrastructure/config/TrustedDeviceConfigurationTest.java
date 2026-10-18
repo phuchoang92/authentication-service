@@ -6,7 +6,6 @@ import static org.mockito.Mockito.mock;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.port.in.session.IssueLoginSessionUseCase;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
@@ -16,9 +15,9 @@ import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JcsCommandDigest;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.LengthPrefixedSigningInputEncoder;
+import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.TokenLookupHasher;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisServerIdentity;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdCodec;
@@ -65,8 +64,8 @@ class TrustedDeviceConfigurationTest {
             .withBean(JcsCommandDigest.class,
                     () -> new JcsCommandDigest(new StrictJoseJson(), new Sha256Digests()))
             .withBean(JsonMapper.class, JsonMapper::new)
-            .withBean(LookupKeyVersion.class, () -> new LookupKeyVersion("k1"))
-            .withBean(TokenLookupHasher.class, () -> mock(TokenLookupHasher.class))
+            .withBean(BankingTokenIssuer.class,
+                    () -> new BankingTokenIssuer(new SecureRandom(), new Sha256Digests()))
             .withBean(SecureRandom.class, SecureRandom::new)
             .withBean(StringRedisTemplate.class, () -> mock(StringRedisTemplate.class))
             .withBean(RedisServerIdentity.class, () -> mock(RedisServerIdentity.class))

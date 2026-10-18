@@ -58,7 +58,7 @@ public final class TrustedDeviceSessions {
      */
     public Optional<StoredRestrictedSession> current(TrustedDeviceCaller caller) {
         Objects.requireNonNull(caller);
-        return store.find(caller.session())
+        return store.find(caller.sessionId())
                 .filter(session -> session.channel().equals(caller.channel()))
                 .filter(session -> cryptography.deviceIdDigest(session.owner(), session.channel(),
                         caller.deviceId()).equals(session.deviceIdDigest()))
@@ -66,20 +66,20 @@ public final class TrustedDeviceSessions {
     }
 
     public boolean beginKeyExchange(TrustedDeviceCaller caller, KeyExchange exchange) {
-        return store.beginKeyExchange(caller.session(), exchange);
+        return store.beginKeyExchange(caller.sessionId(), exchange);
     }
 
     public int recordVerifyAttempt(TrustedDeviceCaller caller) {
-        return store.recordVerifyAttempt(caller.session());
+        return store.recordVerifyAttempt(caller.sessionId());
     }
 
     public boolean recordMfaTransaction(TrustedDeviceCaller caller, String mfaTransactionId) {
-        return store.recordMfaTransaction(caller.session(), mfaTransactionId);
+        return store.recordMfaTransaction(caller.sessionId(), mfaTransactionId);
     }
 
     /** Ends the session. True for exactly one caller, which alone may finish the trust. */
     public boolean end(TrustedDeviceCaller caller) {
-        return store.consume(caller.session());
+        return store.consume(caller.sessionId());
     }
 
     private boolean currentGeneration(UUID expected) {

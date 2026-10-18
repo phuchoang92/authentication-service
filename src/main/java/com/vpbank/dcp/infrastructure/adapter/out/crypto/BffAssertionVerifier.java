@@ -9,11 +9,9 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceCaller;
 import com.vpbank.dcp.core.port.out.replay.AssertionReplay;
 import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
 import java.text.ParseException;
 import java.time.Duration;
@@ -21,11 +19,12 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
  * Verifies the JWT the BFF sends on the trusted-device API. The BFF has already authenticated
- * the App token; {@code sid} names that token's restricted session in Valkey.
+ * the App token; {@code sid} is that token's session ID (draft doc 21 §2).
  *
  * <p>Only the pinned key is accepted, never one the token carries. The claim set must match
  * exactly, so a JWT minted by the BFF for another purpose cannot be replayed here.
@@ -37,7 +36,9 @@ public final class BffAssertionVerifier implements BffCallerAssertions {
             Set.of("iss", "aud", "sid", "channel", "deviceId", "iat", "exp", "jti");
     private static final Duration MAXIMUM_LIFETIME = Duration.ofSeconds(60);
     private static final Duration SKEW = Duration.ofSeconds(5);
-    private static final Pattern SID = Pattern.compile("([A-Za-z0-9_-]{1,16}):([A-Za-z0-9_-]{43})");
+    /** Canonical lowercase UUID only, so one session has exactly one {@code sid} spelling. */
+    private static final Pattern SID = Pattern.compile(
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
 
     private final String issuer;
     private final String kid;
@@ -70,7 +71,7 @@ public final class BffAssertionVerifier implements BffCallerAssertions {
             return Optional.empty();
         }
         return switch (replay.reserve(verified.assertionIdDigest(), verified.expiresAt())) {
-            case RESERVED -> Optional.of(new TrustedDeviceCaller(verified.session(),
+            case RESERVED -> Optional.of(new TrustedDeviceCaller(verified.sessionId(),
                     verified.channel(), verified.deviceId()));
             case REPLAYED -> Optional.empty();
             case AUTHORITY_CLOSED -> throw new ReplayAuthorityUnavailableException();
@@ -118,16 +119,13 @@ public final class BffAssertionVerifier implements BffCallerAssertions {
         String sid = claims.getStringClaim("sid");
         String channel = claims.getStringClaim("channel");
         String deviceId = claims.getStringClaim("deviceId");
-        var sidParts = sid == null ? null : SID.matcher(sid);
         if (jti == null || jti.isBlank() || jti.length() > 128
-                || sidParts == null || !sidParts.matches()
+                || sid == null || !SID.matcher(sid).matches()
                 || channel == null || channel.isBlank() || channel.length() > 64
                 || deviceId == null || deviceId.length() < 16 || deviceId.length() > 300) {
             throw new InvalidCryptographicInputException();
         }
         return new VerifiedBffAssertion(
-                new SessionTokenLookup(new LookupKeyVersion(sidParts.group(1)),
-                        Digest32.fromBase64Url(sidParts.group(2))),
-                channel, deviceId, digests.ofProofId(jti), expiresAt);
+                UUID.fromString(sid), channel, deviceId, digests.ofProofId(jti), expiresAt);
     }
 }

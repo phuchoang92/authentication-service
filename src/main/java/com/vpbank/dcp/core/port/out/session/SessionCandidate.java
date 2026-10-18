@@ -6,12 +6,12 @@ import java.util.UUID;
 
 /** Stable publication identity and digest of the exact prepared candidate. */
 public record SessionCandidate(UUID intentId, UUID sessionId, UUID generation,
-                               SessionTokenLookup lookup, Digest32 candidateDigest) {
+                               Digest32 secretDigest, Digest32 candidateDigest) {
     public SessionCandidate {
         Objects.requireNonNull(intentId);
         Objects.requireNonNull(sessionId);
         Objects.requireNonNull(generation);
-        Objects.requireNonNull(lookup);
+        Objects.requireNonNull(secretDigest);
         Objects.requireNonNull(candidateDigest);
     }
 

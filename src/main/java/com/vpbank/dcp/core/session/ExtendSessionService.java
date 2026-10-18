@@ -48,7 +48,7 @@ public final class ExtendSessionService {
         try {
             // A lost race re-reads and recomputes from the same admittedAt, never from now.
             for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-                Optional<LiveSession> found = store.find(command.lookup());
+                Optional<LiveSession> found = store.find(command.sessionId());
                 if (found.isEmpty() || !found.get().usableAt(clock.instant())) {
                     return new NotExtended(Reason.GONE);
                 }
@@ -63,7 +63,7 @@ public final class ExtendSessionService {
                 }
                 SessionDeadlines next = live.deadlines().slideFor(command.admittedAt());
                 if (next.equals(live.deadlines())
-                        || store.slideIdle(command.lookup(), live.version(), next.idleExpiresAt())) {
+                        || store.slideIdle(command.sessionId(), live.version(), next.idleExpiresAt())) {
                     return new Extended(next);
                 }
             }

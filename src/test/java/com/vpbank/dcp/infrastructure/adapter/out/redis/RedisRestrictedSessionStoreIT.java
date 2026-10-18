@@ -6,8 +6,6 @@ import com.vpbank.dcp.core.domain.customer.CustomerNumber;
 import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.device.BindingId;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.trusteddevice.KeyExchange;
 import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
 import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
@@ -41,7 +39,7 @@ class RedisRestrictedSessionStoreIT {
 
     @Container
     static final GenericContainer<?> REDIS = new GenericContainer<>(
-            "redis@sha256:3b73847e72874be07e6657b129a94761662b79bc0f679273757d4218573b2a98")
+            "valkey/valkey@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd")
             .withExposedPorts(6379);
 
     private LettuceConnectionFactory factory;
@@ -92,6 +90,7 @@ class RedisRestrictedSessionStoreIT {
                 .containsEntry("responsePublicJwk", "response-jwk");
         Long ttl = redis.getExpire(key(prepared), TimeUnit.SECONDS);
         assertThat(ttl).isBetween(590L, 600L);
+        assertThat(listEntry(prepared)).isEqualTo("v1|" + binding.value());
     }
 
     /** The plaintext device ID and the token never reach Valkey; only their digests do. */
@@ -105,6 +104,7 @@ class RedisRestrictedSessionStoreIT {
         Map<Object, Object> stored = redis.opsForHash().entries(key(prepared));
         assertThat(stored).containsEntry("target", "NEW_DEVICE")
                 .doesNotContainKeys("deviceBindingId", "deviceKeyJkt", "deviceSecurityVersion");
+        assertThat(listEntry(prepared)).isEqualTo("v1|-");
         assertThat(stored.values()).doesNotContain(prepared.session().deviceId());
     }
 
@@ -133,18 +133,18 @@ class RedisRestrictedSessionStoreIT {
         PreparedRestrictedSession prepared = prepared(new TrustTarget.NewDevice(),
                 Instant.now().plusSeconds(600));
         store.create(prepared);
-        SessionTokenLookup lookup = prepared.lookup();
+        UUID sessionId = prepared.sessionId();
         KeyExchange exchange = new KeyExchange(new WrappedServerKey("w1", new byte[] {1, 2, 3}),
                 "server-jwk", randomDigest(), "device-jwk", randomDigest());
 
-        assertThat(store.beginKeyExchange(lookup, exchange)).isTrue();
-        assertThat(store.beginKeyExchange(lookup, exchange)).isFalse();
-        assertThat(store.recordVerifyAttempt(lookup)).isEqualTo(1);
-        assertThat(store.recordVerifyAttempt(lookup)).isEqualTo(2);
-        assertThat(store.recordMfaTransaction(lookup, "mfa-transaction-1")).isTrue();
-        assertThat(store.recordMfaTransaction(lookup, "mfa-transaction-2")).isFalse();
+        assertThat(store.beginKeyExchange(sessionId, exchange)).isTrue();
+        assertThat(store.beginKeyExchange(sessionId, exchange)).isFalse();
+        assertThat(store.recordVerifyAttempt(sessionId)).isEqualTo(1);
+        assertThat(store.recordVerifyAttempt(sessionId)).isEqualTo(2);
+        assertThat(store.recordMfaTransaction(sessionId, "mfa-transaction-1")).isTrue();
+        assertThat(store.recordMfaTransaction(sessionId, "mfa-transaction-2")).isFalse();
 
-        StoredRestrictedSession stored = store.find(lookup).orElseThrow();
+        StoredRestrictedSession stored = store.find(sessionId).orElseThrow();
         assertThat(stored.step()).isEqualTo(RestrictedSessionStep.MFA);
         assertThat(stored.verifyAttempts()).isEqualTo(2);
         assertThat(stored.mfaTransactionId()).isEqualTo("mfa-transaction-1");
@@ -152,18 +152,18 @@ class RedisRestrictedSessionStoreIT {
         assertThat(stored.keyExchange().challengeDigest()).isEqualTo(exchange.challengeDigest());
         assertThat(stored.keys()).isEqualTo(prepared.session().keys());
 
-        assertThat(store.consume(lookup)).isTrue();
-        assertThat(store.consume(lookup)).isFalse();
-        assertThat(store.find(lookup)).isEmpty();
+        assertThat(store.consume(sessionId)).isTrue();
+        assertThat(store.consume(sessionId)).isFalse();
+        assertThat(store.find(sessionId)).isEmpty();
     }
 
     /** A gate run after expiry must not leave a key without TTL that later reads as a session. */
     @Test
     void gatesOnAnEndedSessionLeaveNothingBehind() {
-        SessionTokenLookup gone = new SessionTokenLookup(new LookupKeyVersion("k1"), randomDigest());
+        UUID gone = UUID.randomUUID();
         KeyExchange exchange = new KeyExchange(new WrappedServerKey("w1", new byte[] {1}),
                 "server-jwk", randomDigest(), "device-jwk", randomDigest());
-        String key = new SessionKeys().forLookup(gone.version(), gone.digest());
+        String key = new SessionKeys().forSession(gone);
 
         assertThat(store.beginKeyExchange(gone, exchange)).isFalse();
         assertThat(store.recordVerifyAttempt(gone)).isEqualTo(-1);
@@ -177,13 +177,17 @@ class RedisRestrictedSessionStoreIT {
                 target, "device-id-1234567890",
                 new LoginKeys("request-jwk", randomDigest(), "response-jwk"), "ANDROID",
                 identity.currentGeneration().orElseThrow());
-        return new PreparedRestrictedSession(session, UUID.randomUUID(),
-                new SessionTokenLookup(new LookupKeyVersion("k1"), randomDigest()), randomDigest(),
+        return new PreparedRestrictedSession(session, UUID.randomUUID(), randomDigest(), randomDigest(),
                 expiresAt, "envelope", "receipt");
     }
 
+    private Object listEntry(PreparedRestrictedSession prepared) {
+        return redis.opsForHash().get(new SessionKeys().forSubjectSessions("neo-mobile",
+                prepared.session().owner()), prepared.sessionId().toString());
+    }
+
     private String key(PreparedRestrictedSession prepared) {
-        return new SessionKeys().forLookup(prepared.lookup().version(), prepared.lookup().digest());
+        return new SessionKeys().forSession(prepared.sessionId());
     }
 
     private static Digest32 randomDigest() {

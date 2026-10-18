@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.vpbank.dcp.core.domain.customer.SubjectId;
 import com.vpbank.dcp.core.domain.device.BindingId;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.domain.session.SessionAssurance;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
@@ -19,7 +18,6 @@ import com.vpbank.dcp.core.port.out.session.SessionCandidate;
 import com.vpbank.dcp.core.port.out.session.SessionDelivery;
 import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
 import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.session.LiveSession;
 import com.vpbank.dcp.core.session.SessionActivityUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
@@ -53,16 +51,15 @@ class RedisSessionActivityStoreIT {
 
     @Container
     static final GenericContainer<?> REDIS = new GenericContainer<>(
-            "redis@sha256:3b73847e72874be07e6657b129a94761662b79bc0f679273757d4218573b2a98")
+            "valkey/valkey@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd")
             .withExposedPorts(6379);
 
     private LettuceConnectionFactory factory;
     private StringRedisTemplate redis;
     private RedisSessionAuthority authority;
     private RedisSessionActivityStore store;
-    private final SessionTokenLookup lookup =
-            new SessionTokenLookup(new LookupKeyVersion("k1"), digest(3));
-    private final String key = new SessionKeys().forLookup(lookup.version(), lookup.digest());
+    private final UUID sessionId = UUID.randomUUID();
+    private final String key = new SessionKeys().forSession(sessionId);
 
     @BeforeEach
     void connect() {
@@ -74,8 +71,8 @@ class RedisSessionActivityStoreIT {
         redis.getConnectionFactory().getConnection().serverCommands().flushDb();
         RedisServerIdentity identity = new RedisServerIdentity(redis, new RuntimeKeys(SCOPE));
         identity.initialize();
-        authority = new RedisSessionAuthority(redis, identity, SCOPE,
-                Duration.ofSeconds(60), Clock.systemUTC());
+        authority = new RedisSessionAuthority(redis, identity, Duration.ofSeconds(60),
+                Clock.systemUTC());
         store = new RedisSessionActivityStore(redis, identity);
     }
 
@@ -88,7 +85,7 @@ class RedisSessionActivityStoreIT {
     void readsTheSessionThatLoginPublished() {
         PreparedSession published = publish();
 
-        LiveSession live = store.find(lookup).orElseThrow();
+        LiveSession live = store.find(sessionId).orElseThrow();
 
         assertThat(live.requestKey()).isEqualTo(new RequestKeyThumbprint(digest(1)));
         assertThat(live.generation()).isEqualTo(published.candidate().generation());
@@ -102,7 +99,7 @@ class RedisSessionActivityStoreIT {
         PreparedSession published = publish();
         Instant newIdle = published.deadlines().idleExpiresAt().plusSeconds(120);
 
-        assertThat(store.slideIdle(lookup, 0, newIdle)).isTrue();
+        assertThat(store.slideIdle(sessionId, 0, newIdle)).isTrue();
 
         assertThat(redis.opsForHash().get(key, "idleExpiresAtMs"))
                 .isEqualTo(Long.toString(newIdle.toEpochMilli()));
@@ -110,7 +107,7 @@ class RedisSessionActivityStoreIT {
         long ttl = redis.getExpire(key, java.util.concurrent.TimeUnit.MILLISECONDS);
         long expected = Duration.between(Instant.now(), newIdle).toMillis();
         assertThat(ttl).isBetween(expected - 2000, expected + 2000);
-        assertThat(store.find(lookup).orElseThrow().deadlines().idleExpiresAt()).isEqualTo(newIdle);
+        assertThat(store.find(sessionId).orElseThrow().deadlines().idleExpiresAt()).isEqualTo(newIdle);
     }
 
     @Test
@@ -118,7 +115,7 @@ class RedisSessionActivityStoreIT {
         PreparedSession published = publish();
         var before = redis.opsForHash().entries(key);
 
-        assertThat(store.slideIdle(lookup, 7, published.deadlines().idleExpiresAt().plusSeconds(60)))
+        assertThat(store.slideIdle(sessionId, 7, published.deadlines().idleExpiresAt().plusSeconds(60)))
                 .isFalse();
         assertThat(redis.opsForHash().entries(key)).isEqualTo(before);
     }
@@ -126,13 +123,13 @@ class RedisSessionActivityStoreIT {
     @Test
     void deletedSessionIsNeverRecreated() {
         PreparedSession published = publish();
-        LiveSession live = store.find(lookup).orElseThrow();
+        LiveSession live = store.find(sessionId).orElseThrow();
         assertThat(authority.revoke(published)).isTrue();
 
-        assertThat(store.slideIdle(lookup, live.version(),
+        assertThat(store.slideIdle(sessionId, live.version(),
                 published.deadlines().idleExpiresAt().plusSeconds(60))).isFalse();
         assertThat(redis.hasKey(key)).isFalse();
-        assertThat(store.find(lookup)).isEmpty();
+        assertThat(store.find(sessionId)).isEmpty();
     }
 
     @Test
@@ -141,14 +138,14 @@ class RedisSessionActivityStoreIT {
         ExecutorService pool = Executors.newFixedThreadPool(8);
         try {
             for (int round = 0; round < 10; round++) {
-                long version = store.find(lookup).orElseThrow().version();
+                long version = store.find(sessionId).orElseThrow().version();
                 Instant newIdle = published.deadlines().idleExpiresAt().plusSeconds(round + 1);
                 CountDownLatch start = new CountDownLatch(1);
                 List<Future<Boolean>> results = new ArrayList<>();
                 for (int writer = 0; writer < 8; writer++) {
                     results.add(pool.submit(() -> {
                         start.await();
-                        return store.slideIdle(lookup, version, newIdle);
+                        return store.slideIdle(sessionId, version, newIdle);
                     }));
                 }
                 start.countDown();
@@ -170,7 +167,7 @@ class RedisSessionActivityStoreIT {
         publish();
         redis.opsForHash().put(key, "state", "LOCKED");
 
-        assertThat(store.find(lookup)).isEmpty();
+        assertThat(store.find(sessionId)).isEmpty();
     }
 
     @Test
@@ -178,7 +175,7 @@ class RedisSessionActivityStoreIT {
         publish();
         redis.opsForHash().put(key, "extra", "x");
 
-        assertThat(store.find(lookup)).isEmpty();
+        assertThat(store.find(sessionId)).isEmpty();
     }
 
     @Test
@@ -186,7 +183,7 @@ class RedisSessionActivityStoreIT {
         publish();
         redis.opsForHash().put(key, "idleExpiresAtMs", "soon");
 
-        assertThat(store.find(lookup)).isEmpty();
+        assertThat(store.find(sessionId)).isEmpty();
     }
 
     @Test
@@ -194,13 +191,13 @@ class RedisSessionActivityStoreIT {
         publish();
         redis.persist(key);
 
-        assertThat(store.find(lookup)).isEmpty();
+        assertThat(store.find(sessionId)).isEmpty();
     }
 
     @Test
     void missingKeyIsNotFoundAndNotCreated() {
-        assertThat(store.find(lookup)).isEmpty();
-        assertThat(store.slideIdle(lookup, 0, Instant.now().plusSeconds(60))).isFalse();
+        assertThat(store.find(sessionId)).isEmpty();
+        assertThat(store.slideIdle(sessionId, 0, Instant.now().plusSeconds(60))).isFalse();
         assertThat(redis.hasKey(key)).isFalse();
     }
 
@@ -213,9 +210,9 @@ class RedisSessionActivityStoreIT {
         var unreachable = new RedisSessionActivityStore(template,
                 new RedisServerIdentity(template, new RuntimeKeys(SCOPE)));
         try {
-            assertThatThrownBy(() -> unreachable.find(lookup))
+            assertThatThrownBy(() -> unreachable.find(sessionId))
                     .isInstanceOf(SessionActivityUnavailableException.class);
-            assertThatThrownBy(() -> unreachable.slideIdle(lookup, 0, Instant.now().plusSeconds(60)))
+            assertThatThrownBy(() -> unreachable.slideIdle(sessionId, 0, Instant.now().plusSeconds(60)))
                     .isInstanceOf(SessionActivityUnavailableException.class);
             assertThat(unreachable.currentGeneration()).isEmpty();
         } finally {
@@ -237,8 +234,8 @@ class RedisSessionActivityStoreIT {
                         SessionAssurance.BiometricEnforcement.NOT_APPLICABLE),
                 false);
         PreparedSession session = new PreparedSession(snapshot,
-                new SessionCandidate(UUID.randomUUID(), UUID.randomUUID(),
-                        authority.currentGeneration().orElseThrow(), lookup, digest(4)),
+                new SessionCandidate(UUID.randomUUID(), sessionId,
+                        authority.currentGeneration().orElseThrow(), digest(3), digest(4)),
                 new SessionDelivery("encrypted-only", "signed-receipt",
                         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", now.plusSeconds(120)),
                 SessionDeadlines.createdAt(now));

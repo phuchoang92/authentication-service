@@ -2,7 +2,6 @@ package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
 import com.nimbusds.jose.jwk.ECKey;
 import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.port.out.session.SessionCryptography;
 import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
@@ -10,7 +9,6 @@ import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
 import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
 import com.vpbank.dcp.core.port.out.session.PreparedSession;
 import com.vpbank.dcp.core.port.out.session.SessionDelivery;
-import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
 import com.vpbank.dcp.core.port.out.session.SessionCandidate;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -24,22 +22,16 @@ import java.util.UUID;
 /** Generates one candidate; a failed SQL reservation discards it without exposing a token. */
 public final class SessionCryptoAdapter implements SessionCryptography {
     private final BankingTokenIssuer tokens;
-    private final TokenLookupHasher lookup;
     private final BankingTokenEnvelopeIssuer envelopes;
-    private final LookupKeyVersion lookupVersion;
     private final LengthPrefixedSigningInputEncoder encoding;
     private final Sha256Digests digests;
     private final SecureRandom random;
 
-    public SessionCryptoAdapter(BankingTokenIssuer tokens, TokenLookupHasher lookup,
-                                        BankingTokenEnvelopeIssuer envelopes,
-                                        LookupKeyVersion lookupVersion,
-                                        LengthPrefixedSigningInputEncoder encoding, Sha256Digests digests,
-                                        SecureRandom random) {
+    public SessionCryptoAdapter(BankingTokenIssuer tokens, BankingTokenEnvelopeIssuer envelopes,
+                                LengthPrefixedSigningInputEncoder encoding, Sha256Digests digests,
+                                SecureRandom random) {
         this.tokens = Objects.requireNonNull(tokens);
-        this.lookup = Objects.requireNonNull(lookup);
         this.envelopes = Objects.requireNonNull(envelopes);
-        this.lookupVersion = Objects.requireNonNull(lookupVersion);
         this.encoding = Objects.requireNonNull(encoding);
         this.digests = Objects.requireNonNull(digests);
         this.random = Objects.requireNonNull(random);
@@ -51,23 +43,22 @@ public final class SessionCryptoAdapter implements SessionCryptography {
         SessionActivationContext context = snapshot.context();
         SessionKeyBindings keys = snapshot.keys();
         try {
-            OpaqueBankingToken token = tokens.issue();
-            Digest32 lookupDigest = lookup.digest(token.exactValue());
             UUID intentId = UUID.randomUUID();
             UUID sessionId = UUID.randomUUID();
+            BankingTokenIssuer.IssuedBankingToken token = tokens.issue(sessionId);
             byte[] nonceBytes = new byte[32];
             random.nextBytes(nonceBytes);
             String dpopNonce = Base64.getUrlEncoder().withoutPadding().encodeToString(nonceBytes);
-            EncryptedBankingToken encrypted = envelopes.issue(token,
+            EncryptedBankingToken encrypted = envelopes.issue(token.token(),
                     ECKey.parse(keys.responsePublicJwk()),
                     new TokenDeliveryContext(context.operationId(), context.appId(),
                             BankingTokenStatus.ACTIVE, keys.requestKey().base64Url(),
                             keys.deviceKey().base64Url(), deadlines.absoluteExpiresAt()));
             Digest32 envelopeDigest = digests.sha256(
                     encrypted.tokenEnvelope().getBytes(StandardCharsets.US_ASCII));
-            byte[] candidateBytes = encoding.encode(List.of("PASSWORD_ACTIVE_V1",
+            byte[] candidateBytes = encoding.encode(List.of("PASSWORD_ACTIVE_V2",
                     context.operationId().toString(), intentId.toString(), sessionId.toString(),
-                    generation.toString(), lookupVersion.value(), lookupDigest.base64Url(),
+                    generation.toString(), token.secretDigest().base64Url(),
                     context.subject().value().toString(), context.bindingId().value().toString(),
                     keys.requestKey().base64Url(),
                     Long.toString(deadlines.idleExpiresAt().toEpochMilli()),
@@ -75,7 +66,7 @@ public final class SessionCryptoAdapter implements SessionCryptography {
                     envelopeDigest.base64Url(), dpopNonce));
             Digest32 candidateDigest = digests.sha256(candidateBytes);
             var candidate = new SessionCandidate(intentId, sessionId, generation,
-                    new SessionTokenLookup(lookupVersion, lookupDigest), candidateDigest);
+                    token.secretDigest(), candidateDigest);
             var delivery = new SessionDelivery(encrypted.tokenEnvelope(), encrypted.receipt(),
                     dpopNonce, deliveryDeadline);
             return new PreparedSession(snapshot, candidate, delivery, deadlines);

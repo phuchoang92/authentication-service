@@ -31,7 +31,7 @@ class RedisReplayAuthorityIT {
 
     @Container
     static final GenericContainer<?> REDIS = new GenericContainer<>(
-            "redis@sha256:3b73847e72874be07e6657b129a94761662b79bc0f679273757d4218573b2a98")
+            "valkey/valkey@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd")
             .withExposedPorts(6379);
 
     private LettuceConnectionFactory factory;
