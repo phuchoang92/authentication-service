@@ -1,7 +1,7 @@
 package com.vpbank.archfixtures.core.application.password;
 
-import com.vpbank.dcp.core.application.session.ActivateSessionService;
+import com.vpbank.dcp.core.application.session.IssueLoginSessionService;
 
 public class BadPasswordSessionCaller {
-    private ActivateSessionService sessions;
+    private IssueLoginSessionService sessions;
 }

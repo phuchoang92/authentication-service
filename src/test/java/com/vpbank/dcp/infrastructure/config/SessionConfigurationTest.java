@@ -3,7 +3,6 @@ package com.vpbank.dcp.infrastructure.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-import com.vpbank.dcp.core.port.in.session.ActivateSessionUseCase;
 import com.vpbank.dcp.core.port.out.session.SessionAuthority;
 import com.vpbank.dcp.core.port.out.session.SessionCryptography;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
@@ -34,9 +33,9 @@ class SessionConfigurationTest {
                     "auth.native-session.nonce-validity-ms=60000");
 
     @Test
-    void keepsSessionActivationDisconnectedWhilePasswordStorageIsRetired() {
+    void assemblesSessionCryptographyAndAuthority() {
         context.run(started -> {
-            assertThat(started).hasNotFailed().doesNotHaveBean(ActivateSessionUseCase.class)
+            assertThat(started).hasNotFailed()
                     .hasSingleBean(SessionCryptography.class).hasSingleBean(SessionAuthority.class)
                     .hasSingleBean(SessionDeliveryEscrowCodec.class);
             assertThat(started.getBean(SessionCryptography.class)).isInstanceOf(SessionCryptoAdapter.class);

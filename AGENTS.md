@@ -67,8 +67,8 @@ store login failures. The public password endpoint currently returns a safe unav
 result until a replacement login flow has an approved contract and tests. Guarded reads,
 joins, locks and mutations for capabilities that still exist use focused EntityManager
 repositories; never use a previously loaded entity for a decision after acquiring locks. No JPA caches,
-relationships, cascades or generic base repository. Customer freshness belongs to the
-JDK-only `CustomerFreshnessPolicy`. The old password-source/session persistence adapters
+relationships, cascades or generic base repository. Customer freshness (no grace period) is
+decided in core session issuance (`IssueLoginSessionService`), never in persistence. The old password-source/session persistence adapters
 were removed with the V11 tables; do not restore them against the V12 schema.
 
 Preserve applied migration files and checksums. The user explicitly retired SQL
