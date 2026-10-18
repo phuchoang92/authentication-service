@@ -12,7 +12,7 @@ import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
-import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.BffCallers;
+import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JcsCommandDigest;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.LengthPrefixedSigningInputEncoder;
@@ -90,7 +90,7 @@ class TrustedDeviceConfigurationTest {
                 .run(context -> assertThat(context).hasNotFailed()
                         .hasSingleBean(TrustedDeviceSessions.class)
                         .hasSingleBean(TrustedDeviceUseCase.class)
-                        .hasSingleBean(BffCallers.class));
+                        .hasSingleBean(BffCallerAssertions.class));
     }
 
     @Test

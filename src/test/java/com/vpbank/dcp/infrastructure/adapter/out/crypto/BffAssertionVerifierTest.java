@@ -2,6 +2,11 @@ package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
@@ -13,6 +18,10 @@ import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceCaller;
+import com.vpbank.dcp.core.port.out.replay.AssertionReplay;
+import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
+import com.vpbank.dcp.core.port.out.replay.ReplayReservation;
 import java.net.URI;
 import java.time.Instant;
 import java.util.Date;
@@ -21,13 +30,49 @@ import org.junit.jupiter.api.Test;
 class BffAssertionVerifierTest {
     private static final Instant NOW = Instant.parse("2026-10-18T00:00:00Z");
     private static final String SID = "k1:" + Digest32.fromBytes(new byte[32]).base64Url();
+    private final AssertionReplay replay = mock(AssertionReplay.class);
     private final ECKey bffKey;
     private final BffAssertionVerifier verifier;
 
     BffAssertionVerifierTest() throws Exception {
         bffKey = new ECKeyGenerator(Curve.P_256).keyID("bff-v1").generate();
         verifier = new BffAssertionVerifier("mobile-bff", "bff-v1", bffKey.toPublicJWK(),
-                new StrictJoseJson(), new Sha256Digests());
+                new StrictJoseJson(), new Sha256Digests(), replay);
+    }
+
+    @Test
+    void firstUseOfAValidAssertionNamesTheCaller() throws Exception {
+        when(replay.reserve(any(), any())).thenReturn(ReplayReservation.RESERVED);
+
+        TrustedDeviceCaller caller = verifier.accept(sign(header(), claims()), NOW).orElseThrow();
+
+        assertThat(caller.channel()).isEqualTo("neo-mobile");
+        assertThat(caller.deviceId()).isEqualTo("device-id-1234567890");
+        verify(replay).reserve(new Sha256Digests().ofProofId("jti-1"), NOW.plusSeconds(30));
+    }
+
+    /** One assertion authorizes one step; a captured one cannot drive the next. */
+    @Test
+    void replayedAssertionIsNotACaller() throws Exception {
+        when(replay.reserve(any(), any())).thenReturn(ReplayReservation.REPLAYED);
+
+        assertThat(verifier.accept(sign(header(), claims()), NOW)).isEmpty();
+    }
+
+    @Test
+    void closedReplayAuthorityIsUnavailableNotAFirstUse() throws Exception {
+        when(replay.reserve(any(), any())).thenReturn(ReplayReservation.AUTHORITY_CLOSED);
+        String assertion = sign(header(), claims());
+
+        assertThatThrownBy(() -> verifier.accept(assertion, NOW))
+                .isInstanceOf(ReplayAuthorityUnavailableException.class);
+    }
+
+    /** An invalid assertion never spends a replay marker. */
+    @Test
+    void invalidAssertionIsNotACallerAndIsNotRecorded() throws Exception {
+        assertThat(verifier.accept(sign(header().keyID("bff-v2"), claims()), NOW)).isEmpty();
+        verify(replay, never()).reserve(any(), any());
     }
 
     @Test

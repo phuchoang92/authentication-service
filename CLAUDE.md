@@ -1,117 +1,155 @@
-# Luật thiết kế code
+# Luật code — Authentication Service
 
-`AGENTS.md` là authority về luật riêng của dự án (Keycloak, persistence layout, naming adapter).
-File này chỉ nói **cách chia class và chia kiểu dữ liệu**. Mâu thuẫn ⇒ `AGENTS.md` thắng.
+**Thứ tự ưu tiên:** hợp đồng DD target (API, bảo mật, dữ liệu) > `AGENTS.md` > file này >
+tài liệu luật chung `code-design-rules-and-patterns.md`. Ba override của file này (§2, §3, §5)
+đã được người dùng duyệt ngày 2026-10-18 và được ghi trong `AGENTS.md` (§ Code structure).
+Phần nào file này không nói thì tài liệu chung vẫn áp dụng, nhất là bảo mật, persistence và
+Redis key RK01–RK12.
 
-Mục tiêu: người mới đọc một hàm là biết nó làm gì; muốn biết sâu thì mở collaborator.
-Mỗi luật dưới đây **chạy được một lệnh để kiểm**. Luật không kiểm được là lời khuyên, không phải luật.
-Lệnh kiểm chạy từ `src/main/java/com/vpbank/dcp`.
+**Mục tiêu đo được:** người mới trace được một endpoint. Chỉ số chính là số kiểu phải mở khi
+đi từ controller tới SQL/HTTP/Valkey, tính cả implementation của interface:
 
-## 0. Bốn câu hỏi chặn trước khi tạo class mới
+```bash
+python3 tools/code-metrics.py          # chạy từ thư mục authentication-service
+```
+
+Mốc 2026-10-18: `PasswordLoginController` 196 kiểu, `TrustedDeviceController` 179 kiểu;
+341 file, trong đó 131 file ≤ 15 dòng. **Một thay đổi không thêm hành vi thì không được làm các
+số này tăng.** Luật không kiểm được bằng lệnh là lời khuyên, không phải luật.
+
+## 1. Giữ nguyên — phần đã đúng
+
+- Core chỉ dùng JDK. Spring, HTTP, SQL, Valkey, JOSE/Nimbus nằm ở `infrastructure`.
+  Kiểm: ArchUnit `CORE_DOES_NOT_IMPORT_FRAMEWORK`, `CORE_DOES_NOT_IMPORT_INFRASTRUCTURE`.
+- Adapter dịch định dạng và lỗi của bên ngoài thành kiểu của core. Core không catch exception
+  của vendor.
+- Kết cục mong đợi (từ chối, đang chờ MFA, hết hạn, xung đột) là **giá trị**, không phải exception.
+- Persistence: adapter giữ transaction, repository chỉ chạy SQL (luật trong `AGENTS.md`).
+
+## 2. Package theo năng lực (override bố cục 4 cây vai trò)
+
+```text
+core/<năng lực>/        service + port ra + kết quả + giá trị domain của năng lực đó
+  ví dụ: core/password, core/trusteddevice, core/session, core/customer, core/device
+infrastructure/...      vẫn chia theo công nghệ: adapter/in/web, adapter/out/redis, persistence/...
+```
+
+- Không có `core/domain`, `core/application`, `core/port/in`, `core/port/out` cho code mới.
+- Giá trị dùng chung nằm ở năng lực **sở hữu nghĩa** của nó (`SubjectId` ở `core/customer`,
+  `Digest32` ở `core/security`); năng lực khác import. Không có thư mục `shared`/`common`.
+- Phụ thuộc giữa các năng lực đi **một chiều** và được ArchUnit kiểm (ví dụ: `session` không
+  import `password`; `customer` không import phương thức đăng nhập). Gọi nhau bằng class.
+- Chuyển dần theo từng lát, mỗi lát một năng lực, build xanh sau mỗi lát. Khi chuyển, viết lại
+  các rule ArchUnit gắn với tên package cũ (`PASSWORD_CALLS_SESSION_THROUGH_PORT`,
+  `LOGIN_METHODS_CALL_CUSTOMER_THROUGH_PORT`, `SESSION_CORE_DOES_NOT_IMPORT_PASSWORD`,
+  `CUSTOMER_CORE_DOES_NOT_IMPORT_LOGIN_METHODS`) thành rule hướng phụ thuộc giữa các năng lực.
+
+**Kiểm:** `ls src/main/java/com/vpbank/dcp/core` — đích cuối là chỉ có tên năng lực.
+
+## 3. Interface chỉ ở biên thật (override H04)
+
+Tạo interface **khi và chỉ khi**:
+
+- (a) core cần gọi thứ nằm ngoài core: MySQL, Valkey, HTTP (Keycloak, MFA, Customer), hoặc thư
+  viện core không được import (JOSE/Nimbus); hoặc
+- (b) đã có ≥ 2 implementation thật trong `src/main`.
+
+Không tạo interface cho: use case phía vào, service gọi service, mapper hoặc policy thuần.
+Controller gọi thẳng class service.
+
+**Kiểm:** `python3 tools/code-metrics.py ports` — mỗi dòng in ra là một interface có mọi
+implementation nằm trong core, tức không phải biên. Danh sách phải rỗng, trừ trường hợp (b).
+
+## 4. Một khái niệm — một kiểu
+
+- Không tạo `Candidate`/`Prepared`/`Stored`/`Snapshot`/`View` song song cho cùng một khái niệm,
+  trừ khi mỗi kiểu có bất biến khác mà người gọi dựa vào. Ví dụ hợp lệ: `Prepared…` mang token
+  plaintext để giao cho App, `Stored…` thì không bao giờ. Viết lý do đó ngay trên kiểu.
+- Record trong core ≤ 6 thành phần. Hơn thế thì gom theo nghĩa: chủ sở hữu, khoá, thời hạn.
+- Không để hai `boolean` liền nhau. Dùng enum hoặc kiểu có tên (`DeviceStanding`), vì
+  `new X(true, false, true)` không đọc được.
+- DTO web, DTO HTTP của đối tác, projection và dòng DB được phép rộng: chúng phản chiếu hình
+  dạng bên ngoài.
+
+**Kiểm:** `python3 tools/code-metrics.py records`.
+
+## 5. Exception (override EH02/EH05)
+
+- Tạo class exception riêng **chỉ khi** có `catch` hoặc `@ExceptionHandler` phân biệt nó.
+  Ví dụ cần giữ: `MfaUnavailableException` (application đổi nó thành `Unavailable`).
+- Sai cấu hình lúc khởi động: `IllegalStateException` nêu **tên setting**, không nêu giá trị.
+- Bất biến bị vi phạm do lập trình sai: `IllegalArgumentException`/`IllegalStateException`.
+- Vẫn giữ: không đưa message exception ra response; giữ `cause`; không nuốt lỗi để tiếp tục.
+
+**Kiểm:** `python3 tools/code-metrics.py exceptions` — mỗi dòng là một class không ai phân
+biệt, ứng viên để gộp.
+
+## 6. Không tạo class chỉ để chuyển tiếp
+
+Trước khi tạo class mới, trả lời đủ bốn câu:
 
 1. **Logic dài hơn ceremony không?** `logic = LOC − (package + import + blank + field + ctor)`.
-   Ceremony ≈ 20 dòng. **`logic < 20` ⇒ không tạo class** — nó là một method của class đã có.
-2. **Đã thấy pattern này 3 lần chưa?** Hai lần là trùng hợp, chưa phải pattern.
-3. **Là *năng lực* hay chỉ là *danh từ*?** `challenge` thuộc về `operation`; `claim` thuộc về
-   `request`. **Danh từ ≠ collaborator.**
-4. **Thuộc đúng một vai?** adapter / use case / năng lực. Trộn hai vai là sai.
+   `logic < 20` ⇒ không tạo class, viết thành method của class đã có.
+2. **Đã thấy pattern này 3 lần chưa?** Hai lần là trùng hợp.
+3. **Là năng lực hay chỉ là danh từ?** `challenge` thuộc `operation`; danh từ không phải collaborator.
+4. **Thuộc đúng một vai?** adapter / service / policy. Trộn hai vai là sai.
 
-## 1. Không tạo service chỉ để chuyển tiếp
+Dấu hiệu service chuyển tiếp: thân hàm là một lệnh gọi rồi `map`/`switch` sang kiểu khác, không
+có nhánh quyết định nào ⇒ inline vào caller.
+Tách class chỉ khi bị ép: > 5 collaborator, > 200 dòng, hoặc đã **quan sát được** lý do thay
+đổi thứ hai.
 
-Dấu hiệu, chắc chắn giảm dần:
-- chỉ dùng port của **chính package mình**
-- thân hàm là một lệnh gọi port rồi `map`/`instanceof` sang kiểu khác
-- không có nhánh quyết định nào
+## 7. Kết quả và lỗi — khai một lần, map một lần
 
-**Kiểm:**
-```bash
-for f in $(find core/application -name '*Service.java'); do
-  echo "$(basename $f .java) [$(dirname $f | sed 's|.*/||')] <- \
-$(grep -oE 'port\.out\.[a-z]+' $f | sed 's/.*\.//' | sort -u | tr '\n' ' ')"
-done
-```
-`[x] <- x` (chỉ port trùng tên package) ⇒ **inline vào caller**.
-
-## 2. Năng lực A không được giữ năng lực B
-
-Vẫn lệnh trên: `[mfa] <- ... session ...` nghĩa là `mfa` đang điều phối thay cho use case.
-Chỉ **use case** được ghép nhiều năng lực; **năng lực** chỉ biết port của chính nó.
-Ngoại lệ phải viết lý do ngay trên class, không im lặng.
-
-## 3. Một class cho một NĂNG LỰC, không phải một endpoint
-
-6 class (1/endpoint) ≈ 132 dòng ceremony / 25 dòng logic (**84%**).
-1 class năng lực ≈ 22 / 25 (**47%**).
-
-**Kiểm:** `ls core/application/<pkg>/*.java | wc -l` ≤ số **năng lực** của package đó.
-**Chỉ tách khi bị ép:** >5 collaborator, >200 dòng, hoặc xuất hiện lý do thay đổi thứ hai
-**đã quan sát được** — không phải dự đoán.
-
-## 4. Module sâu, không module nông
-
-Deep = ít method, giấu nhiều. Shallow = nhiều method, giấu ít.
-**Kiểm:** `LOC thân / số public method`. **< 3 ⇒ nông**, xem lại.
-Một record một field tách file riêng chỉ xứng đáng khi nó **chặn được lỗi biên dịch** mà kiểu
-gốc không chặn (ví dụ: hai `UUID` liền nhau đổi chỗ được).
-
-## 5. Đừng implement ý đầu tiên
-
-Sinh **2–3 phương án khác nhau về bản chất**, phác chỉ các method quan trọng, so sánh từ
-**phía người gọi**, rồi mới chọn. Viết 2 dòng lý do chọn.
-
-## 6. Kết quả và lỗi — khai một lần, map một lần
-
-- Outcome **mang dữ liệu + dẫn tới hành vi khác nhau** ⇒ sealed + `switch` exhaustive,
-  **không `default`** (thêm variant mới phải gây lỗi biên dịch).
-- Outcome **kết thúc luồng, không mang dữ liệu** ⇒ **một** kiểu terminal dùng chung cả luồng.
-- **Cấm** khai lại cùng cặp `Rejected`/`Unavailable` ở mỗi tầng: mỗi lần dịch là một lần mất
-  thông tin, và chỗ mất không báo lỗi.
-- `default` **chỉ** cho giá trị từ hệ ngoài (`String` trả về từ API/DB) — ở đó nó bắt buộc.
-- Mỗi variant phải có **người tạo** và **người đọc**. Thiếu một trong hai ⇒ nhánh chết.
-- Kết cục mong đợi là **giá trị**, không phải exception (`RULES:1658`).
+- Outcome mang dữ liệu và dẫn tới hành vi khác nhau ⇒ sealed + `switch` exhaustive, **không
+  `default`**.
+- Cấm khai lại cùng cặp `Rejected`/`Unavailable` ở mỗi tầng; mỗi lần dịch là một lần mất thông tin.
+- `default` chỉ dùng cho giá trị từ hệ ngoài (`String` từ API/DB).
+- Mỗi variant phải có người tạo và người đọc; thiếu một trong hai là nhánh chết.
 
 **Kiểm:**
 ```bash
-grep -rhoE 'record [A-Z][A-Za-z]*\(\s*\)' core/ | sort | uniq -c | sort -rn
-grep -rc instanceof core/application/*/*.java | grep -v ':0' | sort -t: -k2 -rn
-grep -rn 'new <Type>\.<Variant>(' core/ infrastructure/     # variant nào không ai tạo?
+grep -rhoE 'record [A-Z][A-Za-z]*\(\s*\)' src/main/java | sort | uniq -c | sort -rn
 ```
-Một tên variant rỗng xuất hiện >1 lần trong cùng luồng ⇒ **đang dịch vô ích**.
-Một class >5 `instanceof` ⇒ nó là bộ dịch, không phải logic.
+Mốc 2026-10-18: `Rejected()` 11 lần, `Unavailable()` 6 lần. Con số này phải giảm, không tăng.
 
-## 7. Tên
+## 8. Code chết
+
+Class không được wire và không có caller trong `src/main` thì xoá, cùng test của nó. Test xanh
+không phải lý do để giữ.
+
+**Kiểm:** `python3 tools/code-metrics.py dead`.
+
+## 9. Tên
 
 - Động từ đúng việc: `issue` ≠ `store`, `decide` ≠ `verify`.
-- Chữ ký đoán được từ tên: `requireX` **ném** · `findX` trả `Optional` · `decideX` trả sealed.
-- Cấm `Manager`, `Utils`, `Helper`, `Processor`, `Handler`, `*Impl`.
-- Tên chứa `token`/`key` **không** tự động là transport. Xét **nơi khai báo kiểu**, không xét tên:
-  `PreparedPendingToken` là domain của hệ này, `HttpHeaders` thì không.
+- Chữ ký đoán được từ tên: `requireX` ném · `findX` trả `Optional` · `decideX` trả sealed.
+- Không dùng `Manager`, `Utils`, `Helper`, `Processor`, `Handler`, `*Impl`, `Route`.
+- Dùng từ người mới hiểu được, kể cả người không giỏi tiếng Anh.
 
 **Kiểm:** đọc tên method rồi đoán chữ ký. Đoán sai ⇒ đổi tên, đừng thêm javadoc.
 
-## 8. Trùng lặp rẻ hơn abstraction sai
+## 10. Trùng lặp rẻ hơn abstraction sai
 
-Gỡ một abstraction sai **đắt hơn** gỡ trùng lặp. Chưa chắc hai chỗ là **cùng một thứ** hay chỉ
-**trông giống nhau** ⇒ để nguyên. Chuỗi ký tự giống nhau không có nghĩa là cùng khái niệm
-(`RULES:761`).
+Gỡ một abstraction sai đắt hơn gỡ trùng lặp. Chưa chắc hai chỗ là **cùng một thứ** hay chỉ
+**trông giống nhau** thì để nguyên.
 
-## 9. Checklist trước khi nộp
+## 11. Checklist trước khi nộp
 
-- [ ] Mỗi class mới có logic > 20 dòng
-- [ ] Không service nào chỉ dùng port của chính package mình
-- [ ] Không năng lực nào giữ collaborator của năng lực khác
-- [ ] Mỗi class ≤ 5 collaborator, ≤ 200 dòng
-- [ ] Không `switch` nào trên **sealed** có `default`
-- [ ] Mỗi variant có cả người tạo lẫn người đọc
-- [ ] Đoán được chữ ký của mọi public method từ tên nó
-- [ ] Thay đổi có **tiêu chí thành công đo được**, không phải mô tả các bước
+- [ ] `python3 tools/code-metrics.py` không tăng số kiểu trace nếu không thêm hành vi
+- [ ] Không interface mới ngoài biên thật (§3)
+- [ ] Code mới nằm trong `core/<năng lực>/` (§2)
+- [ ] Không exception mới mà không ai catch (§5)
+- [ ] Record mới trong core ≤ 6 thành phần, không hai boolean liền nhau (§4)
+- [ ] Mỗi class mới có logic ≥ 20 dòng, ≤ 5 collaborator, ≤ 200 dòng (§6)
+- [ ] `switch` trên sealed không có `default`; mỗi variant có người tạo và người đọc (§7)
+- [ ] `mvn -o clean verify` xanh
 
 ## Nguồn
 
-Ousterhout *A Philosophy of Software Design* (deep modules; "never implement your first idea") ·
+Ousterhout *A Philosophy of Software Design* (deep modules) ·
 Sandi Metz [The Wrong Abstraction](https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction) ·
 [Rule of Three](https://understandlegacycode.com/blog/refactoring-rule-of-three/) ·
-Fowler [Anemic Domain Model](https://www.martinfowler.com/bliki/AnemicDomainModel.html) ·
-[Google Java Style](https://google.github.io/styleguide/javaguide.html) ·
-[How to write a good CLAUDE.md](https://www.builder.io/blog/claude-md-guide) —
-*"each line should change a decision or name a check"*, giữ file dưới ~200 dòng.
+Cockburn [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture/) — ý gốc
+là tách ứng dụng khỏi thứ bên ngoài; bố cục package và interface phía vào ở đây là lựa chọn của
+dự án (§2, §3).

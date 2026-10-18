@@ -9,13 +9,7 @@ import com.vpbank.dcp.core.port.in.session.IssueLoginSessionUseCase;
 import com.vpbank.dcp.core.port.in.session.LoginConfirmation;
 import com.vpbank.dcp.core.port.in.session.SessionLoginEvidence;
 import com.vpbank.dcp.core.port.in.session.SessionLoginResult;
-import com.vpbank.dcp.core.application.trusteddevice.RestrictedSessionResult;
-import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
-import com.vpbank.dcp.core.port.out.device.LoginDeviceSnapshot;
 import com.vpbank.dcp.core.port.out.password.VerifiedPasswordProofs;
-import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
 import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
 
 import java.util.Objects;
@@ -31,18 +25,15 @@ public final class PasswordLoginService implements PasswordLoginUseCase {
     private final CustomerIdentities identities;
     private final LoginDevices devices;
     private final IssueLoginSessionUseCase sessions;
-    private final TrustedDeviceSessions trustedDevices;
     private final PasswordAvailabilityPolicy availability;
 
     public PasswordLoginService(PasswordProofs proofs, CustomerIdentities identities,
                                 LoginDevices devices, IssueLoginSessionUseCase sessions,
-                                TrustedDeviceSessions trustedDevices,
                                 PasswordAvailabilityPolicy availability) {
         this.proofs = Objects.requireNonNull(proofs);
         this.identities = Objects.requireNonNull(identities);
         this.devices = Objects.requireNonNull(devices);
         this.sessions = Objects.requireNonNull(sessions);
-        this.trustedDevices = Objects.requireNonNull(trustedDevices);
         this.availability = Objects.requireNonNull(availability);
     }
 
@@ -80,15 +71,11 @@ public final class PasswordLoginService implements PasswordLoginUseCase {
                     issueSession(command, new SessionLoginEvidence(subject, customer, device,
                             keyBindings(proof.proofs()), proof.generation(),
                             LoginConfirmation.PRIMARY_PASSWORD));
-            // Every other device continues through the trusted-device API (draft doc 20): a
-            // non-primary binding, a revoked or expired one, and a device with no binding.
-            case DeviceTrustResult.OtherTrusted(var device) ->
-                    needTrustedDevice(command, proof, subject, customer, known(device));
-            case DeviceTrustResult.Lapsed(var device) ->
-                    needTrustedDevice(command, proof, subject, customer, known(device));
-            case DeviceTrustResult.NewDevice() ->
-                    needTrustedDevice(command, proof, subject, customer,
-                            new TrustTarget.NewDevice());
+            // Flow 01: until the trusted-device continuation has an approved contract, both a
+            // non-primary trusted device and a new device fail closed with START_NEW_LOGIN.
+            // No challenge, pending token or banking token is issued.
+            case DeviceTrustResult.OtherTrusted(var _), DeviceTrustResult.NewDevice() ->
+                    denied(LoginDenial.UNAVAILABLE);
         };
     }
 
@@ -103,30 +90,6 @@ public final class PasswordLoginService implements PasswordLoginUseCase {
             case SessionLoginResult.Rejected() -> denied(LoginDenial.REJECTED);
             case SessionLoginResult.Unavailable() -> denied(LoginDenial.UNAVAILABLE);
         };
-    }
-
-    private PasswordLoginResult needTrustedDevice(PasswordLoginCommand command, AdmittedProof proof,
-                                                  SubjectId subject,
-                                                  CustomerAuthenticationState customer,
-                                                  TrustTarget target) {
-        VerifiedPasswordProofs verified = proof.proofs();
-        RestrictedSession session = new RestrictedSession(command.operation().operationId(),
-                subject, customer.customerNumber(), customer.statusVersion(),
-                command.operation().appId(), target, command.operation().deviceId(),
-                new LoginKeys(verified.requestPublicJwk(), verified.requestKey().digest(),
-                        verified.responsePublicJwk()),
-                command.operation().platform(), proof.generation());
-        return switch (trustedDevices.open(session, command.now())) {
-            case RestrictedSessionResult.Opened(var opened) ->
-                    new PasswordLoginResult.NeedTrustedDevice(opened.tokenEnvelope(),
-                            opened.receipt(), opened.expiresAt());
-            case RestrictedSessionResult.Unavailable() -> denied(LoginDenial.UNAVAILABLE);
-        };
-    }
-
-    private static TrustTarget known(LoginDeviceSnapshot device) {
-        return new TrustTarget.KnownDevice(device.bindingId(), device.deviceKeyThumbprint(),
-                device.securityVersion());
     }
 
     /**

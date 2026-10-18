@@ -20,13 +20,17 @@ import com.vpbank.dcp.core.port.in.trusteddevice.InitTrustedDeviceResult;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceCaller;
 import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
 import com.vpbank.dcp.core.port.in.trusteddevice.VerifyTrustedDeviceResult;
+import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
+import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
 import com.vpbank.dcp.infrastructure.adapter.in.web.BoundedJsonBodyAdvice;
 import com.vpbank.dcp.infrastructure.adapter.in.web.error.ApiErrorHandler;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
@@ -40,7 +44,7 @@ class TrustedDeviceControllerTest {
     private static final String BASE = "/internal/v1/authentications/trusted-device";
     private static final String JWK = """
             {"kty":"EC","crv":"P-256","x":"%s","y":"%s"}""".formatted("a".repeat(43), "b".repeat(43));
-    private final BffCallers callers = mock(BffCallers.class);
+    private final BffCallerAssertions assertions = mock(BffCallerAssertions.class);
     private final TrustedDeviceUseCase useCase = mock(TrustedDeviceUseCase.class);
     private final TrustedDeviceCaller caller = new TrustedDeviceCaller(
             new SessionTokenLookup(new LookupKeyVersion("k1"), Digest32.fromBytes(new byte[32])),
@@ -50,7 +54,7 @@ class TrustedDeviceControllerTest {
     TrustedDeviceControllerTest() {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
         JsonMapper json = new JsonMapper();
-        mvc = MockMvcBuilders.standaloneSetup(new TrustedDeviceController(callers, useCase,
+        mvc = MockMvcBuilders.standaloneSetup(new TrustedDeviceController(assertions, useCase,
                         new TrustedDeviceResponseMapper(new PasswordLoginResponseMapper(clock), json),
                         json, clock))
                 .setControllerAdvice(new ApiErrorHandler(), new BoundedJsonBodyAdvice()).build();
@@ -58,11 +62,11 @@ class TrustedDeviceControllerTest {
 
     @Test
     void initPassesTheNewDeviceKeyAndReturnsTheServerKeyAndChallenge() throws Exception {
-        when(callers.require(any(), eq(NOW))).thenReturn(caller);
+        when(assertions.accept("bff-assertion", NOW)).thenReturn(Optional.of(caller));
         when(useCase.init(eq(caller), any(), eq(NOW))).thenReturn(
                 new InitTrustedDeviceResult.Started(JWK, "challenge-jwe"));
 
-        mvc.perform(json(post(BASE + "/init"), "{\"devicePublicJwk\":" + JWK + "}"))
+        mvc.perform(json(bearer(post(BASE + "/init")), "{\"devicePublicJwk\":" + JWK + "}"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.status").value("KEY_EXCHANGE"))
@@ -77,11 +81,11 @@ class TrustedDeviceControllerTest {
 
     @Test
     void knownDeviceInitSendsNoKey() throws Exception {
-        when(callers.require(any(), eq(NOW))).thenReturn(caller);
+        when(assertions.accept("bff-assertion", NOW)).thenReturn(Optional.of(caller));
         when(useCase.init(eq(caller), isNull(), eq(NOW))).thenReturn(
                 new InitTrustedDeviceResult.Rejected());
 
-        mvc.perform(json(post(BASE + "/init"), "{}"))
+        mvc.perform(json(bearer(post(BASE + "/init")), "{}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("REQUEST_REJECTED"))
                 .andExpect(jsonPath("$.nextAction").value("START_NEW_LOGIN"));
@@ -89,11 +93,11 @@ class TrustedDeviceControllerTest {
 
     @Test
     void wrongChallengeTellsHowManyAttemptsAreLeft() throws Exception {
-        when(callers.require(any(), eq(NOW))).thenReturn(caller);
+        when(assertions.accept("bff-assertion", NOW)).thenReturn(Optional.of(caller));
         when(useCase.verify(caller, "r".repeat(64), NOW)).thenReturn(
                 new VerifyTrustedDeviceResult.WrongChallenge(2));
 
-        mvc.perform(json(post(BASE + "/verify"), "{\"challengeResponse\":\"" + "r".repeat(64) + "\"}"))
+        mvc.perform(json(bearer(post(BASE + "/verify")), "{\"challengeResponse\":\"" + "r".repeat(64) + "\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("WRONG_CHALLENGE"))
                 .andExpect(jsonPath("$.attemptsLeft").value(2))
@@ -102,11 +106,11 @@ class TrustedDeviceControllerTest {
 
     @Test
     void provenKeyReturnsTheMfaTransaction() throws Exception {
-        when(callers.require(any(), eq(NOW))).thenReturn(caller);
+        when(assertions.accept("bff-assertion", NOW)).thenReturn(Optional.of(caller));
         when(useCase.verify(caller, "r".repeat(64), NOW)).thenReturn(
                 new VerifyTrustedDeviceResult.MfaRequired("mfa-transaction-1"));
 
-        mvc.perform(json(post(BASE + "/verify"), "{\"challengeResponse\":\"" + "r".repeat(64) + "\"}"))
+        mvc.perform(json(bearer(post(BASE + "/verify")), "{\"challengeResponse\":\"" + "r".repeat(64) + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("MFA_REQUIRED"))
                 .andExpect(jsonPath("$.mfaTransactionId").value("mfa-transaction-1"))
@@ -115,10 +119,10 @@ class TrustedDeviceControllerTest {
 
     @Test
     void confirmBeforeMfaPassesAsksTheAppToCompleteMfa() throws Exception {
-        when(callers.require(any(), eq(NOW))).thenReturn(caller);
+        when(assertions.accept("bff-assertion", NOW)).thenReturn(Optional.of(caller));
         when(useCase.confirm(caller, NOW)).thenReturn(new ConfirmTrustedDeviceResult.MfaPending());
 
-        mvc.perform(post(BASE + "/confirm"))
+        mvc.perform(bearer(post(BASE + "/confirm")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MFA_NOT_PASSED"))
                 .andExpect(jsonPath("$.nextAction").value("COMPLETE_MFA"));
@@ -126,23 +130,48 @@ class TrustedDeviceControllerTest {
 
     @Test
     void rejectedCallerNeverReachesTheUseCase() throws Exception {
-        when(callers.require(any(), eq(NOW))).thenThrow(new RejectedBffCallerException());
+        when(assertions.accept("bff-assertion", NOW)).thenReturn(Optional.empty());
 
-        mvc.perform(post(BASE + "/confirm"))
+        mvc.perform(bearer(post(BASE + "/confirm")))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("REQUEST_REJECTED"));
         verifyNoInteractions(useCase);
     }
 
     @Test
+    void anythingButOneBearerAssertionIsRejectedBeforeItIsChecked() throws Exception {
+        for (MockHttpServletRequestBuilder request : List.of(post(BASE + "/confirm"),
+                post(BASE + "/confirm").header("Authorization", "Basic bff-assertion"),
+                post(BASE + "/confirm").header("Authorization", "Bearer a", "Bearer b"),
+                bearer(post(BASE + "/confirm")).header("DPoP", "proof"),
+                post(BASE + "/confirm").header("Authorization", "Bearer " + "x".repeat(5000)))) {
+            mvc.perform(request).andExpect(status().isUnauthorized());
+        }
+        verifyNoInteractions(assertions, useCase);
+    }
+
+    @Test
+    void unrecordableAssertionUseIsUnavailable() throws Exception {
+        when(assertions.accept("bff-assertion", NOW))
+                .thenThrow(new ReplayAuthorityUnavailableException());
+
+        mvc.perform(bearer(post(BASE + "/confirm"))).andExpect(status().isServiceUnavailable());
+        verifyNoInteractions(useCase);
+    }
+
+    @Test
     void invalidBodyIsABadRequest() throws Exception {
-        mvc.perform(json(post(BASE + "/verify"), "{\"challengeResponse\":\"short\"}"))
+        mvc.perform(json(bearer(post(BASE + "/verify")), "{\"challengeResponse\":\"short\"}"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(json(post(BASE + "/init"), "{\"devicePublicJwk\":{\"kty\":\"RSA\"}}"))
+        mvc.perform(json(bearer(post(BASE + "/init")), "{\"devicePublicJwk\":{\"kty\":\"RSA\"}}"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(json(post(BASE + "/init"), "{\"pad\":\"" + "x".repeat(70_000) + "\"}"))
+        mvc.perform(json(bearer(post(BASE + "/init")), "{\"pad\":\"" + "x".repeat(70_000) + "\"}"))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(useCase);
+    }
+
+    private static MockHttpServletRequestBuilder bearer(MockHttpServletRequestBuilder request) {
+        return request.header("Authorization", "Bearer bff-assertion");
     }
 
     private static MockHttpServletRequestBuilder json(MockHttpServletRequestBuilder request,

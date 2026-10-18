@@ -17,7 +17,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * {@code nextAction} tells the App what to do: {@code RETRY} the same step,
- * {@code COMPLETE_MFA} at the MFA service then confirm again, or {@code START_NEW_LOGIN}.
+ * {@code COMPLETE_MFA} at the MFA service then confirm again, {@code VISIT_BRANCH} when the
+ * Customer has no usable factor, or {@code START_NEW_LOGIN}.
  */
 public final class TrustedDeviceResponseMapper {
     private static final String REJECTED = "The request was rejected";
@@ -50,7 +51,7 @@ public final class TrustedDeviceResponseMapper {
             case VerifyTrustedDeviceResult.WrongChallenge(var attemptsLeft) -> error(
                     HttpStatus.UNAUTHORIZED, "WRONG_CHALLENGE", REJECTED, "RETRY", attemptsLeft);
             case VerifyTrustedDeviceResult.NoUsableFactor() -> error(HttpStatus.FORBIDDEN,
-                    "NO_USABLE_FACTOR", REJECTED, "START_NEW_LOGIN", null);
+                    "NO_USABLE_FACTOR", REJECTED, "VISIT_BRANCH", null);
             case VerifyTrustedDeviceResult.Rejected() -> rejected();
             case VerifyTrustedDeviceResult.Unavailable() -> unavailable();
         };

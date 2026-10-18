@@ -10,12 +10,12 @@ import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
 import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
 import com.vpbank.dcp.core.port.out.mfa.MfaTransactions;
+import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
 import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionCryptography;
 import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionStore;
 import com.vpbank.dcp.core.port.out.trusteddevice.ServerKeyExchange;
 import com.vpbank.dcp.core.port.out.trusteddevice.TrustedDeviceRecords;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
-import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.BffCallers;
 import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.TrustedDeviceResponseMapper;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenIssuer;
@@ -165,14 +165,14 @@ public class TrustedDeviceConfiguration {
     }
 
     @Bean
-    BffCallers bffCallers(TrustedDeviceProperties properties, StrictJoseJson strictJson,
-                          Sha256Digests digests, StringRedisTemplate redis, AuthorityScope scope,
-                          Clock clock) {
+    BffCallerAssertions bffCallerAssertions(TrustedDeviceProperties properties,
+                                            StrictJoseJson strictJson, Sha256Digests digests,
+                                            StringRedisTemplate redis, AuthorityScope scope,
+                                            Clock clock) {
         var bff = properties.bffAssertion();
         try {
-            return new BffCallers(new BffAssertionVerifier(bff.issuer(), bff.keyId(),
-                    ECKey.parse(bff.publicJwk()), strictJson, digests),
-                    new RedisAssertionReplay(redis, new ReplayKeys(scope), clock));
+            return new BffAssertionVerifier(bff.issuer(), bff.keyId(), ECKey.parse(bff.publicJwk()),
+                    strictJson, digests, new RedisAssertionReplay(redis, new ReplayKeys(scope), clock));
         } catch (InvalidCryptographicInputException | ParseException failure) {
             throw new InvalidLoginIntegrationConfigurationException(failure);
         }

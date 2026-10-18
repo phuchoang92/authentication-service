@@ -10,11 +10,16 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
+import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceCaller;
+import com.vpbank.dcp.core.port.out.replay.AssertionReplay;
+import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
+import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
 import java.text.ParseException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -25,7 +30,7 @@ import java.util.regex.Pattern;
  * <p>Only the pinned key is accepted, never one the token carries. The claim set must match
  * exactly, so a JWT minted by the BFF for another purpose cannot be replayed here.
  */
-public final class BffAssertionVerifier {
+public final class BffAssertionVerifier implements BffCallerAssertions {
     static final String TYPE = "bff-assertion+jwt";
     static final String AUDIENCE = "authentication-service";
     private static final Set<String> CLAIMS =
@@ -39,21 +44,41 @@ public final class BffAssertionVerifier {
     private final ECKey pinnedPublicKey;
     private final StrictJoseJson strictJson;
     private final Sha256Digests digests;
+    private final AssertionReplay replay;
 
     public BffAssertionVerifier(String issuer, String kid, ECKey pinnedPublicKey,
-                                StrictJoseJson strictJson, Sha256Digests digests) {
+                                StrictJoseJson strictJson, Sha256Digests digests,
+                                AssertionReplay replay) {
         this.issuer = Objects.requireNonNull(issuer, "issuer");
         this.kid = Objects.requireNonNull(kid, "kid");
         this.pinnedPublicKey = Objects.requireNonNull(pinnedPublicKey, "pinnedPublicKey");
         this.strictJson = Objects.requireNonNull(strictJson, "strictJson");
         this.digests = Objects.requireNonNull(digests, "digests");
+        this.replay = Objects.requireNonNull(replay, "replay");
         if (issuer.isBlank() || kid.isBlank() || pinnedPublicKey.isPrivate()
                 || !Curve.P_256.equals(pinnedPublicKey.getCurve())) {
             throw new InvalidCryptographicInputException();
         }
     }
 
-    public VerifiedBffAssertion verify(String compact, Instant now) {
+    @Override
+    public Optional<TrustedDeviceCaller> accept(String compactAssertion, Instant now) {
+        VerifiedBffAssertion verified;
+        try {
+            verified = verify(compactAssertion, now);
+        } catch (InvalidCryptographicInputException invalid) {
+            return Optional.empty();
+        }
+        return switch (replay.reserve(verified.assertionIdDigest(), verified.expiresAt())) {
+            case RESERVED -> Optional.of(new TrustedDeviceCaller(verified.session(),
+                    verified.channel(), verified.deviceId()));
+            case REPLAYED -> Optional.empty();
+            case AUTHORITY_CLOSED -> throw new ReplayAuthorityUnavailableException();
+        };
+    }
+
+    /** Throws {@link InvalidCryptographicInputException} for anything not exactly an assertion. */
+    VerifiedBffAssertion verify(String compact, Instant now) {
         Objects.requireNonNull(compact, "compact");
         Objects.requireNonNull(now, "now");
         strictJson.checkCompactJws(compact);

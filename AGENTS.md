@@ -6,6 +6,29 @@ This is the new `authentication-service` source tree, renamed from `authenticati
 
 Core is JDK-only and owns ports. Infrastructure owns Spring, HTTP, JPA, Redis and JOSE. Apply RK01–RK12 to Redis key construction and authority operations. Report implemented and actually executed tests separately.
 
+## Code structure (user-approved 2026-10-18)
+
+`CLAUDE.md` holds the code-structure rules and their checks (`python3 tools/code-metrics.py`).
+The user approved three overrides of the shared `code-design-rules-and-patterns.md`:
+
+- **Inbound ports (overrides H04):** no `*UseCase` interface in front of an application service.
+  Controllers call the service class; services call other services as classes. An interface
+  exists only at a real boundary (MySQL, Valkey, HTTP partners, JOSE/Nimbus) or when two real
+  implementations exist.
+- **Core layout (overrides the `core.domain/application/port.in/port.out` tree in H02/H03 and
+  the mandatory architecture layout):** core is grouped by capability, `core/<capability>/`,
+  holding that capability's service, outbound ports, results and domain values. Infrastructure
+  stays grouped by technology. Existing code moves one capability per slice with a green build;
+  ArchUnit rules tied to the old package names are rewritten as capability-direction rules in
+  the same slice.
+- **Exceptions (overrides EH02/EH05):** a custom exception class exists only when a `catch` or
+  `@ExceptionHandler` distinguishes it. Startup misconfiguration uses `IllegalStateException`
+  naming the setting, never its value; programming invariants use the JDK exceptions.
+
+Unchanged: core stays JDK-only (H07), expected outcomes stay typed results (EH01), causes are
+kept and exception text never reaches a caller (EH07–EH09), and all security, persistence and
+Redis-key rules apply as written.
+
 ## Keycloak client authentication
 
 The user-approved client configuration supports `CLIENT_SECRET_POST` (`client_id` and

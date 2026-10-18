@@ -8,10 +8,14 @@ import com.vpbank.dcp.core.domain.device.BindingId;
 import com.vpbank.dcp.core.domain.security.Digest32;
 import com.vpbank.dcp.core.domain.security.LookupKeyVersion;
 import com.vpbank.dcp.core.port.out.session.SessionTokenLookup;
+import com.vpbank.dcp.core.port.out.trusteddevice.KeyExchange;
 import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
 import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
 import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
+import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionStep;
+import com.vpbank.dcp.core.port.out.trusteddevice.StoredRestrictedSession;
 import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
+import com.vpbank.dcp.core.port.out.trusteddevice.WrappedServerKey;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.RuntimeKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
@@ -121,6 +125,50 @@ class RedisRestrictedSessionStoreIT {
 
         assertThat(store.create(prepared)).isFalse();
         assertThat(redis.hasKey(key(prepared))).isFalse();
+    }
+
+    /** Each step advances once and the session reads back exactly as it was written. */
+    @Test
+    void stepsAdvanceOnceAndReadBack() {
+        PreparedRestrictedSession prepared = prepared(new TrustTarget.NewDevice(),
+                Instant.now().plusSeconds(600));
+        store.create(prepared);
+        SessionTokenLookup lookup = prepared.lookup();
+        KeyExchange exchange = new KeyExchange(new WrappedServerKey("w1", new byte[] {1, 2, 3}),
+                "server-jwk", randomDigest(), "device-jwk", randomDigest());
+
+        assertThat(store.beginKeyExchange(lookup, exchange)).isTrue();
+        assertThat(store.beginKeyExchange(lookup, exchange)).isFalse();
+        assertThat(store.recordVerifyAttempt(lookup)).isEqualTo(1);
+        assertThat(store.recordVerifyAttempt(lookup)).isEqualTo(2);
+        assertThat(store.recordMfaTransaction(lookup, "mfa-transaction-1")).isTrue();
+        assertThat(store.recordMfaTransaction(lookup, "mfa-transaction-2")).isFalse();
+
+        StoredRestrictedSession stored = store.find(lookup).orElseThrow();
+        assertThat(stored.step()).isEqualTo(RestrictedSessionStep.MFA);
+        assertThat(stored.verifyAttempts()).isEqualTo(2);
+        assertThat(stored.mfaTransactionId()).isEqualTo("mfa-transaction-1");
+        assertThat(stored.keyExchange().serverKey().ciphertext()).containsExactly(1, 2, 3);
+        assertThat(stored.keyExchange().challengeDigest()).isEqualTo(exchange.challengeDigest());
+        assertThat(stored.keys()).isEqualTo(prepared.session().keys());
+
+        assertThat(store.consume(lookup)).isTrue();
+        assertThat(store.consume(lookup)).isFalse();
+        assertThat(store.find(lookup)).isEmpty();
+    }
+
+    /** A gate run after expiry must not leave a key without TTL that later reads as a session. */
+    @Test
+    void gatesOnAnEndedSessionLeaveNothingBehind() {
+        SessionTokenLookup gone = new SessionTokenLookup(new LookupKeyVersion("k1"), randomDigest());
+        KeyExchange exchange = new KeyExchange(new WrappedServerKey("w1", new byte[] {1}),
+                "server-jwk", randomDigest(), "device-jwk", randomDigest());
+        String key = new SessionKeys().forLookup(gone.version(), gone.digest());
+
+        assertThat(store.beginKeyExchange(gone, exchange)).isFalse();
+        assertThat(store.recordVerifyAttempt(gone)).isEqualTo(-1);
+        assertThat(store.recordMfaTransaction(gone, "mfa-transaction-1")).isFalse();
+        assertThat(redis.hasKey(key)).isFalse();
     }
 
     private PreparedRestrictedSession prepared(TrustTarget target, Instant expiresAt) {
