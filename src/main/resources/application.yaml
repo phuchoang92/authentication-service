@@ -99,10 +99,3 @@ auth:
     lookup-key-base64: ${AUTH_DEVICE_ID_LOOKUP_KEY_BASE64:}
     encryption-key-id: ${AUTH_DEVICE_ID_ENCRYPTION_KEY_ID:}
     encryption-key-base64: ${AUTH_DEVICE_ID_ENCRYPTION_KEY_BASE64:}
-  totp-login:
-    secret-key-id: ${AUTH_TOTP_SECRET_KEY_ID:}
-    secret-key-base64: ${AUTH_TOTP_SECRET_KEY_BASE64:}
-    proof-private-jwk: ${AUTH_TOTP_PROOF_PRIVATE_JWK:}
-    challenge-lifetime-seconds: ${AUTH_TOTP_CHALLENGE_LIFETIME_SECONDS:0}
-    maximum-failures: ${AUTH_TOTP_MAX_FAILURES:0}
-    lock-minutes: ${AUTH_TOTP_LOCK_MINUTES:0}

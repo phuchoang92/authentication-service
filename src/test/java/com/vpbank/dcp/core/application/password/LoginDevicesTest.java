@@ -51,7 +51,7 @@ class LoginDevicesTest {
     }
 
     @Test
-    void nonPrimaryDeviceNeedsTotpRatherThanDirectActive() {
+    void nonPrimaryDeviceIsOtherTrustedRatherThanDirectActive() {
         when(devices.current(subject, "neo-mobile", "installation-1234567890", BINDING_ID))
                 .thenReturn(Optional.of(snapshot(false, true)));
         assertThat(service.decide(subject, command(BINDING_ID), proofs(true)))

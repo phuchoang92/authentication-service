@@ -6,7 +6,6 @@ import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginResponse;
-import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordMfaRequiredResponse;
 import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
 import java.time.Clock;
 import java.time.Duration;
@@ -36,19 +35,6 @@ public final class PasswordLoginResponseMapper {
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                     .header("DPoP-Nonce", session.delivery().dpopNonce()).body(body);
         }
-        if (result instanceof PasswordLoginResult.MfaRequired pending) {
-            if (!clock.instant().isBefore(pending.expiresAt())) {
-                return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
-            }
-            var body = new PasswordMfaRequiredResponse("MFA_REQUIRED", pending.authenticationId(),
-                    pending.expiresAt(), pending.mfaTransactionId(),
-                    pending.token().tokenEnvelope(), pending.token().receipt(),
-                    Math.max(1, Math.min(900,
-                            Duration.between(clock.instant(), pending.expiresAt()).toSeconds())));
-            // The nonce is Auth's own authentication id; the MFA transaction is not a DPoP nonce.
-            return ResponseEntity.status(HttpStatus.ACCEPTED).cacheControl(CacheControl.noStore())
-                    .header("DPoP-Nonce", pending.authenticationId()).body(body);
-        }
         if (result instanceof PasswordLoginResult.Rejected) {
             return problem(HttpStatus.UNAUTHORIZED, "REQUEST_REJECTED");
         }
@@ -56,14 +42,6 @@ public final class PasswordLoginResponseMapper {
             return problem(HttpStatus.CONFLICT, "STATE_CONFLICT");
         }
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
-    }
-
-    /** The MFA service has not accepted the transaction yet; the App may elevate and retry. */
-    public ResponseEntity<PasswordLoginResponse> mfaNotPassed(String authenticationId) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).cacheControl(CacheControl.noStore())
-                .header("DPoP-Nonce", authenticationId)
-                .body(new PasswordLoginErrorResponse("MFA_NOT_PASSED", "Complete MFA and retry",
-                        java.util.UUID.randomUUID(), "RETRY_MFA"));
     }
 
     private @NonNull PasswordLoginResponse getLoginResponse(PreparedSession session, long seconds) {

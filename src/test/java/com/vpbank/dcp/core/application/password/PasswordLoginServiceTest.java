@@ -43,7 +43,6 @@ class PasswordLoginServiceTest {
     private final CustomerIdentities identities = mock(CustomerIdentities.class);
     private final LoginDevices devices = mock(LoginDevices.class);
     private final IssueLoginSessionUseCase sessions = mock(IssueLoginSessionUseCase.class);
-    private final StartTotpLoginService totp = mock(StartTotpLoginService.class);
 
     private final Instant now = Instant.parse("2026-10-13T00:00:00Z");
     private final Digest32 digest = Digest32.fromBytes(new byte[32]);
@@ -140,32 +139,19 @@ class PasswordLoginServiceTest {
         assertThat(service(true).login(command)).isInstanceOf(PasswordLoginResult.Rejected.class);
     }
 
+    /**
+     * Flow 01: a non-primary trusted device fails closed with START_NEW_LOGIN until the
+     * trusted-device continuation has an approved contract. It must never become ACTIVE.
+     */
     @Test
-    void otherTrustedStartsTotpRatherThanIssuingASession() {
+    void otherTrustedFailsClosedAndNeverIssuesASession() {
         admitted();
         verified();
         when(devices.decide(subject, command, verifiedProofs()))
                 .thenReturn(new DeviceTrustResult.OtherTrusted(device(false)));
-        when(totp.start(eq(command), any(AuthenticatedLogin.class)))
-                .thenReturn(new StartTotpLoginResult.Ready("auth-1", "chal-1",
-                        now.plusSeconds(120), null));
 
         assertThat(service(true).login(command))
-                .isInstanceOf(PasswordLoginResult.TotpRequired.class);
-        verify(sessions, never()).issue(any(), any(), any());
-    }
-
-    /** A device without a usable TOTP credential must not silently fall back to an ACTIVE login. */
-    @Test
-    void totpRecoveryIsRejectedAndNeverIssuesASession() {
-        admitted();
-        verified();
-        when(devices.decide(subject, command, verifiedProofs()))
-                .thenReturn(new DeviceTrustResult.OtherTrusted(device(false)));
-        when(totp.start(eq(command), any(AuthenticatedLogin.class)))
-                .thenReturn(new StartTotpLoginResult.NeedsRecovery());
-
-        assertThat(service(true).login(command)).isInstanceOf(PasswordLoginResult.Rejected.class);
+                .isInstanceOf(PasswordLoginResult.TemporarilyUnavailable.class);
         verify(sessions, never()).issue(any(), any(), any());
     }
 
@@ -179,7 +165,6 @@ class PasswordLoginServiceTest {
         assertThat(service(true).login(command))
                 .isInstanceOf(PasswordLoginResult.TemporarilyUnavailable.class);
         verify(sessions, never()).issue(any(), any(), any());
-        verify(totp, never()).start(any(), any());
     }
 
     private void admitted() {
@@ -193,7 +178,7 @@ class PasswordLoginServiceTest {
     }
 
     private PasswordLoginService service(boolean enabled) {
-        return new PasswordLoginService(proofs, identities, devices, sessions, totp,
+        return new PasswordLoginService(proofs, identities, devices, sessions,
                 new PasswordAvailabilityPolicy(enabled));
     }
 

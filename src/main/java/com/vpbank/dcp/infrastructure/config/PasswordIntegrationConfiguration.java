@@ -5,7 +5,6 @@ import com.vpbank.dcp.core.application.password.LoginDevices;
 import com.vpbank.dcp.core.application.password.PasswordAvailabilityPolicy;
 import com.vpbank.dcp.core.application.password.PasswordLoginService;
 import com.vpbank.dcp.core.application.password.PasswordProofs;
-import com.vpbank.dcp.core.application.password.StartTotpLoginService;
 import com.vpbank.dcp.core.application.session.IssueLoginSessionService;
 import com.vpbank.dcp.core.domain.device.DeviceTrustPolicy;
 import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
@@ -68,9 +67,8 @@ public class PasswordIntegrationConfiguration {
     PasswordLoginUseCase activePasswordLoginUseCase(PasswordProofs proofs,
                                                     CustomerIdentities identities,
                                                     LoginDevices devices,
-                                                    IssueLoginSessionUseCase sessions,
-                                                    StartTotpLoginService totp) {
-        return new PasswordLoginService(proofs, identities, devices, sessions, totp,
+                                                    IssueLoginSessionUseCase sessions) {
+        return new PasswordLoginService(proofs, identities, devices, sessions,
                 new PasswordAvailabilityPolicy(true));
     }
 }

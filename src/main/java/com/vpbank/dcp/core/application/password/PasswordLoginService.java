@@ -25,18 +25,15 @@ public final class PasswordLoginService implements PasswordLoginUseCase {
     private final CustomerIdentities identities;
     private final LoginDevices devices;
     private final IssueLoginSessionUseCase sessions;
-    private final StartMfaLoginService mfa;
     private final PasswordAvailabilityPolicy availability;
 
     public PasswordLoginService(PasswordProofs proofs, CustomerIdentities identities,
                                 LoginDevices devices, IssueLoginSessionUseCase sessions,
-                                StartMfaLoginService mfa,
                                 PasswordAvailabilityPolicy availability) {
         this.proofs = Objects.requireNonNull(proofs);
         this.identities = Objects.requireNonNull(identities);
         this.devices = Objects.requireNonNull(devices);
         this.sessions = Objects.requireNonNull(sessions);
-        this.mfa = Objects.requireNonNull(mfa);
         this.availability = Objects.requireNonNull(availability);
     }
 
@@ -70,12 +67,13 @@ public final class PasswordLoginService implements PasswordLoginUseCase {
                                             SubjectId subject, CustomerAuthenticationState customer) {
         return switch (devices.decide(subject, command, proof.proofs())) {
             case DeviceTrustResult.Denied(var why) -> denied(why);
-            // NEW_DEVICE stays closed until provider MFA and the reset acknowledgement are wired.
-            case DeviceTrustResult.NewDevice() -> denied(LoginDenial.UNAVAILABLE);
             case DeviceTrustResult.LastTrusted(var device) ->
                     issueSession(command, new AuthenticatedLogin(subject, customer, device, proof));
-            case DeviceTrustResult.OtherTrusted(var device) ->
-                    startMfa(command, new AuthenticatedLogin(subject, customer, device, proof));
+            // Flow 01: until the trusted-device continuation has an approved contract, both a
+            // non-primary trusted device and a new device fail closed with START_NEW_LOGIN.
+            // No challenge, pending token or banking token is issued.
+            case DeviceTrustResult.OtherTrusted(var _), DeviceTrustResult.NewDevice() ->
+                    denied(LoginDenial.UNAVAILABLE);
         };
     }
 
@@ -90,19 +88,6 @@ public final class PasswordLoginService implements PasswordLoginUseCase {
             case SessionLoginResult.Active(var session) -> new PasswordLoginResult.Active(session);
             case SessionLoginResult.Rejected() -> denied(LoginDenial.REJECTED);
             case SessionLoginResult.Unavailable() -> denied(LoginDenial.UNAVAILABLE);
-        };
-    }
-
-    private PasswordLoginResult startMfa(PasswordLoginCommand command, AuthenticatedLogin login) {
-        return switch (mfa.start(command, login)) {
-            case StartMfaLoginResult.Ready(
-                    var authenticationId, var transactionId,
-                    var expiresAt, var token
-            ) -> new PasswordLoginResult.MfaRequired(authenticationId, transactionId,
-                    expiresAt, token);
-            // No enrolled factor cannot be recovered in the App; it is a rejected login here.
-            case StartMfaLoginResult.NoUsableFactor() -> denied(LoginDenial.REJECTED);
-            case StartMfaLoginResult.Unavailable() -> denied(LoginDenial.UNAVAILABLE);
         };
     }
 

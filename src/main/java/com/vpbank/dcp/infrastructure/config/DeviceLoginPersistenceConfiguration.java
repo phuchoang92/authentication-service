@@ -4,17 +4,14 @@ import com.vpbank.dcp.core.domain.customer.CustomerOwnerPolicy;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
 import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
 import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityStore;
-import com.vpbank.dcp.core.port.out.totp.DeviceTotpAvailability;
 import com.vpbank.dcp.infrastructure.config.properties.DeviceIdProtectionProperties;
 import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
 import com.vpbank.dcp.infrastructure.persistence.adapter.JpaCustomerOwnerAdapter;
-import com.vpbank.dcp.infrastructure.persistence.adapter.JpaDeviceTotpAvailability;
 import com.vpbank.dcp.infrastructure.persistence.adapter.JpaLoginDeviceAdapter;
 import com.vpbank.dcp.infrastructure.persistence.adapter.JpaLoginSessionSecurityStore;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdCodec;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdKeyMaterial;
 import com.vpbank.dcp.infrastructure.persistence.repository.CustomerOwnerPersistenceRepository;
-import com.vpbank.dcp.infrastructure.persistence.repository.DeviceCredentialJpaRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.LoginDevicePersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.LoginSessionSecurityPersistenceRepository;
 import java.security.SecureRandom;
@@ -76,8 +73,4 @@ public class DeviceLoginPersistenceConfiguration {
         return new JpaLoginSessionSecurityStore(repository, transactions);
     }
 
-    @Bean
-    DeviceTotpAvailability deviceTotpAvailability(DeviceCredentialJpaRepository repository) {
-        return new JpaDeviceTotpAvailability(repository);
-    }
 }

@@ -5,7 +5,6 @@ import static org.mockito.Mockito.mock;
 
 import com.vpbank.dcp.core.application.password.PasswordLoginUnavailableService;
 import com.vpbank.dcp.core.application.password.PasswordLoginService;
-import com.vpbank.dcp.core.application.password.StartTotpLoginService;
 import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
 import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
 import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
@@ -59,7 +58,6 @@ class PasswordFlowConfigurationTest {
                 .withBean(LoginSessionSecurityStore.class, () -> mock(LoginSessionSecurityStore.class))
                 .withBean(SessionCryptography.class, () -> mock(SessionCryptography.class))
                 .withBean(SessionAuthority.class, () -> mock(SessionAuthority.class))
-                .withBean(StartTotpLoginService.class, () -> mock(StartTotpLoginService.class))
                 .withBean(CustomerLoginEligibilityProperties.class,
                         () -> new CustomerLoginEligibilityProperties(30000))
                 .withPropertyValues(

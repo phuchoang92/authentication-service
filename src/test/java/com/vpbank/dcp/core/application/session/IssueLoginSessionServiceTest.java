@@ -70,7 +70,7 @@ class IssueLoginSessionServiceTest {
     }
 
     @Test
-    void verifiedTotpCanIssueOnOtherTrustedDevice() {
+    void mfaConfirmedLoginCanIssueOnOtherTrustedDevice() {
         Fixture fixture = fixture(false, LoginConfirmation.MFA_CONFIRMED);
         PreparedSession prepared = mock(PreparedSession.class);
         when(security.current(fixture.subject, fixture.bindingId, "neo-mobile"))
