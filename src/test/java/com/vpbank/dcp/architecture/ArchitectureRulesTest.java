@@ -28,8 +28,8 @@ class ArchitectureRulesTest {
             .because("dependency direction is infrastructure to core");
 
     private static final ArchRule SESSION_CORE_DOES_NOT_IMPORT_PASSWORD = noClasses()
-            .that().resideInAnyPackage("..core.domain.session..", "..core.application.session..",
-                    "..core.port.in.session..", "..core.port.out.session..")
+            .that().resideInAnyPackage("..core.session..", "..core.domain.session..",
+                    "..core.application.session..", "..core.port.in.session..", "..core.port.out.session..")
             .should().dependOnClassesThat().resideInAnyPackage("..core.domain.password..",
                     "..core.application.password..", "..core.port.in.password..", "..core.port.out.password..")
             .because("session issuance is independent of authentication methods");

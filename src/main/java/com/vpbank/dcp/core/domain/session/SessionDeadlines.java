@@ -2,10 +2,11 @@ package com.vpbank.dcp.core.domain.session;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 /**
- * Idle expiry can slide only after eligible Auth admission; absolute expiry never slides.
+ * Idle expiry slides after an admitted BFF request; absolute expiry never slides.
  */
 public record SessionDeadlines(Instant idleExpiresAt, Instant absoluteExpiresAt) {
 
@@ -30,12 +31,16 @@ public record SessionDeadlines(Instant idleExpiresAt, Instant absoluteExpiresAt)
         return now.isBefore(idleExpiresAt) && now.isBefore(absoluteExpiresAt);
     }
 
-    public SessionDeadlines afterEligibleAdmission(Instant now) {
-        if (!activeAt(now)) {
-            throw new InvalidSessionStateException();
-        }
-        Instant candidate = now.plus(IDLE_LIMIT);
-        return new SessionDeadlines(candidate.isBefore(absoluteExpiresAt)
-                ? candidate : absoluteExpiresAt, absoluteExpiresAt);
+    /**
+     * Idle becomes {@code min(absolute, max(idle, admittedAt + IDLE_LIMIT))}. Using the admission
+     * time, not the call time, means a retry of the same admission never extends further.
+     * Milliseconds only, because that is what Valkey stores.
+     */
+    public SessionDeadlines slideFor(Instant admittedAt) {
+        Objects.requireNonNull(admittedAt, "admittedAt");
+        Instant slid = admittedAt.plus(IDLE_LIMIT).truncatedTo(ChronoUnit.MILLIS);
+        Instant idle = slid.isAfter(idleExpiresAt) ? slid : idleExpiresAt;
+        return new SessionDeadlines(idle.isBefore(absoluteExpiresAt) ? idle : absoluteExpiresAt,
+                absoluteExpiresAt);
     }
 }

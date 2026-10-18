@@ -59,6 +59,12 @@ auth:
     lookup-hmac-base64: ${AUTH_TOKEN_LOOKUP_HMAC_BASE64}
     nonce-validity-ms: ${AUTH_DPOP_NONCE_VALIDITY_MS}
     integration-activation-enabled: ${AUTH_INTEGRATION_ACTIVE_ENABLED:false}
+  session-extension:
+    # Read only when integration activation is on. No defaults for who may call and what counts.
+    bff-workload-uri: ${AUTH_SESSION_EXTENSION_BFF_WORKLOAD_URI:}
+    activity-routes: ${AUTH_SESSION_EXTENSION_ACTIVITY_ROUTES:}
+    max-admission-age-ms: ${AUTH_SESSION_EXTENSION_MAX_ADMISSION_AGE_MS:30000}
+    max-clock-skew-ms: ${AUTH_SESSION_EXTENSION_MAX_CLOCK_SKEW_MS:2000}
   authority:
     scope: ${AUTH_BANK_SCOPE}
   token-delivery:
