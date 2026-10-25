@@ -1,11 +1,11 @@
 package com.vpbank.dcp.infrastructure.adapter.out.customer;
 
-import com.vpbank.dcp.core.domain.customer.CustomerNumber;
-import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
-import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
-import com.vpbank.dcp.core.port.out.customer.CustomerResolution;
+import com.vpbank.dcp.core.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.CustomerAuthenticationState;
+import com.vpbank.dcp.core.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.customer.CustomerDirectory;
+import com.vpbank.dcp.core.customer.CustomerDirectoryUnavailableException;
+import com.vpbank.dcp.core.customer.CustomerResolution;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpRequestFailedException;
 import java.util.Objects;

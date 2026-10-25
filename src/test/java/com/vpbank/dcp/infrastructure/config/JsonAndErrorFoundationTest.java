@@ -3,17 +3,17 @@ package com.vpbank.dcp.infrastructure.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.security.Digest32;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import java.util.UUID;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.adapter.in.web.InvalidExternalUriException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.error.ApiErrorHandler;
-import com.vpbank.dcp.core.port.out.security.DpopExpectation;
+import com.vpbank.dcp.core.security.DpopExpectation;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.InvalidCryptographicInputException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
-import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
+import com.vpbank.dcp.core.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.infrastructure.config.properties.KeycloakContextTrustProperties;
 import java.net.URI;
 import java.time.Instant;
@@ -66,7 +66,7 @@ class JsonAndErrorFoundationTest {
     void secretValueObjectsDoNotRenderSecrets() {
         var token = "k1." + Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]);
         var expectation = DpopExpectation.forToken("GET", URI.create("https://api.bank.test/a"),
-                new com.vpbank.dcp.core.domain.security.RequestKeyThumbprint(
+                new com.vpbank.dcp.core.security.RequestKeyThumbprint(
                         Digest32.fromBytes(new byte[32])), "nonce-value", token, Instant.now());
         assertThat(expectation.toString()).doesNotContain(token, "nonce-value");
         assertThat(Digest32.fromBytes(new byte[32]).toString()).doesNotContain("AAAAAAAA");

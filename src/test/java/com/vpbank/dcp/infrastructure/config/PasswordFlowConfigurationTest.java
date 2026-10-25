@@ -3,19 +3,17 @@ package com.vpbank.dcp.infrastructure.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-import com.vpbank.dcp.core.application.password.PasswordLoginUnavailableService;
-import com.vpbank.dcp.core.application.password.PasswordLoginService;
-import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
-import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
-import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
-import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
-import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
-import com.vpbank.dcp.core.port.out.credential.PasswordVerifier;
-import com.vpbank.dcp.core.port.out.password.PasswordProofReplay;
-import com.vpbank.dcp.core.port.out.password.PasswordProofVerifier;
-import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityStore;
-import com.vpbank.dcp.core.port.out.session.SessionAuthority;
-import com.vpbank.dcp.core.port.out.session.SessionCryptography;
+import com.vpbank.dcp.core.password.PasswordLoginService;
+import com.vpbank.dcp.core.session.TrustedDeviceSessions;
+import com.vpbank.dcp.core.customer.CheckCustomerLoginEligibilityService;
+import com.vpbank.dcp.core.customer.CustomerOwnerRepository;
+import com.vpbank.dcp.core.device.LoginDeviceRepository;
+import com.vpbank.dcp.core.password.PasswordVerifier;
+import com.vpbank.dcp.core.password.PasswordProofReplay;
+import com.vpbank.dcp.core.password.PasswordProofVerifier;
+import com.vpbank.dcp.core.session.LoginSessionSecurityStore;
+import com.vpbank.dcp.core.session.SessionAuthority;
+import com.vpbank.dcp.core.session.SessionCryptography;
 import com.vpbank.dcp.infrastructure.config.properties.CustomerLoginEligibilityProperties;
 import java.time.Clock;
 import org.junit.jupiter.api.Test;
@@ -34,15 +32,12 @@ class PasswordFlowConfigurationTest {
                         "auth.password-flow.customer-policy-version=test",
                         "auth.password-flow.credential-deadline-ms=1000",
                         "auth.password-flow.journey-deadline-ms=1000")
-                .run(context -> {
-                    assertThat(context).hasNotFailed().hasSingleBean(PasswordLoginUseCase.class);
-                    assertThat(context.getBean(PasswordLoginUseCase.class))
-                            .isInstanceOf(PasswordLoginUnavailableService.class);
-                });
+                .run(context -> assertThat(context).hasNotFailed()
+                        .doesNotHaveBean(PasswordLoginService.class));
     }
 
     @Test
-    void explicitIntegrationFlagWiresTheRealPasswordUseCase() {
+    void explicitIntegrationFlagWiresThePasswordService() {
         new WebApplicationContextRunner()
                 .withUserConfiguration(PasswordFlowConfiguration.class, PasswordIntegrationConfiguration.class)
                 .withBean(JsonMapper.class, JsonMapper::new)
@@ -51,8 +46,8 @@ class PasswordFlowConfigurationTest {
                 .withBean(PasswordProofVerifier.class, () -> mock(PasswordProofVerifier.class))
                 .withBean(PasswordProofReplay.class, () -> mock(PasswordProofReplay.class))
                 .withBean(PasswordVerifier.class, () -> mock(PasswordVerifier.class))
-                .withBean(CheckCustomerLoginEligibilityUseCase.class,
-                        () -> mock(CheckCustomerLoginEligibilityUseCase.class))
+                .withBean(CheckCustomerLoginEligibilityService.class,
+                        () -> mock(CheckCustomerLoginEligibilityService.class))
                 .withBean(CustomerOwnerRepository.class, () -> mock(CustomerOwnerRepository.class))
                 .withBean(LoginSessionSecurityStore.class, () -> mock(LoginSessionSecurityStore.class))
                 .withBean(SessionCryptography.class, () -> mock(SessionCryptography.class))
@@ -67,15 +62,12 @@ class PasswordFlowConfigurationTest {
                         "auth.password-flow.customer-policy-version=test",
                         "auth.password-flow.credential-deadline-ms=1000",
                         "auth.password-flow.journey-deadline-ms=900000")
-                .run(context -> {
-                    assertThat(context).hasNotFailed().hasSingleBean(PasswordLoginUseCase.class);
-                    assertThat(context.getBean(PasswordLoginUseCase.class))
-                            .isInstanceOf(PasswordLoginService.class);
-                });
+                .run(context -> assertThat(context).hasNotFailed()
+                        .hasSingleBean(PasswordLoginService.class));
     }
 
     @Test
-    void activationFlagWithoutIntegrationProfileCannotExposeLoginUseCase() {
+    void activationFlagWithoutIntegrationProfileCannotExposeLoginService() {
         new WebApplicationContextRunner()
                 .withUserConfiguration(PasswordFlowConfiguration.class, PasswordIntegrationConfiguration.class)
                 .withBean(JsonMapper.class, JsonMapper::new)
@@ -86,6 +78,6 @@ class PasswordFlowConfigurationTest {
                         "auth.password-flow.credential-deadline-ms=1000",
                         "auth.password-flow.journey-deadline-ms=1000")
                 .run(context -> assertThat(context).hasNotFailed()
-                        .doesNotHaveBean(PasswordLoginUseCase.class));
+                        .doesNotHaveBean(PasswordLoginService.class));
     }
 }

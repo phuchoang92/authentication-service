@@ -1,5 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
+import com.vpbank.dcp.core.session.PinnedDevice;
+import com.vpbank.dcp.core.session.PinnedCustomer;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.nimbusds.jose.JWEObject;
@@ -8,14 +10,14 @@ import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.domain.customer.CustomerNumber;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
-import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
+import com.vpbank.dcp.core.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.session.LoginKeys;
+import com.vpbank.dcp.core.session.PreparedRestrictedSession;
+import com.vpbank.dcp.core.session.RestrictedSession;
+import com.vpbank.dcp.core.session.TrustTarget;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -27,6 +29,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class RestrictedSessionCryptoAdapterTest {
+    private static final String DEVICE_ID = "device-id-1234567890";
     private static final Instant NOW = Instant.parse("2026-10-18T00:00:00Z");
     private final JsonMapper json = JsonMapper.builder().build();
     private final ECKey kenc;
@@ -46,7 +49,7 @@ class RestrictedSessionCryptoAdapterTest {
     @Test
     void storedSessionIdAndSecretDigestMatchTheDeliveredToken() throws Exception {
         PreparedRestrictedSession prepared = adapter.prepare(session(
-                new SubjectId(UUID.randomUUID()), new TrustTarget.NewDevice()), NOW.plusSeconds(600));
+                new SubjectId(UUID.randomUUID()), new TrustTarget.NewDevice()), DEVICE_ID, NOW.plusSeconds(600));
 
         JWEObject envelope = JWEObject.parse(prepared.tokenEnvelope());
         envelope.decrypt(new ECDHDecrypter(kenc));
@@ -67,9 +70,9 @@ class RestrictedSessionCryptoAdapterTest {
                 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
                 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7});
         PreparedRestrictedSession known = adapter.prepare(session(new SubjectId(UUID.randomUUID()),
-                new TrustTarget.KnownDevice(new BindingId(UUID.randomUUID()), deviceKey, 2)), NOW.plusSeconds(600));
+                new TrustTarget.KnownDevice(new BindingId(UUID.randomUUID()), deviceKey, 2)), DEVICE_ID, NOW.plusSeconds(600));
         PreparedRestrictedSession fresh = adapter.prepare(session(new SubjectId(UUID.randomUUID()),
-                new TrustTarget.NewDevice()), NOW.plusSeconds(600));
+                new TrustTarget.NewDevice()), DEVICE_ID, NOW.plusSeconds(600));
 
         var knownClaims = SignedJWT.parse(known.receipt()).getJWTClaimsSet();
         assertThat(knownClaims.getStringClaim("status")).isEqualTo("NEED_TRUSTED_DEVICE");
@@ -92,14 +95,15 @@ class RestrictedSessionCryptoAdapterTest {
     }
 
     private Digest32 digestFor(SubjectId owner) {
-        return adapter.prepare(session(owner, new TrustTarget.NewDevice()), NOW.plusSeconds(600)).deviceIdDigest();
+        return adapter.prepare(session(owner, new TrustTarget.NewDevice()), DEVICE_ID, NOW.plusSeconds(600)).deviceIdDigest();
     }
 
     private RestrictedSession session(SubjectId owner, TrustTarget target) {
-        return new RestrictedSession(UUID.randomUUID(), owner, new CustomerNumber("CUST-1"), 3,
-                "neo-mobile", target, "device-id-1234567890",
+        return new RestrictedSession(UUID.randomUUID(),
+                new PinnedCustomer(owner, new CustomerNumber("CUST-1"), 3),
+                new PinnedDevice("neo-mobile", "ANDROID", target),
                 new LoginKeys("request-jwk", Digest32.fromBytes(new byte[32]),
                         kenc.toPublicJWK().toJSONString()),
-                "ANDROID", UUID.randomUUID());
+                UUID.randomUUID());
     }
 }

@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.port.out.password.PasswordProofReplay;
-import com.vpbank.dcp.core.port.out.replay.ReplayProtection;
+import com.vpbank.dcp.core.password.PasswordProofReplay;
+import com.vpbank.dcp.core.replay.ReplayProtection;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.AuthorityRedisPreflight;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisPasswordProofReplay;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.RedisReplayProtection;

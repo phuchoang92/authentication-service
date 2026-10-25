@@ -18,7 +18,7 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
+import com.vpbank.dcp.core.security.VerifiedDpopProof;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.adapter.in.web.security.DpopProofFilter;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;

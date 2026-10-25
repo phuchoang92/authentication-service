@@ -3,8 +3,8 @@ package com.vpbank.dcp.infrastructure.adapter.out.customer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.vpbank.dcp.core.domain.customer.CustomerStatus;
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
+import com.vpbank.dcp.core.customer.CustomerStatus;
+import com.vpbank.dcp.core.customer.CustomerDirectoryUnavailableException;
 import org.junit.jupiter.api.Test;
 
 class CustomerResponseMapperTest {

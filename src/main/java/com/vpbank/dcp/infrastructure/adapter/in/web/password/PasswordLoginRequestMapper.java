@@ -1,10 +1,10 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
-import com.vpbank.dcp.core.port.in.password.PasswordLoginCommand;
-import com.vpbank.dcp.core.port.out.credential.PasswordVerification;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
-import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
-import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
+import com.vpbank.dcp.core.password.PasswordLoginCommand;
+import com.vpbank.dcp.core.password.PasswordVerification;
+import com.vpbank.dcp.core.password.PasswordOperationContext;
+import com.vpbank.dcp.core.password.PasswordWireProofs;
+import com.vpbank.dcp.core.security.VerifiedDpopProof;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginRequest;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
 import java.time.Clock;

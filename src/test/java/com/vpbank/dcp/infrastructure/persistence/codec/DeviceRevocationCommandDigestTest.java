@@ -1,14 +1,14 @@
 package com.vpbank.dcp.infrastructure.persistence.codec;
 
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.core.domain.device.DeviceOwnership;
-import com.vpbank.dcp.core.domain.device.DeviceRevocationReason;
-import com.vpbank.dcp.core.domain.device.SecurityActor;
-import com.vpbank.dcp.core.domain.device.SecurityActorType;
-import com.vpbank.dcp.core.port.out.device.RecordDeviceRevocation;
+import com.vpbank.dcp.core.device.DeviceOwnership;
+import com.vpbank.dcp.core.device.DeviceRevocationReason;
+import com.vpbank.dcp.core.device.SecurityActor;
+import com.vpbank.dcp.core.device.SecurityActorType;
+import com.vpbank.dcp.core.device.RecordDeviceRevocation;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;

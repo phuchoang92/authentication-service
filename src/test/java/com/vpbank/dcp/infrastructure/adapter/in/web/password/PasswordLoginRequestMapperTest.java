@@ -15,12 +15,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
-import com.vpbank.dcp.core.port.in.password.PasswordLoginCommand;
-import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
-import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
+import com.vpbank.dcp.core.password.PasswordLoginCommand;
+import com.vpbank.dcp.core.password.PasswordLoginResult;
+import com.vpbank.dcp.core.password.PasswordLoginService;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
-import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
-import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
+import com.vpbank.dcp.core.security.DpopProofDecoder;
+import com.vpbank.dcp.core.security.VerifiedDpopProof;
 import com.vpbank.dcp.infrastructure.adapter.in.web.security.SecurityErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.error.ApiErrorHandler;
 import com.vpbank.dcp.infrastructure.config.JsonConfiguration;
@@ -36,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.http.HttpHeaders;
@@ -51,7 +52,9 @@ class PasswordLoginRequestMapperTest {
     private static final String PATH = "/internal/v1/authentications/password";
     private static final String OPERATION = "44444444-4444-4444-8444-444444444444";
     private static final String DPOP = "p".repeat(64);
-    private final PasswordLoginUseCase passwords = mock(PasswordLoginUseCase.class);
+    private final PasswordLoginService passwords = mock(PasswordLoginService.class);
+    @SuppressWarnings("unchecked")
+    private final ObjectProvider<PasswordLoginService> wired = mock(ObjectProvider.class);
     private final LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
     private final VerifiedDpopProof dpop = mock(VerifiedDpopProof.class);
     private JsonMapper json;
@@ -69,19 +72,32 @@ class PasswordLoginRequestMapperTest {
         DpopProofDecoder decoder = mock(DpopProofDecoder.class);
         when(decoder.verify(any(), any())).thenReturn(dpop);
         validator.afterPropertiesSet();
-        mvc = MockMvcBuilders.standaloneSetup(new PasswordLoginController(mapper, passwords,
+        mvc = MockMvcBuilders.standaloneSetup(new PasswordLoginController(mapper, wired,
                         new PasswordLoginResponseMapper(clock)))
                 .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
                 .setValidator(validator)
                 .setControllerAdvice(new BoundedJsonBodyAdvice(), new ApiErrorHandler())
                 .addFilter(new DpopProofFilter(decoder, new ExternalUriPolicy("https://api.bank.example"),
                         clock, new SecurityErrorResponse(json))).build();
+        when(wired.getIfAvailable()).thenReturn(passwords);
         when(passwords.login(any())).thenReturn(new PasswordLoginResult.Rejected());
     }
 
     @AfterEach
     void closeValidator() {
         validator.close();
+    }
+
+    @Test
+    void withoutAWiredServiceEveryLoginIsUnavailableAndNothingIsDispatched() throws Exception {
+        when(wired.getIfAvailable()).thenReturn(null);
+
+        mvc.perform(post(PATH).contentType(MediaType.APPLICATION_JSON)
+                        .header("DPoP", DPOP).header("Idempotency-Key", OPERATION).content(validBody()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("TEMPORARILY_UNAVAILABLE"))
+                .andExpect(jsonPath("$.nextAction").value("START_NEW_LOGIN"));
+        verifyNoInteractions(passwords);
     }
 
     @Test

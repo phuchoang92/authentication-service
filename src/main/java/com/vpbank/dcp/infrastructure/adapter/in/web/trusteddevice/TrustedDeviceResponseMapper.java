@@ -1,8 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice;
 
-import com.vpbank.dcp.core.port.in.trusteddevice.ConfirmTrustedDeviceResult;
-import com.vpbank.dcp.core.port.in.trusteddevice.InitTrustedDeviceResult;
-import com.vpbank.dcp.core.port.in.trusteddevice.VerifyTrustedDeviceResult;
+import com.vpbank.dcp.core.trusteddevice.ConfirmTrustedDeviceResult;
+import com.vpbank.dcp.core.trusteddevice.InitTrustedDeviceResult;
+import com.vpbank.dcp.core.trusteddevice.VerifyTrustedDeviceResult;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
 import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.dto.TrustedDeviceErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.dto.TrustedDeviceInitResponse;
@@ -13,7 +13,6 @@ import java.util.UUID;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * {@code nextAction} tells the App what to do: {@code RETRY} the same step,
@@ -25,19 +24,18 @@ public final class TrustedDeviceResponseMapper {
     private static final String UNAVAILABLE = "Please try again later";
 
     private final PasswordLoginResponseMapper sessions;
-    private final JsonMapper json;
 
-    public TrustedDeviceResponseMapper(PasswordLoginResponseMapper sessions, JsonMapper json) {
+    public TrustedDeviceResponseMapper(PasswordLoginResponseMapper sessions) {
         this.sessions = Objects.requireNonNull(sessions);
-        this.json = Objects.requireNonNull(json);
     }
 
     public ResponseEntity<TrustedDeviceResponse> init(InitTrustedDeviceResult result) {
         return switch (result) {
-            case InitTrustedDeviceResult.Started(var serverPublicJwk, var challengeJwe) ->
+            case InitTrustedDeviceResult.Started(var enrollmentId, var suite, var serverPublicKey,
+                                                 var protectedChallenge) ->
                     ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                            .body(new TrustedDeviceInitResponse("KEY_EXCHANGE",
-                                    json.readTree(serverPublicJwk), challengeJwe));
+                            .body(new TrustedDeviceInitResponse("KEY_EXCHANGE", enrollmentId, suite,
+                                    serverPublicKey, protectedChallenge));
             case InitTrustedDeviceResult.Rejected() -> rejected();
             case InitTrustedDeviceResult.Unavailable() -> unavailable();
         };

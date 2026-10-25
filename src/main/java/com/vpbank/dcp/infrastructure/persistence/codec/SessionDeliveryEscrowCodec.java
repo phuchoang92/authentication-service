@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.persistence.codec;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.security.Digest32;
 import com.vpbank.dcp.infrastructure.persistence.repository.InvalidSessionPersistenceException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;

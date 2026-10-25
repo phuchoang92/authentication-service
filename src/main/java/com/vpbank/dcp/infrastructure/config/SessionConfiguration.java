@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.port.out.session.SessionCryptography;
-import com.vpbank.dcp.core.port.out.session.SessionAuthority;
+import com.vpbank.dcp.core.session.SessionCryptography;
+import com.vpbank.dcp.core.session.SessionAuthority;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.SessionCryptoAdapter;

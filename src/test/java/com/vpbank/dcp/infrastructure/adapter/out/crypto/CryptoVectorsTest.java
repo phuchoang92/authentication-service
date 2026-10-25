@@ -1,16 +1,16 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
-import com.vpbank.dcp.core.port.out.security.DpopExpectation;
-import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
-import com.vpbank.dcp.core.port.out.security.InvalidDpopProofException;
+import com.vpbank.dcp.core.security.DpopExpectation;
+import com.vpbank.dcp.core.security.VerifiedDpopProof;
+import com.vpbank.dcp.core.security.InvalidDpopProofException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.nimbusds.jose.crypto.RSADecrypter;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.JWEObject;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.security.RequestKeyThumbprint;
 import com.vpbank.dcp.testsupport.ContractVectors;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;

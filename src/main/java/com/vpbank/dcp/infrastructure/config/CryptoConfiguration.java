@@ -11,7 +11,7 @@ import com.vpbank.dcp.infrastructure.adapter.out.crypto.JosePasswordProofVerifie
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.SignedContextVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
-import com.vpbank.dcp.core.port.out.password.PasswordProofVerifier;
+import com.vpbank.dcp.core.password.PasswordProofVerifier;
 import com.vpbank.dcp.infrastructure.config.properties.KeycloakContextTrustProperties;
 import com.vpbank.dcp.infrastructure.config.properties.BankingTokenDeliveryProperties;
 import java.text.ParseException;

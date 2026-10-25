@@ -1,12 +1,12 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
 import com.nimbusds.jose.jwk.ECKey;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionCryptography;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.session.PreparedRestrictedSession;
+import com.vpbank.dcp.core.session.RestrictedSession;
+import com.vpbank.dcp.core.session.RestrictedSessionCryptography;
+import com.vpbank.dcp.core.session.TrustTarget;
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
 import java.time.Instant;
@@ -37,22 +37,24 @@ public final class RestrictedSessionCryptoAdapter implements RestrictedSessionCr
     }
 
     @Override
-    public PreparedRestrictedSession prepare(RestrictedSession session, Instant expiresAt) {
+    public PreparedRestrictedSession prepare(RestrictedSession session, String deviceId,
+                                             Instant expiresAt) {
         Objects.requireNonNull(session);
+        Objects.requireNonNull(deviceId);
         Objects.requireNonNull(expiresAt);
         try {
             UUID sessionId = UUID.randomUUID();
             BankingTokenIssuer.IssuedBankingToken token = tokens.issue(sessionId);
-            String deviceKeyJkt = switch (session.target()) {
+            String deviceKeyJkt = switch (session.device().target()) {
                 case TrustTarget.KnownDevice known -> known.deviceKeyThumbprint().base64Url();
                 case TrustTarget.NewDevice() -> null;
             };
             EncryptedBankingToken encrypted = envelopes.issue(token.token(), ECKey.parse(session.keys().responsePublicJwk()),
-                    new TokenDeliveryContext(session.operationId(), session.channel(),
+                    new TokenDeliveryContext(session.operationId(), session.device().channel(),
                             BankingTokenStatus.NEED_TRUSTED_DEVICE,
                             session.keys().requestKeyThumbprint().base64Url(), deviceKeyJkt, expiresAt));
             return new PreparedRestrictedSession(session, sessionId, token.secretDigest(),
-                    deviceIdDigest(session.owner(), session.channel(), session.deviceId()),
+                    deviceIdDigest(session.customer().owner(), session.device().channel(), deviceId),
                     expiresAt, encrypted.tokenEnvelope(), encrypted.receipt());
         } catch (ParseException failure) {
             throw new InvalidCryptographicInputException(failure);

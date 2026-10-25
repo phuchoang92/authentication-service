@@ -8,7 +8,7 @@ import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.security.Digest32;
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
 import java.time.Duration;

@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis.key;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.security.RequestKeyThumbprint;
 import java.util.Objects;
 import java.util.UUID;
 

@@ -1,12 +1,12 @@
 package com.vpbank.dcp.infrastructure.adapter.out.mfa;
 
-import com.vpbank.dcp.core.port.out.mfa.MfaCheckResult;
-import com.vpbank.dcp.core.port.out.mfa.MfaStartResult;
-import com.vpbank.dcp.core.port.out.mfa.MfaTransactions;
-import com.vpbank.dcp.core.port.out.mfa.MfaTrustCheck;
-import com.vpbank.dcp.core.port.out.mfa.MfaTrustRequest;
-import com.vpbank.dcp.core.port.out.mfa.MfaUnavailableException;
-import com.vpbank.dcp.core.port.out.mfa.InvalidMfaTransactionException;
+import com.vpbank.dcp.core.trusteddevice.MfaCheckResult;
+import com.vpbank.dcp.core.trusteddevice.MfaStartResult;
+import com.vpbank.dcp.core.trusteddevice.MfaTransactions;
+import com.vpbank.dcp.core.trusteddevice.MfaTrustCheck;
+import com.vpbank.dcp.core.trusteddevice.MfaTrustRequest;
+import com.vpbank.dcp.core.trusteddevice.MfaUnavailableException;
+import com.vpbank.dcp.core.trusteddevice.InvalidMfaTransactionException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.InvalidCryptographicInputException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JcsCommandDigest;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.MfaReceiptVerifier;

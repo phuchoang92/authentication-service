@@ -1,8 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice;
 
-import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceCaller;
-import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
-import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
+import com.vpbank.dcp.core.session.TrustedDeviceCaller;
+import com.vpbank.dcp.core.trusteddevice.TrustedDeviceService;
+import com.vpbank.dcp.core.trusteddevice.BffCallerAssertions;
 import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.dto.TrustedDeviceInitRequest;
 import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.dto.TrustedDeviceResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.dto.TrustedDeviceVerifyRequest;
@@ -22,7 +22,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * init → verify → confirm of a NEED_TRUSTED_DEVICE login (draft doc 20 §4). Private to the
@@ -40,18 +39,15 @@ public final class TrustedDeviceController {
     private static final int MAX_ASSERTION_CHARS = 4096;
 
     private final BffCallerAssertions assertions;
-    private final TrustedDeviceUseCase trustedDevices;
+    private final TrustedDeviceService trustedDevices;
     private final TrustedDeviceResponseMapper responses;
-    private final JsonMapper json;
     private final Clock clock;
 
-    public TrustedDeviceController(BffCallerAssertions assertions, TrustedDeviceUseCase trustedDevices,
-                                   TrustedDeviceResponseMapper responses, JsonMapper json,
-                                   Clock clock) {
+    public TrustedDeviceController(BffCallerAssertions assertions, TrustedDeviceService trustedDevices,
+                                   TrustedDeviceResponseMapper responses, Clock clock) {
         this.assertions = Objects.requireNonNull(assertions);
         this.trustedDevices = Objects.requireNonNull(trustedDevices);
         this.responses = Objects.requireNonNull(responses);
-        this.json = Objects.requireNonNull(json);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -60,10 +56,7 @@ public final class TrustedDeviceController {
     public ResponseEntity<TrustedDeviceResponse> init(@RequestHeader HttpHeaders headers,
                                                       @Valid @RequestBody TrustedDeviceInitRequest body) {
         Instant now = clock.instant();
-        TrustedDeviceCaller caller = caller(headers, now);
-        String devicePublicJwk = body.devicePublicJwk() == null
-                ? null : json.writeValueAsString(body.devicePublicJwk());
-        return responses.init(trustedDevices.init(caller, devicePublicJwk, now));
+        return responses.init(trustedDevices.init(caller(headers, now), body.clientPublicKey(), now));
     }
 
     @PostMapping(path = "/verify", consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -71,8 +64,8 @@ public final class TrustedDeviceController {
     public ResponseEntity<TrustedDeviceResponse> verify(@RequestHeader HttpHeaders headers,
                                                         @Valid @RequestBody TrustedDeviceVerifyRequest body) {
         Instant now = clock.instant();
-        return responses.verify(trustedDevices.verify(caller(headers, now),
-                body.challengeResponse(), now));
+        return responses.verify(trustedDevices.verify(caller(headers, now), body.enrollmentId(),
+                body.keyExchangeProof(), now));
     }
 
     @PostMapping(path = "/confirm", produces = MediaType.APPLICATION_JSON_VALUE)

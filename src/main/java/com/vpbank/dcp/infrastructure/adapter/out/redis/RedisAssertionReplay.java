@@ -1,9 +1,9 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.replay.AssertionReplay;
-import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
-import com.vpbank.dcp.core.port.out.replay.ReplayReservation;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.replay.AssertionReplay;
+import com.vpbank.dcp.core.replay.ReplayAuthorityUnavailableException;
+import com.vpbank.dcp.core.replay.ReplayReservation;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ReplayKeys;
 import java.time.Clock;
 import java.time.Duration;

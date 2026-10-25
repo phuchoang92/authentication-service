@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
+import com.vpbank.dcp.core.customer.CustomerDirectory;
 import com.vpbank.dcp.infrastructure.adapter.out.customer.CustomerHttpEndpoints;
 import com.vpbank.dcp.infrastructure.adapter.out.customer.CustomerHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.customer.CustomerDirectoryAdapter;

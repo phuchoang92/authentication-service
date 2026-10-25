@@ -1,24 +1,21 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.application.password.CustomerIdentities;
-import com.vpbank.dcp.core.application.password.LoginDevices;
-import com.vpbank.dcp.core.application.password.PasswordAvailabilityPolicy;
-import com.vpbank.dcp.core.application.password.PasswordLoginService;
-import com.vpbank.dcp.core.application.password.PasswordProofs;
-import com.vpbank.dcp.core.application.session.IssueLoginSessionService;
-import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
-import com.vpbank.dcp.core.domain.device.DeviceTrustPolicy;
-import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
-import com.vpbank.dcp.core.port.in.password.PasswordLoginUseCase;
-import com.vpbank.dcp.core.port.in.session.IssueLoginSessionUseCase;
-import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
-import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
-import com.vpbank.dcp.core.port.out.credential.PasswordVerifier;
-import com.vpbank.dcp.core.port.out.password.PasswordProofReplay;
-import com.vpbank.dcp.core.port.out.password.PasswordProofVerifier;
-import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityStore;
-import com.vpbank.dcp.core.port.out.session.SessionAuthority;
-import com.vpbank.dcp.core.port.out.session.SessionCryptography;
+import com.vpbank.dcp.core.password.CustomerIdentities;
+import com.vpbank.dcp.core.password.LoginDevices;
+import com.vpbank.dcp.core.password.PasswordLoginService;
+import com.vpbank.dcp.core.password.PasswordProofs;
+import com.vpbank.dcp.core.session.IssueLoginSessionService;
+import com.vpbank.dcp.core.session.TrustedDeviceSessions;
+import com.vpbank.dcp.core.device.DeviceTrustPolicy;
+import com.vpbank.dcp.core.customer.CheckCustomerLoginEligibilityService;
+import com.vpbank.dcp.core.customer.CustomerOwnerRepository;
+import com.vpbank.dcp.core.device.LoginDeviceRepository;
+import com.vpbank.dcp.core.password.PasswordVerifier;
+import com.vpbank.dcp.core.password.PasswordProofReplay;
+import com.vpbank.dcp.core.password.PasswordProofVerifier;
+import com.vpbank.dcp.core.session.LoginSessionSecurityStore;
+import com.vpbank.dcp.core.session.SessionAuthority;
+import com.vpbank.dcp.core.session.SessionCryptography;
 import com.vpbank.dcp.infrastructure.config.properties.CustomerLoginEligibilityProperties;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
 import java.time.Duration;
@@ -44,7 +41,7 @@ public class PasswordIntegrationConfiguration {
 
     @Bean
     CustomerIdentities customerIdentities(PasswordVerifier passwords,
-                                          CheckCustomerLoginEligibilityUseCase customers,
+                                          CheckCustomerLoginEligibilityService customers,
                                           CustomerOwnerRepository owners,
                                           PasswordFlowProperties policy) {
         return new CustomerIdentities(passwords, customers, owners, policy.customerPolicyVersion());
@@ -56,7 +53,7 @@ public class PasswordIntegrationConfiguration {
     }
 
     @Bean
-    IssueLoginSessionUseCase issueLoginSessionUseCase(LoginSessionSecurityStore security,
+    IssueLoginSessionService issueLoginSessionService(LoginSessionSecurityStore security,
                                                      SessionCryptography cryptography,
                                                      SessionAuthority authority,
                                                      CustomerLoginEligibilityProperties policy) {
@@ -65,12 +62,11 @@ public class PasswordIntegrationConfiguration {
     }
 
     @Bean
-    PasswordLoginUseCase activePasswordLoginUseCase(PasswordProofs proofs,
+    PasswordLoginService passwordLoginService(PasswordProofs proofs,
                                                     CustomerIdentities identities,
                                                     LoginDevices devices,
-                                                    IssueLoginSessionUseCase sessions,
+                                                    IssueLoginSessionService sessions,
                                                     TrustedDeviceSessions trustedDevices) {
-        return new PasswordLoginService(proofs, identities, devices, sessions, trustedDevices,
-                new PasswordAvailabilityPolicy(true));
+        return new PasswordLoginService(proofs, identities, devices, sessions, trustedDevices);
     }
 }

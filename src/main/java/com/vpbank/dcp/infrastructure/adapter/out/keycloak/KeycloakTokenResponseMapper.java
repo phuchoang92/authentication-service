@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.out.keycloak;
 
-import com.vpbank.dcp.core.port.out.credential.PasswordVerifierUnavailableException;
+import com.vpbank.dcp.core.password.PasswordVerifierUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import tools.jackson.databind.JsonNode;
 

@@ -1,8 +1,8 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
-import com.vpbank.dcp.core.port.out.device.DeviceRevocationRecordResult;
-import com.vpbank.dcp.core.port.out.device.DeviceRevocationRepository;
-import com.vpbank.dcp.core.port.out.device.RecordDeviceRevocation;
+import com.vpbank.dcp.core.device.DeviceRevocationRecordResult;
+import com.vpbank.dcp.core.device.DeviceRevocationRepository;
+import com.vpbank.dcp.core.device.RecordDeviceRevocation;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceRevocationCommandDigest;
 import com.vpbank.dcp.infrastructure.persistence.projection.DeviceRevocationAuditView;
 import com.vpbank.dcp.infrastructure.persistence.projection.TrustedDeviceStateView;

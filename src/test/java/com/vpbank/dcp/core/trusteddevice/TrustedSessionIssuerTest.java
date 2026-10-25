@@ -1,0 +1,106 @@
+package com.vpbank.dcp.core.trusteddevice;
+
+import com.vpbank.dcp.core.session.RestrictedSession;
+import com.vpbank.dcp.core.session.PinnedDevice;
+import com.vpbank.dcp.core.session.PinnedCustomer;
+import com.vpbank.dcp.core.device.DeviceStanding;
+import com.vpbank.dcp.core.device.DeviceOwnership;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.vpbank.dcp.core.customer.CustomerAuthenticationState;
+import com.vpbank.dcp.core.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.CustomerStatus;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.session.IssueLoginSessionService;
+import com.vpbank.dcp.core.session.LoginConfirmation;
+import com.vpbank.dcp.core.session.SessionLoginEvidence;
+import com.vpbank.dcp.core.session.SessionLoginResult;
+import com.vpbank.dcp.core.customer.CustomerDirectory;
+import com.vpbank.dcp.core.device.LoginDeviceRepository;
+import com.vpbank.dcp.core.device.LoginDeviceSnapshot;
+import com.vpbank.dcp.core.device.StoredDeviceKey;
+import com.vpbank.dcp.core.session.PreparedSession;
+import com.vpbank.dcp.core.session.LoginKeys;
+import com.vpbank.dcp.core.session.TrustTarget;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+class TrustedSessionIssuerTest {
+    private static final Instant NOW = Instant.parse("2026-10-18T00:00:00Z");
+    private final CustomerDirectory customers = mock(CustomerDirectory.class);
+    private final LoginDeviceRepository devices = mock(LoginDeviceRepository.class);
+    private final IssueLoginSessionService sessions = mock(IssueLoginSessionService.class);
+    private final TrustedSessionIssuer issuer = new TrustedSessionIssuer(customers, devices, sessions);
+    private final Digest32 digest = Digest32.fromBytes(new byte[32]);
+    private final SubjectId owner = new SubjectId(UUID.randomUUID());
+    private final BindingId binding = new BindingId(UUID.randomUUID());
+    private final RestrictedSession trust = new RestrictedSession(UUID.randomUUID(),
+            new PinnedCustomer(owner, new CustomerNumber("CUST-1"), 3),
+            new PinnedDevice("neo-mobile", "ANDROID", new TrustTarget.NewDevice()),
+            new LoginKeys("request-jwk", digest, "response-jwk"), UUID.randomUUID());
+
+    @Test
+    void issuesAnMfaConfirmedSessionBoundToTheLoginKeys() {
+        customer(3, CustomerStatus.ELIGIBLE);
+        device(true, true, true);
+        PreparedSession prepared = mock(PreparedSession.class);
+        ArgumentCaptor<SessionLoginEvidence> evidence = ArgumentCaptor.forClass(SessionLoginEvidence.class);
+        when(sessions.issue(eq(trust.operationId()), eq(NOW), evidence.capture()))
+                .thenReturn(new SessionLoginResult.Active(prepared));
+
+        assertThat(issuer.issue(trust, binding, "device-id-1234567890", NOW))
+                .isEqualTo(new ConfirmTrustedDeviceResult.Active(prepared));
+        assertThat(evidence.getValue().confirmation()).isEqualTo(LoginConfirmation.MFA_CONFIRMED);
+        assertThat(evidence.getValue().keys().requestPublicJwk()).isEqualTo("request-jwk");
+        assertThat(evidence.getValue().keys().responsePublicJwk()).isEqualTo("response-jwk");
+    }
+
+    /** A Customer change since login needs a fresh login, never a session on stale state. */
+    @Test
+    void changedOrBlockedCustomerIsRejected() {
+        device(true, true, true);
+        customer(4, CustomerStatus.ELIGIBLE);
+        assertThat(issuer.issue(trust, binding, "device-id-1234567890", NOW))
+                .isInstanceOf(ConfirmTrustedDeviceResult.Rejected.class);
+        customer(3, CustomerStatus.BLOCKED);
+        assertThat(issuer.issue(trust, binding, "device-id-1234567890", NOW))
+                .isInstanceOf(ConfirmTrustedDeviceResult.Rejected.class);
+        verify(sessions, never()).issue(any(), any(), any());
+    }
+
+    @Test
+    void deviceThatIsNotTheMatchingActivePrimaryIsRejected() {
+        customer(3, CustomerStatus.ELIGIBLE);
+        device(false, true, true);
+        assertThat(issuer.issue(trust, binding, "device-id-1234567890", NOW))
+                .isInstanceOf(ConfirmTrustedDeviceResult.Rejected.class);
+        device(true, true, false);
+        assertThat(issuer.issue(trust, binding, "device-id-1234567890", NOW))
+                .isInstanceOf(ConfirmTrustedDeviceResult.Rejected.class);
+        verify(sessions, never()).issue(any(), any(), any());
+    }
+
+    private void customer(long statusVersion, CustomerStatus status) {
+        when(customers.currentStatus(new CustomerNumber("CUST-1"))).thenReturn(
+                new CustomerAuthenticationState(new CustomerNumber("CUST-1"), status, statusVersion,
+                        status.allowsLogin() ? 0 : statusVersion, NOW));
+    }
+
+    private void device(boolean matches, boolean active, boolean primary) {
+        when(devices.currentByBinding(owner, "neo-mobile", "device-id-1234567890", binding))
+                .thenReturn(Optional.of(new LoginDeviceSnapshot(binding, new DeviceOwnership(owner, "neo-mobile"), "ANDROID",
+                matches, new DeviceStanding(active, NOW.plusSeconds(3600), primary), 1,
+                new StoredDeviceKey(new byte[] {1}, digest))));
+    }
+}

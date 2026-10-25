@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.error;
 
-import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
+import com.vpbank.dcp.core.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.InvalidPasswordLoginRequestException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.RejectedBffCallerException;
 import java.util.UUID;

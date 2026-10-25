@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.persistence.schema;
 
-import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.UUID;
@@ -66,8 +66,8 @@ class RevocationCommandDigestMigrationIT {
                 operationId.toString(), deviceId.toString());
 
         Flyway current = flyway(null);
-        // V16 to V19: V18 drops the empty credential table without touching audit rows.
-        assertThat(current.migrate().migrationsExecuted).isEqualTo(4);
+        // V16 to V20: V18 drops the empty credential table without touching audit rows.
+        assertThat(current.migrate().migrationsExecuted).isEqualTo(5);
         assertThat(jdbc.queryForObject("""
                 SELECT command_digest FROM auth_security_audit_event
                  WHERE operation_id = UUID_TO_BIN(?)

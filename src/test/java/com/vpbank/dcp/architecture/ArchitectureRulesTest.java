@@ -8,8 +8,14 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.lang.ArchRule;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 class ArchitectureRulesTest {
@@ -19,41 +25,39 @@ class ArchitectureRulesTest {
             .should().dependOnClassesThat().resideInAnyPackage(
                     "org.springframework..", "jakarta.persistence..", "jakarta.servlet..",
                     "com.fasterxml.jackson..", "tools.jackson..", "com.nimbusds..",
-                    "org.flywaydb..", "io.lettuce..", "redis.clients..")
+                    "org.flywaydb..", "io.lettuce..", "redis.clients..", "com.vpbank.dcp.hpke..")
             .because("core owns policy and ports, while infrastructure owns technology");
+
+    private static final ArchRule HPKE_LIBRARY_ONLY_IN_CRYPTO_ADAPTERS = noClasses()
+            .that().resideInAPackage("com.vpbank.dcp..")
+            .and().resideOutsideOfPackages("com.vpbank.dcp.hpke..", "..infrastructure.adapter.out.crypto..",
+                    "..infrastructure.config..")
+            .should().dependOnClassesThat().resideInAPackage("com.vpbank.dcp.hpke..")
+            .because("only the crypto adapters and their wiring use the X-Wing library; core sees ports");
 
     private static final ArchRule CORE_DOES_NOT_IMPORT_INFRASTRUCTURE = noClasses()
             .that().resideInAPackage("..core..")
             .should().dependOnClassesThat().resideInAPackage("..infrastructure..")
             .because("dependency direction is infrastructure to core");
 
-    private static final ArchRule SESSION_CORE_DOES_NOT_IMPORT_PASSWORD = noClasses()
-            .that().resideInAnyPackage("..core.session..", "..core.domain.session..",
-                    "..core.application.session..", "..core.port.in.session..", "..core.port.out.session..")
-            .should().dependOnClassesThat().resideInAnyPackage("..core.domain.password..",
-                    "..core.application.password..", "..core.port.in.password..", "..core.port.out.password..")
-            .because("session issuance is independent of authentication methods");
+    /** ARCHITECTURE.md §4: each capability in {@code core/<capability>} imports only these. */
+    private static final Map<String, Set<String>> CAPABILITY_IMPORTS = Map.of(
+            "security", Set.of(),
+            "replay", Set.of("security"),
+            "customer", Set.of("security"),
+            "device", Set.of("customer", "security"),
+            "session", Set.of("customer", "device", "security"),
+            "password", Set.of("session", "device", "customer", "replay", "security"),
+            "trusteddevice", Set.of("session", "device", "customer", "replay", "security"));
 
-    private static final ArchRule PASSWORD_CALLS_SESSION_THROUGH_PORT = noClasses()
-            .that().resideInAPackage("..core.application.password..")
-            .should().dependOnClassesThat().resideInAPackage("..core.application.session..")
-            .because("password calls the shared inbound session port");
-
-    private static final ArchRule CUSTOMER_CORE_DOES_NOT_IMPORT_LOGIN_METHODS = noClasses()
-            .that().resideInAnyPackage("..core.domain.customer..", "..core.application.customer..",
-                    "..core.port.in.customer..", "..core.port.out.customer..")
-            .should().dependOnClassesThat().resideInAnyPackage("..core.application.password..",
-                    "..core.port.in.password..", "..core.port.out.password..", "..core.domain.password..",
-                    "..core.application.biometric..", "..core.port.in.biometric..", "..core.port.out.biometric..",
-                    "..core.domain.biometric..", "..core.application.pin..", "..core.port.in.pin..",
-                    "..core.port.out.pin..", "..core.domain.pin..")
-            .because("Customer eligibility is shared by authentication methods");
-
-    private static final ArchRule LOGIN_METHODS_CALL_CUSTOMER_THROUGH_PORT = noClasses()
-            .that().resideInAnyPackage("..core.application.password..", "..core.application.biometric..",
-                    "..core.application.pin..")
-            .should().dependOnClassesThat().resideInAPackage("..core.application.customer..")
-            .because("login methods call the shared inbound Customer port");
+    private static ArchRule capabilityImportsOnly(String capability, Set<String> allowed) {
+        String[] permitted = Stream.concat(Stream.of(capability), allowed.stream())
+                .map(name -> "..core." + name + "..").toArray(String[]::new);
+        return noClasses().that().resideInAPackage("..core." + capability + "..")
+                .should().dependOnClassesThat(resideInAPackage("..core..")
+                        .and(DescribedPredicate.not(resideInAnyPackage(permitted))))
+                .because("ARCHITECTURE.md §4 lets " + capability + " import only " + allowed);
+    }
 
     private static final ArchRule OUTBOUND_ADAPTER_DOES_NOT_IMPORT_INBOUND_ADAPTER = noClasses()
             .that().resideInAnyPackage("..infrastructure.adapter.out..", "..infrastructure.persistence.adapter..")
@@ -125,6 +129,7 @@ class ArchitectureRulesTest {
     void persistenceResponsibilitiesRemainSeparated() {
         var production = new ClassFileImporter()
                 .withImportOption(new ImportOption.DoNotIncludeTests())
+                .withImportOption(new ImportOption.DoNotIncludeJars())
                 .importPackages("com.vpbank.dcp");
         APPLICATION_AND_CONTROLLER_USE_PORTS.check(production);
         ADAPTERS_DO_NOT_EXECUTE_SQL.check(production);
@@ -158,37 +163,53 @@ class ArchitectureRulesTest {
     }
 
     @Test
-    void sharedSessionBoundaryRemainsIndependentOfPassword() {
+    void movedCapabilitiesImportOnlyDownstream() {
         var production = new ClassFileImporter()
                 .withImportOption(new ImportOption.DoNotIncludeTests()).importPackages("com.vpbank.dcp.core");
-        SESSION_CORE_DOES_NOT_IMPORT_PASSWORD.check(production);
-        PASSWORD_CALLS_SESSION_THROUGH_PORT.check(production);
+        CAPABILITY_IMPORTS.forEach((capability, allowed) ->
+                capabilityImportsOnly(capability, allowed).check(production));
     }
 
     @Test
-    void negativeFixturesDemonstrateSessionBoundaryViolationsAreCaught() {
-        var fixtures = new ClassFileImporter().importPackages("com.vpbank.archfixtures.core.application");
-        assertThatThrownBy(() -> SESSION_CORE_DOES_NOT_IMPORT_PASSWORD.check(fixtures))
-                .isInstanceOf(AssertionError.class);
-        assertThatThrownBy(() -> PASSWORD_CALLS_SESSION_THROUGH_PORT.check(fixtures))
-                .isInstanceOf(AssertionError.class);
+    void coreHoldsOnlyCapabilityPackages() {
+        var production = new ClassFileImporter()
+                .withImportOption(new ImportOption.DoNotIncludeTests()).importPackages("com.vpbank.dcp.core");
+        classes().should().resideInAnyPackage(CAPABILITY_IMPORTS.keySet().stream()
+                        .map(name -> "com.vpbank.dcp.core." + name + "..").toArray(String[]::new))
+                .because("ARCHITECTURE.md §2: no domain/application/port folders, only capabilities")
+                .check(production);
     }
 
     @Test
-    void sharedCustomerBoundaryRemainsIndependentOfLoginMethods() {
-        var production = new ClassFileImporter().withImportOption(new ImportOption.DoNotIncludeTests())
-                .importPackages("com.vpbank.dcp.core");
-        CUSTOMER_CORE_DOES_NOT_IMPORT_LOGIN_METHODS.check(production);
-        LOGIN_METHODS_CALL_CUSTOMER_THROUGH_PORT.check(production);
+    void negativeFixturesDemonstrateCapabilityDirectionViolationsAreCaught() {
+        for (String capability : new String[]{"replay", "customer", "device", "session", "password", "trusteddevice"}) {
+            var fixtures = new ClassFileImporter().importPackages("com.vpbank.archfixtures.core." + capability);
+            assertThatThrownBy(() -> capabilityImportsOnly(capability, CAPABILITY_IMPORTS.get(capability))
+                    .check(fixtures)).as(capability).isInstanceOf(AssertionError.class);
+        }
     }
 
     @Test
-    void negativeFixturesDemonstrateCustomerBoundaryViolationsAreCaught() {
-        var fixtures = new ClassFileImporter().importPackages("com.vpbank.archfixtures.core.application");
-        assertThatThrownBy(() -> CUSTOMER_CORE_DOES_NOT_IMPORT_LOGIN_METHODS.check(fixtures))
+    void cryptoLibraryStaysBehindTheCryptoAdapters() {
+        var production = new ClassFileImporter()
+                .withImportOption(new ImportOption.DoNotIncludeTests())
+                .withImportOption(new ImportOption.DoNotIncludeJars())
+                .importPackages("com.vpbank.dcp");
+        HPKE_LIBRARY_ONLY_IN_CRYPTO_ADAPTERS.check(production);
+    }
+
+    @Test
+    void negativeFixtureDemonstratesCryptoLibraryDependencyIsCaught() {
+        var classes = new ClassFileImporter().importPackages("com.vpbank.dcp.archfixtures.core");
+        assertThatThrownBy(() -> HPKE_LIBRARY_ONLY_IN_CRYPTO_ADAPTERS.check(classes))
                 .isInstanceOf(AssertionError.class);
-        assertThatThrownBy(() -> LOGIN_METHODS_CALL_CUSTOMER_THROUGH_PORT.check(fixtures))
-                .isInstanceOf(AssertionError.class);
+    }
+
+    /** X-Wing runs on JDK 25 primitives; no Bouncy Castle may reach this service, not even transitively. */
+    @Test
+    void noBouncyCastleIsOnTheClasspath() {
+        assertThat(getClass().getClassLoader().getResource("org/bouncycastle/crypto/digests/SHA3Digest.class"))
+                .isNull();
     }
 
     @Test

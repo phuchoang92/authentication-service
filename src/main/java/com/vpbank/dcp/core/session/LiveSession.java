@@ -1,7 +1,6 @@
 package com.vpbank.dcp.core.session;
 
-import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
-import com.vpbank.dcp.core.domain.session.SessionDeadlines;
+import com.vpbank.dcp.core.security.RequestKeyThumbprint;
 
 import java.time.Instant;
 import java.util.Objects;

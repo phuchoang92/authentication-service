@@ -6,9 +6,11 @@ This is the new `authentication-service` source tree, renamed from `authenticati
 
 Core is JDK-only and owns ports. Infrastructure owns Spring, HTTP, JPA, Redis and JOSE. Apply RK01–RK12 to Redis key construction and authority operations. Report implemented and actually executed tests separately.
 
-## Code structure (user-approved 2026-10-18)
+## Code structure (user-approved 2026-10-18; layout consolidated 2026-10-24)
 
-`CLAUDE.md` holds the code-structure rules and their checks (`python3 tools/code-metrics.py`).
+[`ARCHITECTURE.md`](ARCHITECTURE.md) is the single source for layers, packages, capability
+dependency direction and the slice-by-slice migration. `CLAUDE.md` holds the code-level rules
+and their checks (`python3 tools/code-metrics.py`).
 The user approved three overrides of the shared `code-design-rules-and-patterns.md`:
 
 - **Inbound ports (overrides H04):** no `*UseCase` interface in front of an application service.

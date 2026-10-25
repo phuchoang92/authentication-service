@@ -4,12 +4,12 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
-import com.vpbank.dcp.core.port.out.security.DpopExpectation;
-import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
-import com.vpbank.dcp.core.port.out.security.InvalidDpopProofException;
-import com.vpbank.dcp.core.port.out.security.VerifiedDpopProof;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.security.RequestKeyThumbprint;
+import com.vpbank.dcp.core.security.DpopExpectation;
+import com.vpbank.dcp.core.security.DpopProofDecoder;
+import com.vpbank.dcp.core.security.InvalidDpopProofException;
+import com.vpbank.dcp.core.security.VerifiedDpopProof;
 
 import java.net.URI;
 import java.text.ParseException;

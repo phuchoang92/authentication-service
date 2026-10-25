@@ -11,9 +11,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
-import com.vpbank.dcp.core.domain.session.SessionDeadlines;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.security.RequestKeyThumbprint;
+import com.vpbank.dcp.core.session.SessionDeadlines;
 import com.vpbank.dcp.core.session.ExtendSessionCommand;
 import com.vpbank.dcp.core.session.ExtendSessionResult.Extended;
 import com.vpbank.dcp.core.session.ExtendSessionResult.NotExtended;

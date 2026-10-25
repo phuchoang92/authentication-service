@@ -1,19 +1,22 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
-import com.vpbank.dcp.core.domain.customer.CustomerNumber;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.trusteddevice.KeyExchange;
-import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
-import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionStep;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionStore;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionUnavailableException;
-import com.vpbank.dcp.core.port.out.trusteddevice.StoredRestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
-import com.vpbank.dcp.core.port.out.trusteddevice.WrappedServerKey;
+import com.vpbank.dcp.core.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.session.KeyExchange;
+import com.vpbank.dcp.core.session.LoginKeys;
+import com.vpbank.dcp.core.session.PreparedRestrictedSession;
+import com.vpbank.dcp.core.session.RestrictedSession;
+import com.vpbank.dcp.core.session.RestrictedSessionStep;
+import com.vpbank.dcp.core.session.RestrictedSessionStore;
+import com.vpbank.dcp.core.session.RestrictedSessionUnavailableException;
+import com.vpbank.dcp.core.session.PinnedCustomer;
+import com.vpbank.dcp.core.session.PinnedDevice;
+import com.vpbank.dcp.core.session.RestrictedProgress;
+import com.vpbank.dcp.core.session.StoredRestrictedSession;
+import com.vpbank.dcp.core.session.TrustTarget;
+import com.vpbank.dcp.core.session.WrappedServerKey;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
 import java.time.Clock;
 import java.time.Instant;
@@ -54,8 +57,8 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
     private static final Set<String> KNOWN_DEVICE_FIELDS =
             Set.of("deviceBindingId", "deviceKeyJkt", "deviceSecurityVersion");
     private static final Set<String> KEY_EXCHANGE_FIELDS = Set.of("keyExchangeStartedAtMs",
-            "serverKeyId", "serverKeyCiphertext", "serverPublicJwk", "challengeDigest",
-            "devicePublicJwk", "exchangeDeviceKeyJkt");
+            "serverKeyId", "serverKeyCiphertext", "serverPublicKey", "challengeDigest",
+            "devicePublicKey", "exchangeDeviceKeyJkt", "enrollmentId");
     private static final String MFA_FIELD = "mfaTransactionId";
 
     private final StringRedisTemplate redis;
@@ -85,8 +88,8 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
         Objects.requireNonNull(prepared);
         RestrictedSession session = prepared.session();
         String key = key(prepared.sessionId());
-        String listKey = sessions.forSubjectSessions(session.channel(), session.owner());
-        String binding = switch (session.target()) {
+        String listKey = sessions.forSubjectSessions(session.device().channel(), session.customer().owner());
+        String binding = switch (session.device().target()) {
             case TrustTarget.KnownDevice known -> known.bindingId().value().toString();
             case TrustTarget.NewDevice() -> "-";
         };
@@ -157,10 +160,11 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
             Map<String, String> fields = new HashMap<>();
             fields.put("serverKeyId", exchange.serverKey().keyId());
             fields.put("serverKeyCiphertext", base64(exchange.serverKey().ciphertext()));
-            fields.put("serverPublicJwk", exchange.serverPublicJwk());
+            fields.put("serverPublicKey", exchange.serverPublicKey());
             fields.put("challengeDigest", exchange.challengeDigest().base64Url());
-            fields.put("devicePublicJwk", exchange.devicePublicJwk());
+            fields.put("devicePublicKey", exchange.devicePublicKey());
             fields.put("exchangeDeviceKeyJkt", exchange.deviceKeyThumbprint().base64Url());
+            fields.put("enrollmentId", exchange.enrollmentId().toString());
             fields.put("step", RestrictedSessionStep.KEY_EXCHANGE.name());
             redis.opsForHash().putAll(key, fields);
             return true;
@@ -262,18 +266,21 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
         KeyExchange exchange = step == RestrictedSessionStep.OPEN ? null : new KeyExchange(
                 new WrappedServerKey(f.get("serverKeyId"),
                         Base64.getUrlDecoder().decode(f.get("serverKeyCiphertext"))),
-                f.get("serverPublicJwk"), Digest32.fromBase64Url(f.get("challengeDigest")),
-                f.get("devicePublicJwk"), Digest32.fromBase64Url(f.get("exchangeDeviceKeyJkt")));
-        return Optional.of(new StoredRestrictedSession(UUID.fromString(f.get("sessionId")),
-                UUID.fromString(f.get("operationId")),
-                new SubjectId(UUID.fromString(f.get("subjectId"))),
-                new CustomerNumber(f.get("customerNumber")),
-                Long.parseLong(f.get("customerStatusVersion")), f.get("channel"), target,
-                Digest32.fromBase64Url(f.get("deviceIdDigest")),
+                f.get("serverPublicKey"), Digest32.fromBase64Url(f.get("challengeDigest")),
+                f.get("devicePublicKey"), Digest32.fromBase64Url(f.get("exchangeDeviceKeyJkt")),
+                UUID.fromString(f.get("enrollmentId")));
+        RestrictedSession login = new RestrictedSession(UUID.fromString(f.get("operationId")),
+                new PinnedCustomer(new SubjectId(UUID.fromString(f.get("subjectId"))),
+                        new CustomerNumber(f.get("customerNumber")),
+                        Long.parseLong(f.get("customerStatusVersion"))),
+                new PinnedDevice(f.get("channel"), f.get("platform"), target),
                 new LoginKeys(f.get("requestPublicJwk"), Digest32.fromBase64Url(f.get("requestKeyJkt")),
                         f.get("responsePublicJwk")),
-                f.get("platform"), UUID.fromString(f.get("generation")), expiresAt, step,
-                Integer.parseInt(f.get("verifyAttempts")), exchange, f.get(MFA_FIELD)));
+                UUID.fromString(f.get("generation")));
+        return Optional.of(new StoredRestrictedSession(UUID.fromString(f.get("sessionId")), login,
+                Digest32.fromBase64Url(f.get("deviceIdDigest")), expiresAt,
+                new RestrictedProgress(step, Integer.parseInt(f.get("verifyAttempts")), exchange,
+                        f.get(MFA_FIELD))));
     }
 
     private boolean stored(String key, Map<String, String> expected) {
@@ -307,12 +314,12 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
         fields.put("sessionId", prepared.sessionId().toString());
         fields.put("secretDigest", prepared.secretDigest().base64Url());
         fields.put("operationId", session.operationId().toString());
-        fields.put("subjectId", session.owner().value().toString());
-        fields.put("customerNumber", session.customerNumber().value());
-        fields.put("customerStatusVersion", Long.toString(session.customerStatusVersion()));
-        fields.put("channel", session.channel());
+        fields.put("subjectId", session.customer().owner().value().toString());
+        fields.put("customerNumber", session.customer().number().value());
+        fields.put("customerStatusVersion", Long.toString(session.customer().statusVersion()));
+        fields.put("channel", session.device().channel());
         fields.put("deviceIdDigest", prepared.deviceIdDigest().base64Url());
-        fields.put("platform", session.platform());
+        fields.put("platform", session.device().platform());
         fields.put("requestKeyJkt", session.keys().requestKeyThumbprint().base64Url());
         fields.put("requestPublicJwk", session.keys().requestPublicJwk());
         fields.put("responsePublicJwk", session.keys().responsePublicJwk());
@@ -321,7 +328,7 @@ public final class RedisRestrictedSessionStore implements RestrictedSessionStore
         fields.put("expiresAtMs", Long.toString(prepared.expiresAt().toEpochMilli()));
         fields.put("verifyAttempts", "0");
         // Missing and empty differ (contract 16): a new device has no binding fields at all.
-        switch (session.target()) {
+        switch (session.device().target()) {
             case TrustTarget.NewDevice() -> fields.put("target", "NEW_DEVICE");
             case TrustTarget.KnownDevice known -> {
                 fields.put("target", "KNOWN_DEVICE");

@@ -1,18 +1,18 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.domain.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.CustomerNumber;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
-import com.vpbank.dcp.core.domain.customer.CustomerStatus;
-import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
-import com.vpbank.dcp.core.port.in.customer.CheckCustomerLoginEligibilityUseCase;
-import com.vpbank.dcp.core.port.in.customer.CustomerLoginEligibilityResult;
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
-import com.vpbank.dcp.core.port.out.customer.CustomerResolution;
+import com.vpbank.dcp.core.customer.CustomerAuthenticationState;
+import com.vpbank.dcp.core.customer.CustomerStatus;
+import com.vpbank.dcp.core.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.customer.CheckCustomerLoginEligibilityService;
+import com.vpbank.dcp.core.customer.CustomerLoginEligibilityResult;
+import com.vpbank.dcp.core.customer.CustomerDirectory;
+import com.vpbank.dcp.core.customer.CustomerResolution;
 import com.vpbank.dcp.infrastructure.config.properties.PasswordFlowProperties;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -29,14 +29,14 @@ class CustomerLoginConfigurationTest {
     @Test
     void assemblesTheSharedUseCaseWithCustomerFreshnessConfiguration() {
         context.withPropertyValues("auth.customer.status-max-age-ms=1000").run(started -> {
-            assertThat(started).hasNotFailed().hasSingleBean(CheckCustomerLoginEligibilityUseCase.class)
+            assertThat(started).hasNotFailed().hasSingleBean(CheckCustomerLoginEligibilityService.class)
                     .doesNotHaveBean(PasswordFlowProperties.class);
             verifyNoInteractions(directory);
             var identity = new VerifiedProviderIdentity("https://auth.bank.test/realms/mobile", "kc-a");
             Instant checkedAt = Instant.parse("2026-10-13T00:00:00Z");
             var customer = new CustomerAuthenticationState(new CustomerNumber("CUST-1"), CustomerStatus.ELIGIBLE, 1, 0, checkedAt);
             when(directory.resolve(identity)).thenReturn(new CustomerResolution.Found(customer));
-            var customers = started.getBean(CheckCustomerLoginEligibilityUseCase.class);
+            var customers = started.getBean(CheckCustomerLoginEligibilityService.class);
             assertThat(customers.checkEligibility(identity, checkedAt.plusMillis(999)))
                     .isEqualTo(new CustomerLoginEligibilityResult.Eligible(customer));
             assertThat(customers.checkEligibility(identity, checkedAt.plusMillis(1000)))

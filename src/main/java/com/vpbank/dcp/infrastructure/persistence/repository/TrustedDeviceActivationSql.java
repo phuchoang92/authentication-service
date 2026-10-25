@@ -86,7 +86,7 @@ final class TrustedDeviceActivationSql {
                server_key_id, server_key_ciphertext, created_at, updated_at)
             VALUES (UUID_TO_BIN(:bindingId), UUID_TO_BIN(:customerId), :channel, :lookup,
                     :lookupKeyId, :deviceIdCiphertext, :deviceIdKeyId, :platform, :label,
-                    'ACTIVE', :publicKey, :publicKeyHash, 'ES256', :trustMethod,
+                    'ACTIVE', :publicKey, :publicKeyHash, 'XWING-MLKEM768-X25519', :trustMethod,
                     :trustPolicyVersion, 'MFA_KEY_POSSESSION', :now, :expiresAt, :now,
                     :serverKeyId, :serverKeyCiphertext, :now, :now)
             """;

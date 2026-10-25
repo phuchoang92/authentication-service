@@ -1,10 +1,10 @@
 package com.vpbank.dcp.infrastructure.adapter.out.customer;
 
-import com.vpbank.dcp.core.domain.customer.CustomerNumber;
-import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
-import com.vpbank.dcp.core.domain.customer.CustomerStatus;
-import com.vpbank.dcp.core.domain.customer.InvalidCustomerStateException;
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
+import com.vpbank.dcp.core.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.CustomerAuthenticationState;
+import com.vpbank.dcp.core.customer.CustomerStatus;
+import com.vpbank.dcp.core.customer.InvalidCustomerStateException;
+import com.vpbank.dcp.core.customer.CustomerDirectoryUnavailableException;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;

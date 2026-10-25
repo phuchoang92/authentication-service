@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.persistence.codec;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.security.Digest32;
 import java.util.Objects;
 
 /** Storage representation, not a device-possession proof. */

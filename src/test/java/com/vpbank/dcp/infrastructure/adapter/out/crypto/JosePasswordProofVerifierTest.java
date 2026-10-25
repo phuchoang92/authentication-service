@@ -2,8 +2,8 @@ package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import com.vpbank.dcp.core.port.out.password.InvalidPasswordProofException;
-import com.vpbank.dcp.core.port.out.security.DpopExpectation;
+import com.vpbank.dcp.core.password.InvalidPasswordProofException;
+import com.vpbank.dcp.core.security.DpopExpectation;
 
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -19,11 +19,11 @@ import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jose.util.Base64URL;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.password.PasswordOperationContext;
-import com.vpbank.dcp.core.port.out.password.PasswordProofRequest;
-import com.vpbank.dcp.core.port.out.password.PasswordWireProofs;
-import com.vpbank.dcp.core.port.out.password.StoredDeviceKey;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.password.PasswordOperationContext;
+import com.vpbank.dcp.core.password.PasswordProofRequest;
+import com.vpbank.dcp.core.password.PasswordWireProofs;
+import com.vpbank.dcp.core.device.StoredDeviceKey;
 import com.vpbank.dcp.testsupport.ContractVectors;
 import java.net.URI;
 import java.time.Instant;
@@ -78,6 +78,21 @@ class JosePasswordProofVerifierTest {
         assertThatThrownBy(() -> verifier.verify(request(vector, "alice", responseKey()),
                 new StoredDeviceKey(wrongKey,
                         Digest32.fromBase64Url(vector.path("deviceKeyJkt").asText()))))
+                .isInstanceOf(InvalidPasswordProofException.class);
+    }
+
+    /**
+     * A device trusted through the X-Wing key exchange stores a key that cannot sign, so its
+     * ES256 device proof cannot be checked. Until that login path is decided it is refused.
+     */
+    @Test
+    void deviceTrustedWithAnXWingKeyIsRefused() throws Exception {
+        JsonNode vector = ContractVectors.loadPasswordOneShot();
+        byte[] xWing = com.vpbank.dcp.hpke.XWingKeyPair.generate()
+                .publicKey().toBytes();
+
+        assertThatThrownBy(() -> verifier.verify(request(vector, "alice", responseKey()),
+                new StoredDeviceKey(xWing, digests.sha256(xWing))))
                 .isInstanceOf(InvalidPasswordProofException.class);
     }
 

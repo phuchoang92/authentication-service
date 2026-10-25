@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.persistence.codec;
 
-import com.vpbank.dcp.core.port.out.device.RecordDeviceRevocation;
+import com.vpbank.dcp.core.device.RecordDeviceRevocation;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;

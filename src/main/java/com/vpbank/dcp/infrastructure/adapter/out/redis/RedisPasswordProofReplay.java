@@ -1,9 +1,9 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
-import com.vpbank.dcp.core.port.out.password.PasswordProofReplay;
-import com.vpbank.dcp.core.port.out.password.PasswordReplayAttempt;
-import com.vpbank.dcp.core.port.out.password.PasswordReplayResult;
-import com.vpbank.dcp.core.port.out.replay.ReplayAuthorityUnavailableException;
+import com.vpbank.dcp.core.password.PasswordProofReplay;
+import com.vpbank.dcp.core.password.PasswordReplayAttempt;
+import com.vpbank.dcp.core.password.PasswordReplayResult;
+import com.vpbank.dcp.core.replay.ReplayAuthorityUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.PasswordProofReplayKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ReplayKeys;
 import java.time.Duration;

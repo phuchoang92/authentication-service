@@ -1,15 +1,15 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
 import com.nimbusds.jose.jwk.ECKey;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.session.SessionDeadlines;
-import com.vpbank.dcp.core.port.out.session.SessionCryptography;
-import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
-import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
-import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
-import com.vpbank.dcp.core.port.out.session.PreparedSession;
-import com.vpbank.dcp.core.port.out.session.SessionDelivery;
-import com.vpbank.dcp.core.port.out.session.SessionCandidate;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.session.SessionDeadlines;
+import com.vpbank.dcp.core.session.SessionCryptography;
+import com.vpbank.dcp.core.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.session.SessionActivationContext;
+import com.vpbank.dcp.core.session.SessionKeyBindings;
+import com.vpbank.dcp.core.session.PreparedSession;
+import com.vpbank.dcp.core.session.SessionDelivery;
+import com.vpbank.dcp.core.session.SessionCandidate;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.text.ParseException;

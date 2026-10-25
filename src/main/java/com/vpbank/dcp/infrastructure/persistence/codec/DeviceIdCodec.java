@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.persistence.codec;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.security.Digest32;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;

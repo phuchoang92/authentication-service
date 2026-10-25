@@ -1,8 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.security;
 
-import com.vpbank.dcp.core.port.out.security.DpopExpectation;
-import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
-import com.vpbank.dcp.core.port.out.security.InvalidDpopProofException;
+import com.vpbank.dcp.core.security.DpopExpectation;
+import com.vpbank.dcp.core.security.DpopProofDecoder;
+import com.vpbank.dcp.core.security.InvalidDpopProofException;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.adapter.in.web.security.constant.DpopRequestAttributes;
 import jakarta.servlet.FilterChain;

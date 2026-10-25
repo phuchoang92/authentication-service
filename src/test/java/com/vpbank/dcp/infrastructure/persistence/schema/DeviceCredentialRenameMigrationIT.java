@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.schema;
 
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

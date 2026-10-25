@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.out.customer;
 
-import com.vpbank.dcp.core.domain.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.CustomerNumber;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,10 +9,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.vpbank.dcp.core.domain.customer.CustomerStatus;
-import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectoryUnavailableException;
-import com.vpbank.dcp.core.port.out.customer.CustomerResolution;
+import com.vpbank.dcp.core.customer.CustomerStatus;
+import com.vpbank.dcp.core.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.customer.CustomerDirectoryUnavailableException;
+import com.vpbank.dcp.core.customer.CustomerResolution;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpRequestFailedException;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpSettings;

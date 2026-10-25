@@ -2,13 +2,13 @@ package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
-import com.vpbank.dcp.core.port.out.password.PasswordProofIds;
-import com.vpbank.dcp.core.port.out.password.PasswordReplayAttempt;
-import com.vpbank.dcp.core.port.out.password.PasswordReplayResult;
-import com.vpbank.dcp.core.port.out.replay.ReplayAttempt;
-import com.vpbank.dcp.core.port.out.replay.ReplayReservation;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.security.RequestKeyThumbprint;
+import com.vpbank.dcp.core.password.PasswordProofIds;
+import com.vpbank.dcp.core.password.PasswordReplayAttempt;
+import com.vpbank.dcp.core.password.PasswordReplayResult;
+import com.vpbank.dcp.core.replay.ReplayAttempt;
+import com.vpbank.dcp.core.replay.ReplayReservation;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.PasswordProofReplayKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.ReplayKeys;

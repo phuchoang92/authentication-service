@@ -10,9 +10,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
-import com.vpbank.dcp.core.domain.session.SessionDeadlines;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.session.ExtendSessionResult.Extended;
 import com.vpbank.dcp.core.session.ExtendSessionResult.NotExtended;
 import com.vpbank.dcp.core.session.ExtendSessionResult.Reason;

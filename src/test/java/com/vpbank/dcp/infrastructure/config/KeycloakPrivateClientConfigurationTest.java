@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
-import com.vpbank.dcp.core.port.out.credential.PasswordVerifier;
+import com.vpbank.dcp.core.password.PasswordVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakClientAuthentication;
 import com.vpbank.dcp.infrastructure.adapter.out.keycloak.KeycloakClientSecretAuthentication;

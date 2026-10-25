@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.config;
 
-import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
+import com.vpbank.dcp.core.security.DpopProofDecoder;
 import com.vpbank.dcp.infrastructure.adapter.in.web.ExternalUriPolicy;
 import com.vpbank.dcp.infrastructure.adapter.in.web.security.DpopProofFilter;
 import com.vpbank.dcp.infrastructure.adapter.in.web.security.SecureWorkloadAuthorizationManager;

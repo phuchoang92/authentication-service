@@ -3,7 +3,7 @@ package com.vpbank.dcp.infrastructure.persistence.codec;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.security.Digest32;
 import com.vpbank.dcp.infrastructure.persistence.repository.InvalidSessionPersistenceException;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;

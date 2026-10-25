@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.session;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.domain.security.RequestKeyThumbprint;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.security.RequestKeyThumbprint;
 import com.vpbank.dcp.core.session.ExtendSessionCommand;
 import com.vpbank.dcp.core.session.ExtendSessionResult;
 import com.vpbank.dcp.core.session.ExtendSessionService;

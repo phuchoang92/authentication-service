@@ -1,11 +1,13 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
-import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
-import com.vpbank.dcp.core.port.out.device.LoginDeviceSnapshot;
-import com.vpbank.dcp.core.port.out.device.LoginDeviceUnavailableException;
-import com.vpbank.dcp.core.port.out.password.StoredDeviceKey;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.device.LoginDeviceRepository;
+import com.vpbank.dcp.core.device.DeviceOwnership;
+import com.vpbank.dcp.core.device.DeviceStanding;
+import com.vpbank.dcp.core.device.LoginDeviceSnapshot;
+import com.vpbank.dcp.core.device.LoginDeviceUnavailableException;
+import com.vpbank.dcp.core.device.StoredDeviceKey;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdCodec;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdLookup;
 import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
@@ -38,7 +40,7 @@ public final class JpaLoginDeviceAdapter implements LoginDeviceRepository {
         try {
             return publicIds.decode(publicBindingId).flatMap(devices::keyForProof)
                     .map(key -> new StoredDeviceKey(key.publicKey(),
-                            com.vpbank.dcp.core.domain.security.Digest32.fromBytes(key.thumbprint())));
+                            com.vpbank.dcp.core.security.Digest32.fromBytes(key.thumbprint())));
         } catch (DataAccessException | TransactionException failure) {
             throw new LoginDeviceUnavailableException(failure);
         }
@@ -74,10 +76,12 @@ public final class JpaLoginDeviceAdapter implements LoginDeviceRepository {
                 matches = true;
             }
         }
-        return new LoginDeviceSnapshot(new BindingId(device.bindingId()), new SubjectId(device.customerId()), device.channel(),
-                device.platform(), matches, "ACTIVE".equals(device.status()), device.primary(),
-                device.expiresAt(), device.securityVersion(), new StoredDeviceKey(
-                device.publicKey(), com.vpbank.dcp.core.domain.security.Digest32.fromBytes(
+        return new LoginDeviceSnapshot(new BindingId(device.bindingId()),
+                new DeviceOwnership(new SubjectId(device.customerId()), device.channel()),
+                device.platform(), matches,
+                new DeviceStanding("ACTIVE".equals(device.status()), device.expiresAt(), device.primary()),
+                device.securityVersion(), new StoredDeviceKey(
+                device.publicKey(), com.vpbank.dcp.core.security.Digest32.fromBytes(
                         device.publicKeyHash())));
     }
 }

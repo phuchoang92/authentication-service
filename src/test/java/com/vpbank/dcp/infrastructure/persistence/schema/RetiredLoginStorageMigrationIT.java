@@ -37,7 +37,7 @@ class RetiredLoginStorageMigrationIT {
     @Test
     void freshDatabaseRetainsOnlyCurrentCustomerAndDeviceTables() {
         Flyway flyway = flyway(FRESH);
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(19);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(20);
 
         JdbcTemplate jdbc = jdbc(FRESH);
         Set<String> tables = Set.copyOf(jdbc.queryForList("""

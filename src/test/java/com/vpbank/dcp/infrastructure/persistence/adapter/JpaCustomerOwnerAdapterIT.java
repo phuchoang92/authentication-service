@@ -1,15 +1,15 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
-import com.vpbank.dcp.core.domain.customer.CustomerNumber;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
-import com.vpbank.dcp.core.domain.customer.CustomerOwnerPolicy;
-import com.vpbank.dcp.core.domain.customer.CustomerStatus;
-import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
-import com.vpbank.dcp.core.port.out.customer.CustomerOwnerAcceptance;
-import com.vpbank.dcp.core.port.out.customer.CustomerOwnerRepository;
+import com.vpbank.dcp.core.customer.CustomerAuthenticationState;
+import com.vpbank.dcp.core.customer.CustomerOwnerPolicy;
+import com.vpbank.dcp.core.customer.CustomerStatus;
+import com.vpbank.dcp.core.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.customer.CustomerOwnerAcceptance;
+import com.vpbank.dcp.core.customer.CustomerOwnerRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.CustomerOwnerPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.entity.SecurityAuditEventEntity;
 import com.vpbank.dcp.infrastructure.persistence.repository.SecurityAuditJpaRepository;

@@ -1,7 +1,7 @@
 package com.vpbank.dcp.infrastructure.persistence.repository;
 
-import com.vpbank.dcp.core.domain.customer.CustomerAuthenticationState;
-import com.vpbank.dcp.core.domain.customer.VerifiedProviderIdentity;
+import com.vpbank.dcp.core.customer.CustomerAuthenticationState;
+import com.vpbank.dcp.core.customer.VerifiedProviderIdentity;
 import com.vpbank.dcp.infrastructure.persistence.projection.CustomerOwnerView;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;

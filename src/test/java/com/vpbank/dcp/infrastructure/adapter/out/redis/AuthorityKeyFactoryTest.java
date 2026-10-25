@@ -3,14 +3,14 @@ package com.vpbank.dcp.infrastructure.adapter.out.redis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.security.Digest32;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.InvalidAuthorityScopeException;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.RuntimeKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.InvalidCryptographicInputException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.customer.SubjectId;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 

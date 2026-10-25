@@ -11,7 +11,7 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.port.out.credential.PasswordVerifierUnavailableException;
+import com.vpbank.dcp.core.password.PasswordVerifierUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import java.time.Clock;
 import java.time.Instant;

@@ -1,5 +1,7 @@
 # Luật code — Authentication Service
 
+**Tầng và package:** [`ARCHITECTURE.md`](ARCHITECTURE.md) là nguồn duy nhất (2026-10-24).
+
 **Thứ tự ưu tiên:** hợp đồng DD target (API, bảo mật, dữ liệu) > `AGENTS.md` > file này >
 tài liệu luật chung `code-design-rules-and-patterns.md`. Ba override của file này (§2, §3, §5)
 đã được người dùng duyệt ngày 2026-10-18 và được ghi trong `AGENTS.md` (§ Code structure).
@@ -26,39 +28,18 @@ số này tăng.** Luật không kiểm được bằng lệnh là lời khuyên
 - Kết cục mong đợi (từ chối, đang chờ MFA, hết hạn, xung đột) là **giá trị**, không phải exception.
 - Persistence: adapter giữ transaction, repository chỉ chạy SQL (luật trong `AGENTS.md`).
 
-## 2. Package theo năng lực (override bố cục 4 cây vai trò)
+## 2. Tầng, package và hướng phụ thuộc
 
-```text
-core/<năng lực>/        service + port ra + kết quả + giá trị domain của năng lực đó
-  ví dụ: core/password, core/trusteddevice, core/session, core/customer, core/device
-infrastructure/...      vẫn chia theo công nghệ: adapter/in/web, adapter/out/redis, persistence/...
-```
-
-- Không có `core/domain`, `core/application`, `core/port/in`, `core/port/out` cho code mới.
-- Giá trị dùng chung nằm ở năng lực **sở hữu nghĩa** của nó (`SubjectId` ở `core/customer`,
-  `Digest32` ở `core/security`); năng lực khác import. Không có thư mục `shared`/`common`.
-- Phụ thuộc giữa các năng lực đi **một chiều** và được ArchUnit kiểm (ví dụ: `session` không
-  import `password`; `customer` không import phương thức đăng nhập). Gọi nhau bằng class.
-- Chuyển dần theo từng lát, mỗi lát một năng lực, build xanh sau mỗi lát. Khi chuyển, viết lại
-  các rule ArchUnit gắn với tên package cũ (`PASSWORD_CALLS_SESSION_THROUGH_PORT`,
-  `LOGIN_METHODS_CALL_CUSTOMER_THROUGH_PORT`, `SESSION_CORE_DOES_NOT_IMPORT_PASSWORD`,
-  `CUSTOMER_CORE_DOES_NOT_IMPORT_LOGIN_METHODS`) thành rule hướng phụ thuộc giữa các năng lực.
-
-**Kiểm:** `ls src/main/java/com/vpbank/dcp/core` — đích cuối là chỉ có tên năng lực.
+Chuyển sang [`ARCHITECTURE.md`](ARCHITECTURE.md) (2026-10-24): tầng nào giữ gì, mỗi năng lực
+`core/<năng lực>/` gồm những loại kiểu nào, bảng hướng phụ thuộc giữa các năng lực, thứ tự các
+lát chuyển và checklist mỗi lát. File này không lặp lại các luật đó.
 
 ## 3. Interface chỉ ở biên thật (override H04)
 
-Tạo interface **khi và chỉ khi**:
+Xem [`ARCHITECTURE.md` §2](ARCHITECTURE.md#2-inside-one-core-capability). Không có interface
+`*UseCase` phía vào; controller gọi thẳng class service.
 
-- (a) core cần gọi thứ nằm ngoài core: MySQL, Valkey, HTTP (Keycloak, MFA, Customer), hoặc thư
-  viện core không được import (JOSE/Nimbus); hoặc
-- (b) đã có ≥ 2 implementation thật trong `src/main`.
-
-Không tạo interface cho: use case phía vào, service gọi service, mapper hoặc policy thuần.
-Controller gọi thẳng class service.
-
-**Kiểm:** `python3 tools/code-metrics.py ports` — mỗi dòng in ra là một interface có mọi
-implementation nằm trong core, tức không phải biên. Danh sách phải rỗng, trừ trường hợp (b).
+**Kiểm:** `python3 tools/code-metrics.py ports` — danh sách phải rỗng.
 
 ## 4. Một khái niệm — một kiểu
 

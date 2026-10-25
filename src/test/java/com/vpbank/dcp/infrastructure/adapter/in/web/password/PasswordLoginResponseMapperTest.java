@@ -1,18 +1,18 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
-import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
-import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
-import com.vpbank.dcp.core.port.out.session.PreparedSession;
-import com.vpbank.dcp.core.port.out.session.SessionDelivery;
-import com.vpbank.dcp.core.domain.session.SessionDeadlines;
-import com.vpbank.dcp.core.domain.session.SessionAssurance;
+import com.vpbank.dcp.core.password.PasswordLoginResult;
+import com.vpbank.dcp.core.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.session.SessionActivationContext;
+import com.vpbank.dcp.core.session.PreparedSession;
+import com.vpbank.dcp.core.session.SessionDelivery;
+import com.vpbank.dcp.core.session.SessionDeadlines;
+import com.vpbank.dcp.core.session.SessionAssurance;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordNeedTrustedDeviceResponse;

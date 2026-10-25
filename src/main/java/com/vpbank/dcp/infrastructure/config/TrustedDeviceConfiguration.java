@@ -1,19 +1,20 @@
 package com.vpbank.dcp.infrastructure.config;
 
 import com.nimbusds.jose.jwk.ECKey;
-import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceService;
-import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
-import com.vpbank.dcp.core.application.trusteddevice.TrustedSessionIssuer;
-import com.vpbank.dcp.core.port.in.session.IssueLoginSessionUseCase;
-import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
-import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
-import com.vpbank.dcp.core.port.out.mfa.MfaTransactions;
-import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionCryptography;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionStore;
-import com.vpbank.dcp.core.port.out.trusteddevice.ServerKeyExchange;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustedDeviceRecords;
+import com.vpbank.dcp.core.trusteddevice.TrustedDeviceService;
+import com.vpbank.dcp.core.session.TrustedDeviceSessions;
+import com.vpbank.dcp.core.trusteddevice.TrustedSessionIssuer;
+import com.vpbank.dcp.core.session.IssueLoginSessionService;
+import com.vpbank.dcp.core.customer.CustomerDirectory;
+import com.vpbank.dcp.core.device.LoginDeviceRepository;
+import com.vpbank.dcp.core.trusteddevice.MfaTransactions;
+import com.vpbank.dcp.core.trusteddevice.BffCallerAssertions;
+import com.vpbank.dcp.core.session.RestrictedSessionCryptography;
+import com.vpbank.dcp.core.session.RestrictedSessionStore;
+import com.vpbank.dcp.core.trusteddevice.ServerKeyExchange;
+import com.vpbank.dcp.core.trusteddevice.TrustedDeviceRecords;
+import com.vpbank.dcp.hpke.ServerKeyWrapper;
+import com.vpbank.dcp.hpke.XWingHpke;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
 import com.vpbank.dcp.infrastructure.adapter.in.web.trusteddevice.TrustedDeviceResponseMapper;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
@@ -25,7 +26,6 @@ import com.vpbank.dcp.infrastructure.adapter.out.crypto.LengthPrefixedSigningInp
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.MfaReceiptVerifier;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.RestrictedSessionCryptoAdapter;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.ServerKeyExchangeAdapter;
-import com.vpbank.dcp.infrastructure.adapter.out.crypto.ServerKeyWrappingKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.infrastructure.adapter.out.http.ExternalHttpClient;
@@ -98,16 +98,15 @@ public class TrustedDeviceConfiguration {
     }
 
     @Bean
-    ServerKeyExchange serverKeyExchange(TrustedDeviceProperties properties, StrictJoseJson json,
-                                        Sha256Digests digests,
+    ServerKeyExchange serverKeyExchange(TrustedDeviceProperties properties, Sha256Digests digests,
                                         LengthPrefixedSigningInputEncoder encoding,
                                         SecureRandom random) {
         var wrapping = properties.serverKeyWrapping();
         Map<String, byte[]> keys = new HashMap<>();
         try {
             wrapping.keysBase64().forEach((id, key) -> keys.put(id, Base64.getDecoder().decode(key)));
-            return new ServerKeyExchangeAdapter(new ServerKeyWrappingKeys(wrapping.activeKeyId(), keys),
-                    json, digests, encoding, random);
+            return new ServerKeyExchangeAdapter(new XWingHpke(),
+                    new ServerKeyWrapper(wrapping.activeKeyId(), keys), digests, encoding, random);
         } catch (IllegalArgumentException failure) {
             throw new InvalidLoginIntegrationConfigurationException(failure);
         } finally {
@@ -149,11 +148,11 @@ public class TrustedDeviceConfiguration {
     }
 
     @Bean
-    TrustedDeviceUseCase trustedDeviceUseCase(TrustedDeviceSessions sessions, ServerKeyExchange keys,
+    TrustedDeviceService trustedDeviceService(TrustedDeviceSessions sessions, ServerKeyExchange keys,
                                               MfaTransactions mfa, TrustedDeviceRecords records,
                                               CustomerDirectory customers,
                                               LoginDeviceRepository devices,
-                                              IssueLoginSessionUseCase issuance,
+                                              IssueLoginSessionService issuance,
                                               TrustedDeviceProperties properties) {
         return new TrustedDeviceService(sessions, keys, mfa, records,
                 new TrustedSessionIssuer(customers, devices, issuance),
@@ -175,8 +174,7 @@ public class TrustedDeviceConfiguration {
     }
 
     @Bean
-    TrustedDeviceResponseMapper trustedDeviceResponseMapper(PasswordLoginResponseMapper sessions,
-                                                            JsonMapper json) {
-        return new TrustedDeviceResponseMapper(sessions, json);
+    TrustedDeviceResponseMapper trustedDeviceResponseMapper(PasswordLoginResponseMapper sessions) {
+        return new TrustedDeviceResponseMapper(sessions);
     }
 }

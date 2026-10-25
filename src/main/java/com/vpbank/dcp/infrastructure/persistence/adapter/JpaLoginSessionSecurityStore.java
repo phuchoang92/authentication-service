@@ -1,13 +1,13 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
-import com.vpbank.dcp.core.port.out.session.LoginSessionSecurity;
-import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityStore;
-import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityUnavailableException;
-import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
-import com.vpbank.dcp.core.port.out.session.StoredCustomerSecurity;
-import com.vpbank.dcp.core.port.out.session.StoredDeviceSecurity;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.session.LoginSessionSecurity;
+import com.vpbank.dcp.core.session.LoginSessionSecurityStore;
+import com.vpbank.dcp.core.session.LoginSessionSecurityUnavailableException;
+import com.vpbank.dcp.core.session.SessionSecurityVersions;
+import com.vpbank.dcp.core.session.StoredCustomerSecurity;
+import com.vpbank.dcp.core.device.DeviceStanding;
 import com.vpbank.dcp.infrastructure.persistence.repository.LoginSessionSecurityPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.projection.LoginSessionSecurityView;
 import java.time.ZoneOffset;
@@ -40,7 +40,7 @@ public final class JpaLoginSessionSecurityStore implements LoginSessionSecurityS
             return current.map(row -> new LoginSessionSecurity(
                     new StoredCustomerSecurity("ELIGIBLE".equals(row.customerStatus()),
                             row.customerStatusVersion()),
-                    new StoredDeviceSecurity("ACTIVE".equals(row.deviceStatus()),
+                    new DeviceStanding("ACTIVE".equals(row.deviceStatus()),
                             row.deviceExpiresAt().toInstant(ZoneOffset.UTC), row.devicePrimary()),
                     new SessionSecurityVersions(row.customerSecurityVersion(),
                             row.credentialSecurityVersion(), row.deviceSecurityVersion()),

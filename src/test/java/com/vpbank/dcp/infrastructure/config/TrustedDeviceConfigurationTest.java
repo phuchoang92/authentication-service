@@ -5,13 +5,13 @@ import static org.mockito.Mockito.mock;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
-import com.vpbank.dcp.core.application.trusteddevice.TrustedDeviceSessions;
-import com.vpbank.dcp.core.port.in.session.IssueLoginSessionUseCase;
-import com.vpbank.dcp.core.port.in.trusteddevice.TrustedDeviceUseCase;
-import com.vpbank.dcp.core.port.out.customer.CustomerDirectory;
-import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
+import com.vpbank.dcp.core.session.TrustedDeviceSessions;
+import com.vpbank.dcp.core.session.IssueLoginSessionService;
+import com.vpbank.dcp.core.trusteddevice.TrustedDeviceService;
+import com.vpbank.dcp.core.customer.CustomerDirectory;
+import com.vpbank.dcp.core.device.LoginDeviceRepository;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.PasswordLoginResponseMapper;
-import com.vpbank.dcp.core.port.out.trusteddevice.BffCallerAssertions;
+import com.vpbank.dcp.core.trusteddevice.BffCallerAssertions;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.BankingTokenEnvelopeIssuer;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.JcsCommandDigest;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.LengthPrefixedSigningInputEncoder;
@@ -78,7 +78,7 @@ class TrustedDeviceConfigurationTest {
             .withBean(TransactionTemplate.class, () -> mock(TransactionTemplate.class))
             .withBean(CustomerDirectory.class, () -> mock(CustomerDirectory.class))
             .withBean(LoginDeviceRepository.class, () -> mock(LoginDeviceRepository.class))
-            .withBean(IssueLoginSessionUseCase.class, () -> mock(IssueLoginSessionUseCase.class))
+            .withBean(IssueLoginSessionService.class, () -> mock(IssueLoginSessionService.class))
             .withBean(PasswordLoginResponseMapper.class,
                     () -> new PasswordLoginResponseMapper(Clock.systemUTC()))
             .withBean(Clock.class, Clock::systemUTC);
@@ -88,7 +88,7 @@ class TrustedDeviceConfigurationTest {
         runner.withPropertyValues(ACTIVE)
                 .run(context -> assertThat(context).hasNotFailed()
                         .hasSingleBean(TrustedDeviceSessions.class)
-                        .hasSingleBean(TrustedDeviceUseCase.class)
+                        .hasSingleBean(TrustedDeviceService.class)
                         .hasSingleBean(BffCallerAssertions.class));
     }
 
@@ -120,7 +120,7 @@ class TrustedDeviceConfigurationTest {
         runner.withPropertyValues("auth.trusted-device.restricted-session-ttl-seconds=600")
                 .run(context -> assertThat(context).hasNotFailed()
                         .doesNotHaveBean(TrustedDeviceSessions.class)
-                        .doesNotHaveBean(TrustedDeviceUseCase.class));
+                        .doesNotHaveBean(TrustedDeviceService.class));
     }
 
     private static String publicJwk() {

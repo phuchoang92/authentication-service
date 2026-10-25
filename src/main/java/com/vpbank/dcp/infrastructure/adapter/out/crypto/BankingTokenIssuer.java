@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.out.crypto;
 
-import com.vpbank.dcp.core.domain.security.Digest32;
+import com.vpbank.dcp.core.security.Digest32;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Arrays;

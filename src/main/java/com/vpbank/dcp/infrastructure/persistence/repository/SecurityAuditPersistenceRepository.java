@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.persistence.repository;
 
-import com.vpbank.dcp.core.port.out.device.RecordDeviceRevocation;
+import com.vpbank.dcp.core.device.RecordDeviceRevocation;
 import com.vpbank.dcp.infrastructure.persistence.entity.SecurityAuditEventEntity;
 import com.vpbank.dcp.infrastructure.persistence.entity.SecurityAuditEventHeader;
 import com.vpbank.dcp.infrastructure.persistence.projection.DeviceRevocationAuditView;

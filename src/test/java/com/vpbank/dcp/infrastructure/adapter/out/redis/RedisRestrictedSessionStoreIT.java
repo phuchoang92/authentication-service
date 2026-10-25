@@ -1,19 +1,21 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
+import com.vpbank.dcp.core.session.PinnedDevice;
+import com.vpbank.dcp.core.session.PinnedCustomer;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.core.domain.customer.CustomerNumber;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.trusteddevice.KeyExchange;
-import com.vpbank.dcp.core.port.out.trusteddevice.LoginKeys;
-import com.vpbank.dcp.core.port.out.trusteddevice.PreparedRestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.RestrictedSessionStep;
-import com.vpbank.dcp.core.port.out.trusteddevice.StoredRestrictedSession;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
-import com.vpbank.dcp.core.port.out.trusteddevice.WrappedServerKey;
+import com.vpbank.dcp.core.customer.CustomerNumber;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.session.KeyExchange;
+import com.vpbank.dcp.core.session.LoginKeys;
+import com.vpbank.dcp.core.session.PreparedRestrictedSession;
+import com.vpbank.dcp.core.session.RestrictedSession;
+import com.vpbank.dcp.core.session.RestrictedSessionStep;
+import com.vpbank.dcp.core.session.StoredRestrictedSession;
+import com.vpbank.dcp.core.session.TrustTarget;
+import com.vpbank.dcp.core.session.WrappedServerKey;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.AuthorityScope;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.RuntimeKeys;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
@@ -81,7 +83,7 @@ class RedisRestrictedSessionStoreIT {
                 .containsEntry("deviceBindingId", binding.value().toString())
                 .containsEntry("deviceKeyJkt", deviceKey.base64Url())
                 .containsEntry("deviceSecurityVersion", "4")
-                .containsEntry("subjectId", prepared.session().owner().value().toString())
+                .containsEntry("subjectId", prepared.session().customer().owner().value().toString())
                 .containsEntry("customerNumber", "CUST-1")
                 .containsEntry("deviceIdDigest", prepared.deviceIdDigest().base64Url())
                 .containsEntry("verifyAttempts", "0")
@@ -105,7 +107,7 @@ class RedisRestrictedSessionStoreIT {
         assertThat(stored).containsEntry("target", "NEW_DEVICE")
                 .doesNotContainKeys("deviceBindingId", "deviceKeyJkt", "deviceSecurityVersion");
         assertThat(listEntry(prepared)).isEqualTo("v1|-");
-        assertThat(stored.values()).doesNotContain(prepared.session().deviceId());
+        assertThat(stored.values()).doesNotContain("device-id-1234567890");
     }
 
     @Test
@@ -135,7 +137,7 @@ class RedisRestrictedSessionStoreIT {
         store.create(prepared);
         UUID sessionId = prepared.sessionId();
         KeyExchange exchange = new KeyExchange(new WrappedServerKey("w1", new byte[] {1, 2, 3}),
-                "server-jwk", randomDigest(), "device-jwk", randomDigest());
+                "server-key", randomDigest(), "device-key", randomDigest(), UUID.randomUUID());
 
         assertThat(store.beginKeyExchange(sessionId, exchange)).isTrue();
         assertThat(store.beginKeyExchange(sessionId, exchange)).isFalse();
@@ -145,15 +147,33 @@ class RedisRestrictedSessionStoreIT {
         assertThat(store.recordMfaTransaction(sessionId, "mfa-transaction-2")).isFalse();
 
         StoredRestrictedSession stored = store.find(sessionId).orElseThrow();
-        assertThat(stored.step()).isEqualTo(RestrictedSessionStep.MFA);
-        assertThat(stored.verifyAttempts()).isEqualTo(2);
-        assertThat(stored.mfaTransactionId()).isEqualTo("mfa-transaction-1");
-        assertThat(stored.keyExchange().serverKey().ciphertext()).containsExactly(1, 2, 3);
-        assertThat(stored.keyExchange().challengeDigest()).isEqualTo(exchange.challengeDigest());
-        assertThat(stored.keys()).isEqualTo(prepared.session().keys());
+        assertThat(stored.progress().step()).isEqualTo(RestrictedSessionStep.MFA);
+        assertThat(stored.progress().verifyAttempts()).isEqualTo(2);
+        assertThat(stored.progress().mfaTransactionId()).isEqualTo("mfa-transaction-1");
+        assertThat(stored.progress().keyExchange().serverKey().ciphertext()).containsExactly(1, 2, 3);
+        assertThat(stored.progress().keyExchange()).isEqualTo(exchange);
+        assertThat(stored.login().keys()).isEqualTo(prepared.session().keys());
 
         assertThat(store.consume(sessionId)).isTrue();
         assertThat(store.consume(sessionId)).isFalse();
+        assertThat(store.find(sessionId)).isEmpty();
+    }
+
+    /** A key exchange written in the earlier JWK layout, or without its enrollment ID, denies. */
+    @Test
+    void keyExchangeInAnotherLayoutDenies() {
+        PreparedRestrictedSession prepared = prepared(new TrustTarget.NewDevice(),
+                Instant.now().plusSeconds(600));
+        store.create(prepared);
+        UUID sessionId = prepared.sessionId();
+        store.beginKeyExchange(sessionId, new KeyExchange(new WrappedServerKey("w1", new byte[] {1}),
+                "server-key", randomDigest(), "device-key", randomDigest(), UUID.randomUUID()));
+        String key = key(prepared);
+        assertThat(store.find(sessionId)).isPresent();
+
+        redis.opsForHash().put(key, "serverPublicJwk", "{}");
+        assertThat(store.find(sessionId)).isEmpty();
+        redis.opsForHash().delete(key, "serverPublicJwk", "enrollmentId");
         assertThat(store.find(sessionId)).isEmpty();
     }
 
@@ -162,7 +182,7 @@ class RedisRestrictedSessionStoreIT {
     void gatesOnAnEndedSessionLeaveNothingBehind() {
         UUID gone = UUID.randomUUID();
         KeyExchange exchange = new KeyExchange(new WrappedServerKey("w1", new byte[] {1}),
-                "server-jwk", randomDigest(), "device-jwk", randomDigest());
+                "server-key", randomDigest(), "device-key", randomDigest(), UUID.randomUUID());
         String key = new SessionKeys().forSession(gone);
 
         assertThat(store.beginKeyExchange(gone, exchange)).isFalse();
@@ -173,9 +193,9 @@ class RedisRestrictedSessionStoreIT {
 
     private PreparedRestrictedSession prepared(TrustTarget target, Instant expiresAt) {
         RestrictedSession session = new RestrictedSession(UUID.randomUUID(),
-                new SubjectId(UUID.randomUUID()), new CustomerNumber("CUST-1"), 3, "neo-mobile",
-                target, "device-id-1234567890",
-                new LoginKeys("request-jwk", randomDigest(), "response-jwk"), "ANDROID",
+                new PinnedCustomer(new SubjectId(UUID.randomUUID()), new CustomerNumber("CUST-1"), 3),
+                new PinnedDevice("neo-mobile", "ANDROID", target),
+                new LoginKeys("request-jwk", randomDigest(), "response-jwk"),
                 identity.currentGeneration().orElseThrow());
         return new PreparedRestrictedSession(session, UUID.randomUUID(), randomDigest(), randomDigest(),
                 expiresAt, "envelope", "receipt");
@@ -183,7 +203,7 @@ class RedisRestrictedSessionStoreIT {
 
     private Object listEntry(PreparedRestrictedSession prepared) {
         return redis.opsForHash().get(new SessionKeys().forSubjectSessions("neo-mobile",
-                prepared.session().owner()), prepared.sessionId().toString());
+                prepared.session().customer().owner()), prepared.sessionId().toString());
     }
 
     private String key(PreparedRestrictedSession prepared) {

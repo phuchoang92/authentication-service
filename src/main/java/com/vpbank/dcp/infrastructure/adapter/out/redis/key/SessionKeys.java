@@ -1,6 +1,6 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis.key;
 
-import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.customer.SubjectId;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;

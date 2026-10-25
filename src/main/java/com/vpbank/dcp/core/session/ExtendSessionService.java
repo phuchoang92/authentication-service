@@ -1,6 +1,5 @@
 package com.vpbank.dcp.core.session;
 
-import com.vpbank.dcp.core.domain.session.SessionDeadlines;
 import com.vpbank.dcp.core.session.ExtendSessionResult.Extended;
 import com.vpbank.dcp.core.session.ExtendSessionResult.NotExtended;
 import com.vpbank.dcp.core.session.ExtendSessionResult.Reason;

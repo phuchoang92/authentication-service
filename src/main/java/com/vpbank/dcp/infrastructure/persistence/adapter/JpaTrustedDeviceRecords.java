@@ -1,17 +1,16 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
-import com.nimbusds.jose.JOSEException;
-import com.nimbusds.jose.jwk.Curve;
-import com.nimbusds.jose.jwk.ECKey;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.password.StoredDeviceKey;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustActivation;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustActivationResult;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustedDeviceRecords;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustedDeviceRecordsUnavailableException;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.device.StoredDeviceKey;
+import com.vpbank.dcp.core.trusteddevice.TrustActivation;
+import com.vpbank.dcp.core.trusteddevice.TrustActivationResult;
+import com.vpbank.dcp.core.session.KeyExchange;
+import com.vpbank.dcp.core.session.RestrictedSession;
+import com.vpbank.dcp.core.session.TrustTarget;
+import com.vpbank.dcp.core.trusteddevice.TrustedDeviceRecords;
+import com.vpbank.dcp.core.trusteddevice.TrustedDeviceRecordsUnavailableException;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdCodec;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdLookup;
 import com.vpbank.dcp.infrastructure.persistence.codec.ProtectedDeviceId;
@@ -21,10 +20,12 @@ import com.vpbank.dcp.infrastructure.persistence.repository.SecurityAuditJpaRepo
 import com.vpbank.dcp.infrastructure.persistence.repository.TrustedDeviceActivationPersistenceRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.TrustedDeviceActivationPersistenceRepository.DeviceLock;
 import com.vpbank.dcp.infrastructure.persistence.repository.TrustedDeviceActivationPersistenceRepository.NewDeviceRow;
-import java.text.ParseException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -45,6 +46,7 @@ public final class JpaTrustedDeviceRecords implements TrustedDeviceRecords {
     private static final String SYSTEM_ACTOR_TYPE = "SYSTEM";
     private static final String SYSTEM_ACTOR_ID = "authentication-service";
     private static final String CUSTOMER_ACTOR_TYPE = "CUSTOMER";
+    private static final int XWING_PUBLIC_KEY_BYTES = 1216;
 
     private final TrustedDeviceActivationPersistenceRepository devices;
     private final SecurityAuditJpaRepository audit;
@@ -95,28 +97,29 @@ public final class JpaTrustedDeviceRecords implements TrustedDeviceRecords {
     }
 
     private TrustActivationResult activateLocked(TrustActivation activation, TransactionStatus status) {
-        UUID owner = activation.owner().value();
-        String channel = activation.channel();
+        UUID owner = activation.login().customer().owner().value();
+        String channel = activation.login().device().channel();
         var customer = devices.lockCustomer(owner).orElse(null);
         if (customer == null || !"ELIGIBLE".equals(customer.status())
-                || customer.statusVersion() != activation.customerStatusVersion()) {
+                || customer.statusVersion() != activation.login().customer().statusVersion()) {
             return rejected(status);
         }
         Events events = new Events(activation);
         UUID previousPrimary = devices.lockPrimary(owner, channel).orElse(null);
         UUID activated;
-        switch (activation.target()) {
+        switch (activation.login().device().target()) {
             case TrustTarget.KnownDevice known -> {
                 DeviceLock row = devices.lockDevice(known.bindingId().value(), owner, channel,
                         activation.now()).orElse(null);
-                if (row == null || !known.deviceKeyThumbprint().equals(activation.deviceKeyThumbprint())
+                KeyExchange exchange = activation.exchange();
+                if (row == null || !known.deviceKeyThumbprint().equals(exchange.deviceKeyThumbprint())
                         || !Arrays.equals(row.publicKeyHash(), known.deviceKeyThumbprint().bytes())) {
                     return rejected(status);
                 }
                 if ("ACTIVE".equals(row.status()) && row.unexpired()) {
                     // Trusted but not primary: same row, new Ksrv.
                     if (!devices.keepBinding(known.bindingId().value(),
-                            activation.serverKey().keyId(), activation.serverKey().ciphertext(),
+                            exchange.serverKey().keyId(), exchange.serverKey().ciphertext(),
                             known.deviceSecurityVersion(), activation.now())) {
                         return rejected(status);
                     }
@@ -128,7 +131,7 @@ public final class JpaTrustedDeviceRecords implements TrustedDeviceRecords {
                 }
             }
             case TrustTarget.NewDevice() ->
-                    activated = insertNew(activation, spki(activation), events);
+                    activated = insertNew(activation, publicKey(activation), events);
         }
         if (!activated.equals(previousPrimary)) {
             devices.clearPrimary(owner, channel);
@@ -152,26 +155,29 @@ public final class JpaTrustedDeviceRecords implements TrustedDeviceRecords {
     }
 
     /** A reinstalled App keeps its device ID but not its key: the old live row is replaced. */
-    private UUID insertNew(TrustActivation activation, byte[] publicKeySpki, Events events) {
-        UUID owner = activation.owner().value();
-        for (DeviceIdLookup candidate : deviceIds.lookupCandidates(owner, activation.channel(),
+    private UUID insertNew(TrustActivation activation, byte[] publicKey, Events events) {
+        UUID owner = activation.login().customer().owner().value();
+        String channel = activation.login().device().channel();
+        String platform = activation.login().device().platform();
+        KeyExchange exchange = activation.exchange();
+        for (DeviceIdLookup candidate : deviceIds.lookupCandidates(owner, channel,
                 activation.deviceId())) {
-            Optional<UUID> live = devices.lockLiveByDeviceId(owner, activation.channel(),
+            Optional<UUID> live = devices.lockLiveByDeviceId(owner, channel,
                     candidate.digest().bytes(), candidate.keyId());
             if (live.isPresent() && !revokeBySystem(live.get(), REPLACED, activation, events)) {
                 throw new IllegalStateException("live binding could not be replaced");
             }
         }
         UUID bindingId = UUID.randomUUID();
-        ProtectedDeviceId deviceId = deviceIds.protect(owner, activation.channel(), bindingId,
+        ProtectedDeviceId deviceId = deviceIds.protect(owner, channel, bindingId,
                 activation.deviceId());
-        devices.insertDevice(new NewDeviceRow(bindingId, owner, activation.channel(),
+        devices.insertDevice(new NewDeviceRow(bindingId, owner, channel,
                 deviceId.lookup().bytes(), deviceId.lookupKeyId(), deviceId.ciphertext(),
-                deviceId.encryptionKeyId(), activation.platform(), activation.platform(),
-                publicKeySpki, activation.deviceKeyThumbprint().bytes(), policy.trustMethod(),
+                deviceId.encryptionKeyId(), platform, platform,
+                publicKey, exchange.deviceKeyThumbprint().bytes(), policy.trustMethod(),
                 policy.trustPolicyVersion(), activation.now(),
-                activation.now().plus(policy.trustLifetime()), activation.serverKey().keyId(),
-                activation.serverKey().ciphertext()));
+                activation.now().plus(policy.trustLifetime()), exchange.serverKey().keyId(),
+                exchange.serverKey().ciphertext()));
         events.record(SecurityAuditEventEntity.deviceTrusted(events.header(CUSTOMER_ACTOR_TYPE),
                 bindingId, devices.securityVersion(bindingId),
                 activation.mfaReceiptDigest().bytes()));
@@ -196,18 +202,23 @@ public final class JpaTrustedDeviceRecords implements TrustedDeviceRecords {
         return true;
     }
 
-    /** The presented JWK must be the key whose thumbprint the session pinned. */
-    private static byte[] spki(TrustActivation activation) {
+    /**
+     * The presented key, decoded from its wire form, must be the one whose SHA-256 the session
+     * pinned. The crypto adapter validated it at init; this only stops a mismatched activation.
+     */
+    private static byte[] publicKey(TrustActivation activation) {
+        KeyExchange exchange = activation.exchange();
+        byte[] raw;
         try {
-            ECKey key = ECKey.parse(activation.devicePublicJwk());
-            if (key.isPrivate() || !Curve.P_256.equals(key.getCurve())
-                    || !Digest32.fromBytes(key.computeThumbprint().decode())
-                            .equals(activation.deviceKeyThumbprint())) {
+            raw = Base64.getUrlDecoder().decode(exchange.devicePublicKey());
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(raw);
+            if (raw.length != XWING_PUBLIC_KEY_BYTES
+                    || !MessageDigest.isEqual(digest, exchange.deviceKeyThumbprint().bytes())) {
                 throw new IllegalStateException("device key does not match its thumbprint");
             }
-            return key.toECPublicKey().getEncoded();
-        } catch (ParseException | JOSEException failure) {
-            throw new IllegalStateException("device key is not a public P-256 JWK", failure);
+            return raw;
+        } catch (IllegalArgumentException | NoSuchAlgorithmException failure) {
+            throw new IllegalStateException("device key is not a base64url X-Wing public key", failure);
         }
     }
 
@@ -226,11 +237,12 @@ public final class JpaTrustedDeviceRecords implements TrustedDeviceRecords {
         }
 
         SecurityAuditEventHeader header(String actorType) {
-            String actorId = SYSTEM_ACTOR_TYPE.equals(actorType) ? SYSTEM_ACTOR_ID
-                    : activation.owner().value().toString();
-            return new SecurityAuditEventHeader(UUID.randomUUID(), activation.owner().value(),
-                    activation.channel(), activation.operationId(), ++sequence, actorType, actorId,
-                    activation.now(), clock.instant());
+            RestrictedSession login = activation.login();
+            UUID owner = login.customer().owner().value();
+            String actorId = SYSTEM_ACTOR_TYPE.equals(actorType) ? SYSTEM_ACTOR_ID : owner.toString();
+            return new SecurityAuditEventHeader(UUID.randomUUID(), owner, login.device().channel(),
+                    login.operationId(), ++sequence, actorType, actorId, activation.now(),
+                    clock.instant());
         }
 
         void record(SecurityAuditEventEntity event) {

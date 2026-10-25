@@ -2,7 +2,7 @@ package com.vpbank.dcp.infrastructure.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.core.port.out.security.DpopProofDecoder;
+import com.vpbank.dcp.core.security.DpopProofDecoder;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.InvalidDpopConfigurationException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.NonProductionDpopProofDecoder;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;

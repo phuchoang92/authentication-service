@@ -1,14 +1,14 @@
 package com.vpbank.dcp.infrastructure.adapter.out.redis;
 
-import com.vpbank.dcp.core.domain.session.SessionAssurance;
-import com.vpbank.dcp.core.port.out.session.PreparedSession;
-import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
-import com.vpbank.dcp.core.port.out.session.SessionActivationContext;
-import com.vpbank.dcp.core.port.out.session.SessionKeyBindings;
-import com.vpbank.dcp.core.port.out.session.SessionSecurityVersions;
-import com.vpbank.dcp.core.port.out.session.CustomerStatusFreshness;
-import com.vpbank.dcp.core.port.out.session.SessionApplyResult;
-import com.vpbank.dcp.core.port.out.session.SessionAuthority;
+import com.vpbank.dcp.core.session.SessionAssurance;
+import com.vpbank.dcp.core.session.PreparedSession;
+import com.vpbank.dcp.core.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.session.SessionActivationContext;
+import com.vpbank.dcp.core.session.SessionKeyBindings;
+import com.vpbank.dcp.core.session.SessionSecurityVersions;
+import com.vpbank.dcp.core.session.CustomerStatusFreshness;
+import com.vpbank.dcp.core.session.SessionApplyResult;
+import com.vpbank.dcp.core.session.SessionAuthority;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.Sha256Digests;
 import com.vpbank.dcp.infrastructure.adapter.out.redis.key.SessionKeys;
 import org.springframework.dao.DataAccessException;

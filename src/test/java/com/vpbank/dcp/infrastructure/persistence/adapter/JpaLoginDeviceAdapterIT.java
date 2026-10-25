@@ -1,11 +1,11 @@
 package com.vpbank.dcp.infrastructure.persistence.adapter;
 
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.customer.SubjectId;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.core.port.out.device.LoginDeviceRepository;
-import com.vpbank.dcp.core.port.out.session.LoginSessionSecurityStore;
+import com.vpbank.dcp.core.device.LoginDeviceRepository;
+import com.vpbank.dcp.core.session.LoginSessionSecurityStore;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdCodec;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdKeyMaterial;
 import com.vpbank.dcp.infrastructure.id.OpaqueBindingIdCodec;
@@ -119,7 +119,7 @@ class JpaLoginDeviceAdapterIT {
 
         assertThat(devices.current(subject, CHANNEL, INSTALLATION, externalId))
                 .get().satisfies(device -> {
-                    assertThat(device.primary()).isTrue();
+                    assertThat(device.standing().primary()).isTrue();
                     assertThat(device.deviceIdMatches()).isTrue();
                     assertThat(device.bindingId()).isEqualTo(bindingId);
                 });
@@ -166,7 +166,7 @@ class JpaLoginDeviceAdapterIT {
 
         assertThat(devices.keyForProof(externalId)).isPresent();
         assertThat(devices.current(subject, CHANNEL, INSTALLATION, externalId))
-                .get().satisfies(device -> assertThat(device.active()).isFalse());
+                .get().satisfies(device -> assertThat(device.standing().active()).isFalse());
     }
 
     private void seed(SubjectId subject, BindingId bindingId, ProtectedDeviceId protectedId) {

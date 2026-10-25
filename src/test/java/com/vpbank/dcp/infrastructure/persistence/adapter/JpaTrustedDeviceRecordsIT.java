@@ -2,27 +2,32 @@ package com.vpbank.dcp.infrastructure.persistence.adapter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.nimbusds.jose.jwk.Curve;
-import com.nimbusds.jose.jwk.ECKey;
-import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
-import com.vpbank.dcp.core.domain.customer.SubjectId;
-import com.vpbank.dcp.core.domain.device.BindingId;
-import com.vpbank.dcp.core.domain.security.Digest32;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustActivation;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustActivationResult;
-import com.vpbank.dcp.core.port.out.trusteddevice.TrustTarget;
-import com.vpbank.dcp.core.port.out.trusteddevice.WrappedServerKey;
+import com.vpbank.dcp.core.customer.SubjectId;
+import com.vpbank.dcp.core.device.BindingId;
+import com.vpbank.dcp.core.security.Digest32;
+import com.vpbank.dcp.core.trusteddevice.TrustActivation;
+import com.vpbank.dcp.core.trusteddevice.TrustActivationResult;
+import com.vpbank.dcp.core.customer.CustomerNumber;
+import com.vpbank.dcp.core.session.KeyExchange;
+import com.vpbank.dcp.core.session.LoginKeys;
+import com.vpbank.dcp.core.session.PinnedCustomer;
+import com.vpbank.dcp.core.session.PinnedDevice;
+import com.vpbank.dcp.core.session.RestrictedSession;
+import com.vpbank.dcp.core.session.TrustTarget;
+import com.vpbank.dcp.core.session.WrappedServerKey;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdCodec;
 import com.vpbank.dcp.infrastructure.persistence.codec.DeviceIdKeyMaterial;
 import com.vpbank.dcp.infrastructure.persistence.codec.ProtectedDeviceId;
 import com.vpbank.dcp.infrastructure.persistence.entity.SecurityAuditEventEntity;
 import com.vpbank.dcp.infrastructure.persistence.repository.SecurityAuditJpaRepository;
 import com.vpbank.dcp.infrastructure.persistence.repository.TrustedDeviceActivationPersistenceRepository;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -110,7 +115,7 @@ class JpaTrustedDeviceRecordsIT {
         UUID customer = seedCustomer(1);
         UUID oldPrimary = seedDevice(customer, "old-device-id-0000001", key(), "ACTIVE", true);
         UUID biometric = seedBiometric(customer, oldPrimary);
-        ECKey device = key();
+        byte[] device = key();
 
         UUID activated = activated(newDevice(customer, 1, "new-device-id-0000001", device));
 
@@ -118,6 +123,10 @@ class JpaTrustedDeviceRecordsIT {
         assertThat(primary(customer)).isEqualTo(activated);
         assertThat(jdbc.queryForObject("SELECT server_key_id FROM auth_trusted_device "
                 + "WHERE id = UUID_TO_BIN(?)", String.class, activated.toString())).isEqualTo("w1");
+        assertThat(jdbc.queryForMap("SELECT device_key_algorithm AS algorithm, "
+                + "device_public_key AS public_key FROM auth_trusted_device WHERE id = UUID_TO_BIN(?)",
+                activated.toString())).containsEntry("algorithm", "XWING-MLKEM768-X25519")
+                .containsEntry("public_key", device);
         assertThat(status(oldPrimary)).isEqualTo("ACTIVE");
         assertThat(jdbc.queryForObject("SELECT status FROM auth_biometric_login WHERE id = UUID_TO_BIN(?)",
                 String.class, biometric.toString())).isEqualTo("REVOKED");
@@ -125,6 +134,20 @@ class JpaTrustedDeviceRecordsIT {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auth_security_audit_event "
                 + "WHERE trusted_device_id = UUID_TO_BIN(?) AND mfa_receipt_digest IS NOT NULL",
                 Integer.class, activated.toString())).isEqualTo(1);
+    }
+
+    /** V20: an X-Wing row must hold exactly a 1216-byte key; ES256 rows remain valid data. */
+    @Test
+    void xWingRowsMustHoldAWholeXWingKey() throws Exception {
+        UUID customer = seedCustomer(1);
+        UUID es256 = seedDevice(customer, "es256-device-id-00001", key(), "REVOKED", false);
+        assertThat(jdbc.update("UPDATE auth_trusted_device SET device_key_algorithm = 'ES256', "
+                + "device_public_key = ? WHERE id = UUID_TO_BIN(?)", new byte[91], es256.toString()))
+                .isEqualTo(1);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> seedDevice(customer,
+                        "short-key-device-id-01", new byte[1215], "ACTIVE", false))
+                .hasMessageContaining("ck_trusted_device_key_algorithm");
     }
 
     /** A reinstalled App keeps its device ID but has a new key: the old binding is replaced. */
@@ -148,7 +171,7 @@ class JpaTrustedDeviceRecordsIT {
     void trustedNonPrimaryKeepsItsRowAndBecomesPrimary() throws Exception {
         UUID customer = seedCustomer(1);
         seedDevice(customer, "primary-device-000001", key(), "ACTIVE", true);
-        ECKey kept = key();
+        byte[] kept = key();
         UUID other = seedDevice(customer, "other-device-0000001", kept, "ACTIVE", false);
 
         UUID activated = activated(known(customer, 1, other, kept, "other-device-0000001"));
@@ -162,7 +185,7 @@ class JpaTrustedDeviceRecordsIT {
     @Test
     void revokedDeviceIsTrustedAgainOnANewRowWithTheSameKey() throws Exception {
         UUID customer = seedCustomer(1);
-        ECKey kept = key();
+        byte[] kept = key();
         UUID revoked = seedDevice(customer, "revoked-device-00001", kept, "REVOKED", false);
 
         UUID activated = activated(known(customer, 1, revoked, kept, "revoked-device-00001"));
@@ -213,7 +236,7 @@ class JpaTrustedDeviceRecordsIT {
     /** Two live bindings can never share a key, even across customers. */
     @Test
     void keyAlreadyLiveOnAnotherBindingIsRejected() throws Exception {
-        ECKey shared = key();
+        byte[] shared = key();
         seedDevice(seedCustomer(1), "victim-device-000001", shared, "ACTIVE", true);
         UUID attacker = seedCustomer(1);
 
@@ -230,22 +253,32 @@ class JpaTrustedDeviceRecordsIT {
         return ((TrustActivationResult.Activated) result).bindingId().value();
     }
 
-    private TrustActivation newDevice(UUID customer, long statusVersion, String deviceId, ECKey key)
+    private TrustActivation newDevice(UUID customer, long statusVersion, String deviceId, byte[] key)
             throws Exception {
-        return new TrustActivation(UUID.randomUUID(), new SubjectId(customer), statusVersion, CHANNEL,
-                new TrustTarget.NewDevice(), "ANDROID", thumbprint(key),
-                key.toPublicJWK().toJSONString(), serverKey(), deviceId, receipt(),
-                Instant.now().truncatedTo(ChronoUnit.MICROS));
+        return activation(customer, statusVersion, new TrustTarget.NewDevice(), deviceId, key);
     }
 
-    private TrustActivation known(UUID customer, long statusVersion, UUID binding, ECKey key,
+    private TrustActivation known(UUID customer, long statusVersion, UUID binding, byte[] key,
                                   String deviceId) throws Exception {
         long securityVersion = jdbc.queryForObject("SELECT device_security_version FROM "
                 + "auth_trusted_device WHERE id = UUID_TO_BIN(?)", Long.class, binding.toString());
-        return new TrustActivation(UUID.randomUUID(), new SubjectId(customer), statusVersion, CHANNEL,
+        return activation(customer, statusVersion,
                 new TrustTarget.KnownDevice(new BindingId(binding), thumbprint(key), securityVersion),
-                "ANDROID", thumbprint(key), key.toPublicJWK().toJSONString(), serverKey(), deviceId,
-                receipt(), Instant.now().truncatedTo(ChronoUnit.MICROS));
+                deviceId, key);
+    }
+
+    private TrustActivation activation(UUID customer, long statusVersion, TrustTarget target,
+                                       String deviceId, byte[] key) throws Exception {
+        Digest32 placeholder = Digest32.fromBytes(new byte[32]);
+        RestrictedSession login = new RestrictedSession(UUID.randomUUID(),
+                new PinnedCustomer(new SubjectId(customer), new CustomerNumber("customer-" + customer),
+                        statusVersion),
+                new PinnedDevice(CHANNEL, "ANDROID", target),
+                new LoginKeys("request-jwk", placeholder, "response-jwk"), UUID.randomUUID());
+        KeyExchange exchange = new KeyExchange(serverKey(), "server-public-key", placeholder,
+                text(key), thumbprint(key), UUID.randomUUID());
+        return new TrustActivation(login, exchange, deviceId, receipt(),
+                Instant.now().truncatedTo(ChronoUnit.MICROS));
     }
 
     private UUID seedCustomer(long statusVersion) {
@@ -259,7 +292,7 @@ class JpaTrustedDeviceRecordsIT {
         return customer;
     }
 
-    private UUID seedDevice(UUID customer, String deviceId, ECKey key, String status, boolean primary)
+    private UUID seedDevice(UUID customer, String deviceId, byte[] key, String status, boolean primary)
             throws Exception {
         UUID binding = UUID.randomUUID();
         ProtectedDeviceId protectedId = deviceIds.protect(customer, CHANNEL, binding, deviceId);
@@ -273,12 +306,12 @@ class JpaTrustedDeviceRecordsIT {
                    trusted_at, expires_at, revoked_at, revoked_reason, revoked_by_type,
                    revoked_by_id, is_primary, created_at, updated_at)
                 VALUES (UUID_TO_BIN(?), UUID_TO_BIN(?), ?, ?, ?, ?, ?, 'ANDROID', 'Test device', ?,
-                        ?, ?, 'ES256', 'NFC_FACE_SMS_OTP', 'test-policy', 'MFA_KEY_POSSESSION',
+                        ?, ?, 'XWING-MLKEM768-X25519', 'NFC_FACE_SMS_OTP', 'test-policy', 'MFA_KEY_POSSESSION',
                         UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 90 DAY,
                         ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                 """, binding.toString(), customer.toString(), CHANNEL, protectedId.lookup().bytes(),
                 protectedId.lookupKeyId(), protectedId.ciphertext(), protectedId.encryptionKeyId(),
-                status, key.toECPublicKey().getEncoded(), thumbprint(key).bytes(),
+                status, key, thumbprint(key).bytes(),
                 revoked ? java.sql.Timestamp.from(Instant.now()) : null,
                 revoked ? "LOST" : null, revoked ? "CUSTOMER" : null, revoked ? "test" : null,
                 primary ? 1 : 0);
@@ -316,12 +349,19 @@ class JpaTrustedDeviceRecordsIT {
                 customer.toString());
     }
 
-    private static ECKey key() throws Exception {
-        return new ECKeyGenerator(Curve.P_256).generate();
+    /** Raw X-Wing public key bytes: persistence checks only their length and digest. */
+    private static byte[] key() {
+        byte[] raw = new byte[1216];
+        new SecureRandom().nextBytes(raw);
+        return raw;
     }
 
-    private static Digest32 thumbprint(ECKey key) throws Exception {
-        return Digest32.fromBytes(key.computeThumbprint().decode());
+    private static String text(byte[] key) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(key);
+    }
+
+    private static Digest32 thumbprint(byte[] key) throws Exception {
+        return Digest32.fromBytes(MessageDigest.getInstance("SHA-256").digest(key));
     }
 
     private static WrappedServerKey serverKey() {

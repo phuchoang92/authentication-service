@@ -8,7 +8,7 @@ import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.util.Base64URL;
 import com.nimbusds.jwt.SignedJWT;
-import com.vpbank.dcp.core.port.out.credential.PasswordVerifierUnavailableException;
+import com.vpbank.dcp.core.password.PasswordVerifierUnavailableException;
 import com.vpbank.dcp.infrastructure.adapter.out.crypto.StrictJoseJson;
 import com.vpbank.dcp.testsupport.ContractVectors;
 import java.net.URI;

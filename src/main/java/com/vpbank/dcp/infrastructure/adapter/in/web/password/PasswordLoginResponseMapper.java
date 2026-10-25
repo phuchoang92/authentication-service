@@ -1,8 +1,8 @@
 package com.vpbank.dcp.infrastructure.adapter.in.web.password;
 
-import com.vpbank.dcp.core.port.in.password.PasswordLoginResult;
-import com.vpbank.dcp.core.port.out.session.PreparedSession;
-import com.vpbank.dcp.core.port.out.session.SessionActivationSnapshot;
+import com.vpbank.dcp.core.password.PasswordLoginResult;
+import com.vpbank.dcp.core.session.PreparedSession;
+import com.vpbank.dcp.core.session.SessionActivationSnapshot;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginActiveResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginErrorResponse;
 import com.vpbank.dcp.infrastructure.adapter.in.web.password.dto.PasswordLoginResponse;
