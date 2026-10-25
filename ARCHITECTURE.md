@@ -136,20 +136,15 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-25, slice 2 implemented):** the tree above plus the login/session
-capability in the same role packages — `domain.model` (`Session`, `SessionPolicy`, `OpaqueToken`,
-`Password`, `DeviceId`, `Channel`, `SessionStatus`, `SessionId`), `application.port.in`
-(`LoginUseCase`, `LogoutUseCase`, `ExtendSessionUseCase`, `CurrentSessionUseCase` and their
-commands/results), `application.port.out` (`CredentialVerifierPort`, `SessionStore` addressed by
-`SessionLookup`, `TokenEnvelopeSealer`, `OpaqueTokenGenerator`, `CustomerAuthenticationRepository`),
-`application.service` (`LoginService`, `SessionService`), adapters `adapter.out.valkey`
-(`SessionKeys`, `SessionHashCodec`, `ValkeySessionAdapter`), `adapter.out.jose`
-(`NimbusTokenEnvelopeSealer`), `adapter.out.keycloak` (`KeycloakDirectGrantAdapter`,
-`KeycloakIdTokenVerifier`), web `LoginController`, `SessionController`, `SessionExtensionController`,
-`SessionFilter` (`/api/**` minus `/api/ns/**`), and `config.LoginConfiguration`,
-`ValkeyConfiguration`, `LoginProperties`, `SessionProperties`. `ArchitectureTest` enforces the
-**[arch]** rules of §4 and §10. Login and Trusted Device composition in §6.1 is still illustrative
-(slice 3). See `docs/plans/slice-2-login-session.md` for the slice's decisions.
+**Current (2026-10-25, slices 1–3 implemented):** the tree above plus, in the same role packages,
+login/session (slice 2: `Session`, `OpaqueToken`, `LoginService`, `SessionService`, Valkey, JWE,
+Direct Grant, `SessionFilter`) and password lockout with CAPTCHA (slice 3: `PasswordLockout`,
+`LockoutPolicy`, `PasswordStatus`, `CaptchaId`/`CaptchaAnswer`, `IssueCaptchaUseCase`,
+`UnlockPasswordUseCase`, `CaptchaService`, `PasswordUnlockService`, `adapter.out.captcha.AwtCaptchaGenerator`,
+`adapter.out.valkey.ValkeyCaptchaStore`, `CaptchaController`, `PasswordUnlockController`, Flyway
+`V2__password_lockout.sql`). `ArchitectureTest` enforces the **[arch]** rules of §4 and §10. Login and
+Trusted Device composition in §6.1 is still illustrative (next slice). Slice decisions:
+`docs/plans/slice-2-login-session.md`, `docs/plans/slice-3-password-lockout.md`.
 
 ---
 

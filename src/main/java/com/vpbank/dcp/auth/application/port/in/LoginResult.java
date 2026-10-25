@@ -32,6 +32,12 @@ public sealed interface LoginResult {
     /** The identity exists but is not ACTIVE in Auth. */
     record AccountNotReady() implements LoginResult { }
 
+    /** Too many failures: temporarily or permanently locked. The password was not sent to Keycloak. */
+    record AccountLocked() implements LoginResult { }
+
+    /** Two or more failures: this attempt needs a solved CAPTCHA bound to the customer first. */
+    record CaptchaRequired() implements LoginResult { }
+
     /** Keycloak, the database or the session store did not answer; nothing was issued. */
     record Unavailable() implements LoginResult { }
 }

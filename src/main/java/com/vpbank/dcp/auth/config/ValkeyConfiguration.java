@@ -1,8 +1,11 @@
 package com.vpbank.dcp.auth.config;
 
+import com.vpbank.dcp.auth.adapter.out.valkey.CaptchaKeys;
 import com.vpbank.dcp.auth.adapter.out.valkey.RandomOpaqueTokenGenerator;
+import com.vpbank.dcp.auth.adapter.out.valkey.ValkeyCaptchaStore;
 import com.vpbank.dcp.auth.adapter.out.valkey.SessionKeys;
 import com.vpbank.dcp.auth.adapter.out.valkey.ValkeySessionAdapter;
+import com.vpbank.dcp.auth.application.port.out.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.SessionStore;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
@@ -41,6 +44,17 @@ public class ValkeyConfiguration {
     @Bean
     SessionStore sessionStore(StringRedisTemplate redis, SessionKeys keys) {
         return new ValkeySessionAdapter(redis, keys);
+    }
+
+    /** CAPTCHA answers are HMAC-ed with the current session lookup key: one secret to manage. */
+    @Bean
+    CaptchaStore captchaStore(StringRedisTemplate redis, SessionProperties properties, java.time.Clock clock) {
+        String base64 = properties.lookupHmacKeysBase64().get(properties.lookupKeyVersion());
+        if (base64 == null) {
+            throw new IllegalStateException("auth.session.lookup-key-version " + properties.lookupKeyVersion()
+                    + " has no entry in auth.session.lookup-hmac-keys-base64");
+        }
+        return new ValkeyCaptchaStore(redis, new CaptchaKeys(decodeKey(properties.lookupKeyVersion(), base64)), clock);
     }
 
     @Bean

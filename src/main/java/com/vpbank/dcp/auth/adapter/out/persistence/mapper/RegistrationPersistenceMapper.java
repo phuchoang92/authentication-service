@@ -4,6 +4,8 @@ import com.vpbank.dcp.auth.adapter.out.persistence.entity.CustomerAuthentication
 import com.vpbank.dcp.auth.adapter.out.persistence.entity.RegistrationEntity;
 import com.vpbank.dcp.auth.application.port.out.CustomerAuthentication;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.PasswordLockout;
+import com.vpbank.dcp.auth.domain.model.PasswordStatus;
 import com.vpbank.dcp.auth.domain.model.Registration;
 import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.RequestDigest;
@@ -55,6 +57,8 @@ public final class RegistrationPersistenceMapper {
                 .identityIssuer(completed.identityIssuer())
                 .identitySubject(completed.identitySubject())
                 .status(CustomerAuthenticationEntity.STATUS_ACTIVE)
+                .passwordStatus(PasswordStatus.ACTIVE)
+                .passwordFailedCount(0)
                 .build();
     }
 
@@ -66,6 +70,14 @@ public final class RegistrationPersistenceMapper {
                 .identityIssuer(entity.getIdentityIssuer())
                 .identitySubject(entity.getIdentitySubject())
                 .status(entity.getStatus())
+                .lockout(new PasswordLockout(entity.getPasswordStatus(), entity.getPasswordFailedCount(),
+                        entity.getPasswordLockoutTime()))
+                .version(entity.getVersion())
                 .build();
+    }
+
+    /** Copies the lockout the aggregate decided onto the managed row. */
+    public static void applyLockout(CustomerAuthenticationEntity entity, PasswordLockout lockout) {
+        entity.applyLockout(lockout.status(), lockout.failedCount(), lockout.lockedUntil());
     }
 }

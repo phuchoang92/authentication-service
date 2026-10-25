@@ -35,6 +35,7 @@ class ArchitectureTest {
                 .adapter("notification", ROOT + ".adapter.out.notification..")
                 .adapter("valkey", ROOT + ".adapter.out.valkey..")
                 .adapter("jose", ROOT + ".adapter.out.jose..")
+                .adapter("captcha", ROOT + ".adapter.out.captcha..")
                 .withOptionalLayers(true)
                 // config wires every ring; it is the only package allowed to see all of them
                 .ignoreDependency(JavaClass.Predicates.resideInAPackage(ROOT + ".config.."),

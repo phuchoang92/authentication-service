@@ -12,8 +12,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.vpbank.dcp.auth.adapter.in.web.common.ErrorMessages;
 import com.vpbank.dcp.auth.adapter.in.web.common.SessionFilter;
 import com.vpbank.dcp.auth.adapter.in.web.mapper.LoginWebMapper;
+import com.vpbank.dcp.auth.adapter.in.web.mapper.PasswordUnlockWebMapper;
 import com.vpbank.dcp.auth.adapter.in.web.mapper.SessionWebMapper;
+import com.vpbank.dcp.auth.application.port.in.CaptchaChallenge;
 import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
+import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.ExtendSessionResult;
 import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginResult;
@@ -22,6 +25,8 @@ import com.vpbank.dcp.auth.application.port.in.LogoutCommand;
 import com.vpbank.dcp.auth.application.port.in.LogoutResult;
 import com.vpbank.dcp.auth.application.port.in.LogoutUseCase;
 import com.vpbank.dcp.auth.application.port.in.SessionSummary;
+import com.vpbank.dcp.auth.application.port.in.UnlockPasswordResult;
+import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
 import com.vpbank.dcp.auth.config.WebConfiguration;
 import com.vpbank.dcp.auth.domain.model.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
@@ -43,7 +48,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** Web slice for slice 2: login, logout behind the session filter, extend; use cases mocked. */
-@WebMvcTest(controllers = {LoginController.class, SessionController.class, SessionExtensionController.class},
+@WebMvcTest(controllers = {LoginController.class, SessionController.class, SessionExtensionController.class,
+        CaptchaController.class, PasswordUnlockController.class},
         properties = "auth.login.enabled=true")
 @Import({WebConfiguration.class, LoginWebTest.Beans.class})
 class LoginWebTest {
@@ -61,6 +67,7 @@ class LoginWebTest {
     static class Beans {
         @Bean LoginWebMapper loginWebMapper(ErrorMessages errors) { return new LoginWebMapper(errors); }
         @Bean SessionWebMapper sessionWebMapper(ErrorMessages errors) { return new SessionWebMapper(errors); }
+        @Bean PasswordUnlockWebMapper passwordUnlockWebMapper(ErrorMessages errors) { return new PasswordUnlockWebMapper(errors); }
         @Bean SessionFilter sessionFilter(CurrentSessionUseCase sessions, ErrorMessages errors,
                                           org.springframework.web.servlet.LocaleResolver locales) {
             return new SessionFilter(sessions, errors, locales);
@@ -72,6 +79,8 @@ class LoginWebTest {
     @MockitoBean LogoutUseCase logout;
     @MockitoBean ExtendSessionUseCase extend;
     @MockitoBean CurrentSessionUseCase current;
+    @MockitoBean IssueCaptchaUseCase captchas;
+    @MockitoBean UnlockPasswordUseCase unlock;
 
     @Test
     void loginIs201WithTheEnvelopeAndNeverTheTokenAndNoSessionIsNeeded() throws Exception {
@@ -107,6 +116,58 @@ class LoginWebTest {
         when(login.login(any())).thenReturn(new LoginResult.Unavailable());
         mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
                 .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.error.code").value("LOGIN_UNAVAILABLE"));
+        when(login.login(any())).thenReturn(new LoginResult.AccountLocked());
+        mvc.perform(post("/api/ns/v1/login").header("Accept-Language", "en")
+                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+                .andExpect(status().isLocked()).andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"))
+                .andExpect(jsonPath("$.error.message").value("The account is locked after too many failed logins"))
+                .andExpect(jsonPath("$.error.lockedUntil").doesNotExist());
+        when(login.login(any())).thenReturn(new LoginResult.CaptchaRequired());
+        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+                .andExpect(status().isPreconditionRequired()).andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"));
+    }
+
+    @Test
+    void aCaptchaIsIssuedForAUserNameAndSentBackWithTheLogin() throws Exception {
+        com.vpbank.dcp.auth.domain.model.CaptchaId id = com.vpbank.dcp.auth.domain.model.CaptchaId.random();
+        when(captchas.issue(new com.vpbank.dcp.auth.domain.model.UserName("alice")))
+                .thenReturn(new CaptchaChallenge(id, new byte[]{1, 2, 3}, IDLE));
+        mvc.perform(post("/api/ns/v1/login/captcha").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userName\":\"alice\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.captchaId").value(id.toString()))
+                .andExpect(jsonPath("$.data.image").value("AQID"))
+                .andExpect(jsonPath("$.data.expiresAt").value("2026-10-25T10:15:00Z"));
+        verifyNoInteractions(current);
+
+        when(login.login(any())).thenReturn(new LoginResult.InvalidCredentials());
+        String withCaptcha = LOGIN_BODY.replace("\"deviceId\":\"dev-1\",",
+                "\"deviceId\":\"dev-1\",\"captcha\":{\"captchaId\":\"" + id + "\",\"answer\":\"ab3cd\"},");
+        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(withCaptcha))
+                .andExpect(status().isUnauthorized());
+        var captor = ArgumentCaptor.forClass(com.vpbank.dcp.auth.application.port.in.LoginCommand.class);
+        verify(login).login(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().captcha().captchaId()).isEqualTo(id);
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().captcha().answer().normalized()).isEqualTo("AB3CD");
+
+        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(withCaptcha.replace("ab3cd", "a!")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.details[0].field").value("captcha.answer"));
+    }
+
+    @Test
+    void unlockIsInternalAndMapsEveryOutcome() throws Exception {
+        when(unlock.unlock(new CustomerId("90359"))).thenReturn(new UnlockPasswordResult.Unlocked());
+        mvc.perform(post("/internal/v1/customers/90359/password-unlock")).andExpect(status().isNoContent());
+        verifyNoInteractions(current);
+
+        when(unlock.unlock(new CustomerId("00000"))).thenReturn(new UnlockPasswordResult.UnknownCustomer());
+        mvc.perform(post("/internal/v1/customers/00000/password-unlock").header("Accept-Language", "en"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.error.code").value("CUSTOMER_UNKNOWN"))
+                .andExpect(jsonPath("$.error.message").value("The customer is unknown"));
+        mvc.perform(post("/internal/v1/customers/not%20valid/password-unlock")).andExpect(status().isBadRequest());
+        verify(unlock, org.mockito.Mockito.times(2)).unlock(any());
     }
 
     @Test

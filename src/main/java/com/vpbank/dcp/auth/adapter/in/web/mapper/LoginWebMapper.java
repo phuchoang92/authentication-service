@@ -6,8 +6,11 @@ import com.vpbank.dcp.auth.adapter.in.web.common.ErrorMessages;
 import com.vpbank.dcp.auth.adapter.in.web.common.InvalidRequestException;
 import com.vpbank.dcp.auth.adapter.in.web.dto.request.LoginRequest;
 import com.vpbank.dcp.auth.adapter.in.web.dto.response.LoginResponse;
+import com.vpbank.dcp.auth.application.port.in.CaptchaSolution;
 import com.vpbank.dcp.auth.application.port.in.LoginCommand;
 import com.vpbank.dcp.auth.application.port.in.LoginResult;
+import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
+import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.Channel;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.Password;
@@ -33,6 +36,9 @@ public final class LoginWebMapper {
                     .channel(Channel.valueOf(request.channel()))
                     .deviceId(request.deviceId() == null ? null : new DeviceId(request.deviceId()))
                     .tokenEncryptionKey(json(request.tokenEncryptionKey()))
+                    .captcha(request.captcha() == null ? null : new CaptchaSolution(
+                            new CaptchaId(java.util.UUID.fromString(request.captcha().captchaId())),
+                            new CaptchaAnswer(request.captcha().answer())))
                     .build();
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
@@ -45,6 +51,9 @@ public final class LoginWebMapper {
                     new LoginResponse(ok.tokenEnvelope(), ok.status().name(), ok.idleExpiresAt(), ok.absoluteExpiresAt())));
             case LoginResult.InvalidCredentials() -> errors.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.INVALID_CREDENTIALS);
             case LoginResult.AccountNotReady() -> errors.failure(HttpStatus.FORBIDDEN, ErrorCodes.ACCOUNT_NOT_READY);
+            case LoginResult.AccountLocked() -> errors.failure(HttpStatus.LOCKED, ErrorCodes.ACCOUNT_LOCKED);
+            case LoginResult.CaptchaRequired() ->
+                    errors.failure(HttpStatus.PRECONDITION_REQUIRED, ErrorCodes.CAPTCHA_REQUIRED);
             case LoginResult.Unavailable() -> errors.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.LOGIN_UNAVAILABLE);
         };
     }

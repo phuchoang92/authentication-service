@@ -9,12 +9,14 @@ import lombok.Builder;
 import java.util.Objects;
 
 /**
- * One login attempt. {@code deviceId} may be null (slice 2 records it, slice 3 judges it).
+ * One login attempt. {@code deviceId} may be null (recorded now, judged by the trusted-device slice).
  * {@code tokenEncryptionKey} is the app's public P-256 JWK as JSON text; the sealer validates it.
+ * {@code captcha} is null unless the app solved one; it is required once the identity has failed
+ * {@code LockoutPolicy.captchaAfter()} times.
  */
 @Builder
 public record LoginCommand(UserName userName, Password password, Channel channel, DeviceId deviceId,
-                           String tokenEncryptionKey) {
+                           String tokenEncryptionKey, CaptchaSolution captcha) {
     public LoginCommand {
         Objects.requireNonNull(userName, "userName");
         Objects.requireNonNull(password, "password");

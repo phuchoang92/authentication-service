@@ -3,6 +3,8 @@ package com.vpbank.dcp.auth.config;
 import com.vpbank.dcp.auth.adapter.in.web.common.ErrorMessages;
 import com.vpbank.dcp.auth.adapter.in.web.common.SessionFilter;
 import com.vpbank.dcp.auth.adapter.in.web.mapper.LoginWebMapper;
+import com.vpbank.dcp.auth.adapter.in.web.mapper.PasswordUnlockWebMapper;
+import com.vpbank.dcp.auth.adapter.out.captcha.AwtCaptchaGenerator;
 import com.vpbank.dcp.auth.adapter.in.web.mapper.SessionWebMapper;
 import com.vpbank.dcp.auth.adapter.out.jose.NimbusTokenEnvelopeSealer;
 import com.vpbank.dcp.auth.adapter.out.keycloak.KeycloakDirectGrantAdapter;
@@ -10,14 +12,21 @@ import com.vpbank.dcp.auth.adapter.out.keycloak.KeycloakIdTokenVerifier;
 import com.vpbank.dcp.auth.adapter.out.persistence.adapter.CustomerAuthenticationPersistenceAdapter;
 import com.vpbank.dcp.auth.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
+import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
+import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
+import com.vpbank.dcp.auth.application.port.out.CaptchaGenerator;
+import com.vpbank.dcp.auth.application.port.out.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.CustomerAuthenticationRepository;
 import com.vpbank.dcp.auth.application.port.out.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.service.CaptchaService;
 import com.vpbank.dcp.auth.application.service.LoginService;
+import com.vpbank.dcp.auth.application.service.PasswordUnlockService;
 import com.vpbank.dcp.auth.application.service.SessionService;
+import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -41,9 +50,38 @@ public class LoginConfiguration {
 
     @Bean
     LoginUseCase loginUseCase(CustomerAuthenticationRepository identities, CredentialVerifierPort credentials,
-                              SessionStore sessions, TokenEnvelopeSealer sealer, OpaqueTokenGenerator tokens,
-                              SessionPolicy policy, Clock clock) {
-        return new LoginService(identities, credentials, sessions, sealer, tokens, SessionId::random, policy, clock);
+                              CaptchaStore captchas, SessionStore sessions, TokenEnvelopeSealer sealer,
+                              OpaqueTokenGenerator tokens, SessionPolicy policy, LockoutPolicy lockoutPolicy, Clock clock) {
+        return new LoginService(identities, credentials, captchas, sessions, sealer, tokens, SessionId::random, policy,
+                lockoutPolicy, clock);
+    }
+
+    @Bean
+    IssueCaptchaUseCase issueCaptchaUseCase(CustomerAuthenticationRepository identities, CaptchaGenerator generator,
+                                            CaptchaStore captchas, LoginProperties properties, Clock clock) {
+        return new CaptchaService(identities, generator, captchas, properties.lockout().captchaLifetime(), clock);
+    }
+
+    @Bean
+    UnlockPasswordUseCase unlockPasswordUseCase(CustomerAuthenticationRepository identities) {
+        return new PasswordUnlockService(identities);
+    }
+
+    @Bean
+    PasswordUnlockWebMapper passwordUnlockWebMapper(ErrorMessages errors) {
+        return new PasswordUnlockWebMapper(errors);
+    }
+
+    @Bean
+    CaptchaGenerator captchaGenerator() {
+        return new AwtCaptchaGenerator(new java.security.SecureRandom());
+    }
+
+    @Bean
+    LockoutPolicy lockoutPolicy(LoginProperties properties) {
+        LoginProperties.Lockout lockout = properties.lockout();
+        return new LockoutPolicy(lockout.captchaAfter(), new java.util.TreeMap<>(lockout.temporaryLocksOrDefault()),
+                lockout.permanentAt());
     }
 
     @Bean

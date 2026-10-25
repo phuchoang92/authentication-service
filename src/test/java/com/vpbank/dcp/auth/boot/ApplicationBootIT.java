@@ -15,6 +15,7 @@ import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.vpbank.dcp.auth.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
+import com.vpbank.dcp.auth.application.port.out.CaptchaGenerator;
 import com.vpbank.dcp.auth.application.port.out.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.CredentialVerifierPort.VerificationResult;
 import com.vpbank.dcp.auth.application.port.out.CustomerDirectoryPort;
@@ -22,6 +23,7 @@ import com.vpbank.dcp.auth.application.port.out.CustomerProfile;
 import com.vpbank.dcp.auth.application.port.out.IdentityProviderPort;
 import com.vpbank.dcp.auth.application.port.out.IdentityProviderPort.CreateUserResult;
 import com.vpbank.dcp.auth.application.port.out.SmsSenderPort;
+import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.UserName;
 import java.util.Base64;
@@ -45,9 +47,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * The whole application boots against real MySQL and Valkey with registration and login on. One
- * customer is registered, logs in (token envelope decrypted with the test's Kenc), extends the
- * session the BFF way, and logs out. Partner ports (Customer, Keycloak admin + Direct Grant,
- * Notification) are mocked; no external service is called.
+ * customer is registered, fails twice (CAPTCHA now required), solves a CAPTCHA, logs in (token
+ * envelope decrypted with the test's Kenc), extends the session the BFF way, logs out, then fails
+ * until locked and is unlocked by the bank. Partner ports (Customer, Keycloak admin + Direct Grant,
+ * Notification) are mocked; the CAPTCHA generator is replaced by a fixed answer.
  */
 @Testcontainers
 @SpringBootTest(properties = {
@@ -91,9 +94,11 @@ class ApplicationBootIT {
     @MockitoBean IdentityProviderPort keycloakAdmin;
     @MockitoBean SmsSenderPort sms;
     @MockitoBean CredentialVerifierPort credentials;
+    @MockitoBean CaptchaGenerator captchaGenerator;
 
     @Test
-    void registersLogsInExtendsAndLogsOutEndToEnd() throws Exception {
+    void registersFailsSolvesACaptchaLogsInExtendsLogsOutGetsLockedAndIsUnlocked() throws Exception {
+        when(captchaGenerator.next()).thenReturn(new CaptchaGenerator.GeneratedCaptcha(new CaptchaAnswer("AB3CD"), new byte[]{1}));
         when(customers.profile(new CustomerId("90359"))).thenReturn(Optional.of(CustomerProfile.builder()
                 .customerId(new CustomerId("90359")).eligible(true).phone("+84901234567").phoneVerified(true).build()));
         when(keycloakAdmin.createDisabledUser(any())).thenReturn(new CreateUserResult.Created(ISSUER, "sub-1"));
@@ -102,15 +107,25 @@ class ApplicationBootIT {
                 .content(REGISTER)).andExpect(status().isCreated());
         assertThat(identities.findById("90359").orElseThrow().getIdentitySubject()).isEqualTo("sub-1");
 
-        // Login: wrong password first (same answer as unknown user), then the right one.
+        // Two wrong passwords (same answer as an unknown user); the third attempt needs a CAPTCHA.
         ECKey kenc = new ECKeyGenerator(Curve.P_256).generate();
         String loginBody = "{\"userName\":\"alice\",\"password\":\"Secret123\",\"channel\":\"MOBILE\","
                 + "\"deviceId\":\"dev-1\",\"tokenEncryptionKey\":" + kenc.toPublicJWK().toJSONString() + "}";
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Rejected());
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
-                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"));
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+                    .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"));
+        }
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Verified(ISSUER, "sub-1"));
-        MvcResult login = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+                .andExpect(status().isPreconditionRequired()).andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"));
+        MvcResult captcha = mvc.perform(post("/api/ns/v1/login/captcha").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userName\":\"alice\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String captchaId = field(captcha.getResponse().getContentAsString(), "captchaId");
+        String solved = loginBody.replace("\"deviceId\":\"dev-1\",",
+                "\"deviceId\":\"dev-1\",\"captcha\":{\"captchaId\":\"" + captchaId + "\",\"answer\":\"ab3cd\"},");
+        MvcResult login = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(solved))
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("X-Correlation-Id"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
@@ -139,6 +154,27 @@ class ApplicationBootIT {
         mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
         mvc.perform(post("/internal/v1/sessions/extend").contentType(MediaType.APPLICATION_JSON).content(extendBody))
                 .andExpect(status().isGone());
+
+        // The success reset the counter: two failures, then CAPTCHA + a third failure locks for 15 minutes.
+        when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Rejected());
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+                    .andExpect(status().isUnauthorized());
+        }
+        MvcResult again = mvc.perform(post("/api/ns/v1/login/captcha").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userName\":\"alice\"}")).andReturn();
+        String third = loginBody.replace("\"deviceId\":\"dev-1\",", "\"deviceId\":\"dev-1\",\"captcha\":{\"captchaId\":\""
+                + field(again.getResponse().getContentAsString(), "captchaId") + "\",\"answer\":\"AB3CD\"},");
+        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(third))
+                .andExpect(status().isLocked()).andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
+        assertThat(identities.findById("90359").orElseThrow().getPasswordFailedCount()).isEqualTo(3);
+        assertThat(identities.findById("90359").orElseThrow().getPasswordLockoutTime()).isNotNull();
+
+        // The bank unlocks; the next correct login works without a CAPTCHA.
+        mvc.perform(post("/internal/v1/customers/90359/password-unlock")).andExpect(status().isNoContent());
+        when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Verified(ISSUER, "sub-1"));
+        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+                .andExpect(status().isCreated());
     }
 
     private static String field(String json, String name) {

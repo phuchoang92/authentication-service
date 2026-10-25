@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vpbank.dcp.auth.adapter.in.web.common.SessionFilter;
 import com.vpbank.dcp.auth.adapter.in.web.controller.LoginController;
 import com.vpbank.dcp.auth.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
+import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
+import com.vpbank.dcp.auth.application.port.out.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.SessionStore;
 import java.util.Base64;
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,7 @@ class LoginConfigurationTest {
     void onWithEverySettingWiresLoginSessionsAndTheFilter() {
         runner.withPropertyValues(ENABLED).run(context -> assertThat(context).hasNotFailed()
                 .hasSingleBean(LoginUseCase.class).hasSingleBean(SessionStore.class)
+                .hasSingleBean(IssueCaptchaUseCase.class).hasSingleBean(CaptchaStore.class)
                 .hasSingleBean(SessionFilter.class).hasSingleBean(LoginController.class));
     }
 
