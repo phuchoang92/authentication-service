@@ -87,7 +87,8 @@ class RegistrationWebMapperTest {
     private void assertFailure(RegisterCustomerResult result, HttpStatus status, String code, String message) {
         ResponseEntity<?> response = mapper.toResponse(result);
         assertThat(response.getStatusCode()).isEqualTo(status);
-        ApiEnvelope.Failure body = (ApiEnvelope.Failure) response.getBody();
+        ApiEnvelope<?> body = (ApiEnvelope<?>) response.getBody();
+        assertThat(body.data()).isNull();
         assertThat(body.error().code()).isEqualTo(code);
         assertThat(body.error().message()).isEqualTo(message);
     }

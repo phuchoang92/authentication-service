@@ -42,7 +42,7 @@ public final class RegistrationWebMapper {
         }
     }
 
-    public ResponseEntity<?> toResponse(RegisterCustomerResult result) {
+    public ResponseEntity<ApiEnvelope<RegistrationResponse>> toResponse(RegisterCustomerResult result) {
         return switch (result) {
             case RegisterCustomerResult.Ready ready -> ResponseEntity
                     .status(ready.created() ? HttpStatus.CREATED : HttpStatus.OK)

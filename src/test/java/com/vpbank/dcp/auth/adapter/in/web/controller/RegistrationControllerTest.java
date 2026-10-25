@@ -1,7 +1,6 @@
 package com.vpbank.dcp.auth.adapter.in.web.controller;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -10,29 +9,33 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vpbank.dcp.auth.adapter.in.web.common.ErrorMessages;
+import com.vpbank.dcp.auth.adapter.in.web.mapper.RegistrationWebMapper;
 import com.vpbank.dcp.auth.application.port.in.RegisterCustomerCommand;
 import com.vpbank.dcp.auth.application.port.in.RegisterCustomerResult;
 import com.vpbank.dcp.auth.application.port.in.RegisterCustomerUseCase;
-import com.vpbank.dcp.auth.domain.model.RegistrationId;
+import com.vpbank.dcp.auth.config.WebConfiguration;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.Email;
 import com.vpbank.dcp.auth.domain.model.PhoneNumber;
+import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.UserName;
-import com.vpbank.dcp.auth.adapter.in.web.common.ErrorMessages;
-import com.vpbank.dcp.auth.adapter.in.web.common.GlobalExceptionHandler;
-import com.vpbank.dcp.auth.adapter.in.web.common.ResponseHeadersFilter;
-import com.vpbank.dcp.auth.adapter.in.web.mapper.RegistrationWebMapper;
-import com.vpbank.dcp.auth.config.WebConfiguration;
-import org.springframework.context.MessageSource;
 import java.util.UUID;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 
+/** The web slice: envelope, headers, validation, status table and localization, with the use case mocked. */
+@WebMvcTest(controllers = RegistrationController.class, properties = "auth.registration.enabled=true")
+@Import({WebConfiguration.class, RegistrationControllerTest.Mapper.class})
 class RegistrationControllerTest {
     private static final String PATH = "/internal/v1/callback/authentication-creation";
     private static final RegistrationId REQUEST =
@@ -43,22 +46,16 @@ class RegistrationControllerTest {
             {"customerId":"90359","userName":"alice","firstName":"Alice","lastName":"Nguyen",
              "phoneNumber":"+84901234567","email":"alice@example.com"}""";
 
-    private final RegisterCustomerUseCase service = mock(RegisterCustomerUseCase.class);
-    private final MockMvc mvc;
-
-    RegistrationControllerTest() {
-        MessageSource messages = WebConfiguration.errorMessageSource();
-        ErrorMessages errors = new ErrorMessages(messages);
-        LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
-        validator.setValidationMessageSource(messages);
-        validator.afterPropertiesSet();
-        mvc = MockMvcBuilders.standaloneSetup(new RegistrationController(service, new RegistrationWebMapper(errors)))
-                .setControllerAdvice(new GlobalExceptionHandler(errors))
-                .setValidator(validator)
-                .setLocaleResolver(WebConfiguration.acceptHeaderLocaleResolver())
-                .addFilters(new ResponseHeadersFilter())
-                .build();
+    @TestConfiguration
+    static class Mapper {
+        @Bean
+        RegistrationWebMapper registrationWebMapper(ErrorMessages errors) {
+            return new RegistrationWebMapper(errors);
+        }
     }
+
+    @Autowired MockMvc mvc;
+    @MockitoBean RegisterCustomerUseCase service;
 
     @Test
     void aNewAccountIs201WithTheEnvelopeAndHeaders() throws Exception {

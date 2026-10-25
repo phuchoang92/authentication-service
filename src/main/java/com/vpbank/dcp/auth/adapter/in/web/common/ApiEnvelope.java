@@ -1,35 +1,27 @@
 package com.vpbank.dcp.auth.adapter.in.web.common;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.List;
 import java.util.Objects;
 
 /**
  * The response body of every API: {@code {success:true, data}} or
- * {@code {success:false, error:{code, message, details}}}. The correlation ID is only in the
- * {@code X-Correlation-Id} header.
+ * {@code {success:false, error:{code, message, details}}}. The absent half is left out of the
+ * JSON. The correlation ID is only in the {@code X-Correlation-Id} header.
  */
-public final class ApiEnvelope {
-    private ApiEnvelope() {
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record ApiEnvelope<T>(boolean success, T data, ApiError error) {
+
+    public static <T> ApiEnvelope<T> success(T data) {
+        return new ApiEnvelope<>(true, Objects.requireNonNull(data), null);
     }
 
-    public static <T> Success<T> success(T data) {
-        return new Success<>(true, Objects.requireNonNull(data));
+    public static <T> ApiEnvelope<T> failure(String code, String message, List<FieldDetail> details) {
+        return new ApiEnvelope<>(false, null, new ApiError(code, message, List.copyOf(details)));
     }
 
-    public static Failure failure(String code, String message, List<FieldDetail> details) {
-        return new Failure(false, new Error(code, message, List.copyOf(details)));
-    }
-
-    public static Failure failure(String code, String message) {
+    public static <T> ApiEnvelope<T> failure(String code, String message) {
         return failure(code, message, List.of());
     }
-
-    public record Success<T>(boolean success, T data) { }
-
-    public record Failure(boolean success, Error error) { }
-
-    public record Error(String code, String message, List<FieldDetail> details) { }
-
-    /** A field that failed validation. Never carries the submitted value. */
-    public record FieldDetail(String field, String message) { }
 }

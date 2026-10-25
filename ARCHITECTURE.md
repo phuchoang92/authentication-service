@@ -96,9 +96,9 @@ com.vpbank.dcp.auth
 ├── adapter
 │   ├── in
 │   │   └── web                               ring 3 — Spring MVC
-│   │       ├── common                        ApiEnvelope, ApiError, FieldDetail, InvalidRequestException,
+│   │       ├── common                        ApiEnvelope<T>, ApiError, FieldDetail, InvalidRequestException,
 │   │       │                                 GlobalExceptionHandler, ResponseHeadersFilter,
-│   │       │                                 ErrorMessages (localized text by error code)
+│   │       │                                 ErrorCodes (every code), ErrorMessages (localized text by code)
 │   │       ├── controller                    RegistrationController
 │   │       ├── dto
 │   │       │   ├── request                   RegistrationRequest
@@ -136,16 +136,8 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-25, after the refactor to this document):** the code matches the tree
-above. Persistence is Spring Data JPA (`RegistrationEntity`, `CustomerAuthenticationEntity`,
-two `JpaRepository` interfaces, `RegistrationPersistenceMapper`, `RegistrationPersistenceAdapter`
-plus `RegistrationCompletion` holding the one two-table `@Transactional` step) with
-`ddl-auto=validate` against the Flyway schema. Error messages are localized (§9.1): `ErrorCodes`,
-`ErrorMessages`, `messages/errors_vi|en.properties`, `ValidationMessages_vi|en.properties`;
-`RegistrationWebMapper` is an instance created in `RegistrationConfiguration`. Partner adapters
-have `dto` and `mapper` packages. `RegistrationConfiguration` exposes one bean per outbound port.
-`ApplicationBootIT` boots the whole application against MySQL with the ports mocked. Still
-illustrative only: Login and Trusted Device examples below.
+**Current (2026-10-25):** the code matches the tree above; `ArchitectureTest` enforces the
+**[arch]** rules of §4 and §10. Login and Trusted Device examples below are illustrative only.
 
 ---
 
@@ -342,7 +334,7 @@ public class RegistrationEntity extends AuditedEntity {
     @Column(name = "IDENTITY_ISSUER") private String identityIssuer;
     @Column(name = "IDENTITY_SUBJECT") private String identitySubject;
     @Column(name = "EXPIRES_AT") private Instant expiresAt;
-    @Column(name = "OPEN_SLOT", insertable = false, updatable = false) private Integer openSlot; // generated column
+    @Column(name = "OPEN_SLOT", insertable = false, updatable = false) private Byte openSlot; // generated TINYINT
     @Version @Column(name = "VERSION") private long version;
 }
 ```
@@ -529,11 +521,11 @@ and updates; `Commands`/`Queries` interfaces and an interface per method are not
 | `domain` | unit | JUnit, AssertJ | every legal and illegal transition, value validation, redaction |
 | `application.service` | unit | Mockito ports and called capability services + in-memory repository double | flow order, published cross-capability outcomes, each failure leaves the right state, retries never call partners blindly |
 | `mapper` | unit | JUnit | round trips, status/code table |
-| `adapter.in.web` | slice | `@WebMvcTest` with a mocked use case | envelope, headers, validation 400 details, status table |
+| `adapter.in.web` | slice | `@WebMvcTest` with a `@MockitoBean` use case, `WebConfiguration` imported | envelope, headers, validation 400 details, status table, Accept-Language |
 | `adapter.out.persistence` | integration | `@DataJpaTest` + Testcontainers MySQL 8.4 + Flyway | schema validation, unique keys, CAS, transactions |
 | `adapter.out.<partner>` | unit | `MockRestServiceServer` | request shape, status mapping, timeout → unavailable |
 | `config` | slice | `ApplicationContextRunner` | flag off = no beans; invalid values or missing required settings fail startup naming the key; validated properties map to the correct scalar/plain-Java settings |
-| whole app | integration | `@SpringBootTest` + Testcontainers + `MockRestServiceServer` | one happy path end to end |
+| whole app | integration | `@SpringBootTest` + `@AutoConfigureMockMvc` + Testcontainers MySQL, the three partner **ports** replaced by `@MockitoBean` (partner HTTP is already proven by the adapter tests) | boot with Flyway + JPA validation, web → use case → JPA → database, retry answered from the database |
 | rules | static | ArchUnit | implemented §4, §10 and naming rules; role-only packages, layer boundaries and service cycles require future test updates |
 
 Conventions: a test class sits in the same package as the class under test; names read as
@@ -630,70 +622,77 @@ public interface RegistrationRepository {
     CompleteResult complete(Registration completed);        // identity row + READY, one transaction
 }
 
-// adapter.out.persistence.adapter — owns the transaction and the mapping
-@Transactional
+// adapter.out.persistence.adapter — translates Spring exceptions; owns the one two-table transaction
+@RequiredArgsConstructor
 public class RegistrationPersistenceAdapter implements RegistrationRepository {
+    @NonNull private final RegistrationJpaRepository registrations;
+    @NonNull private final CustomerAuthenticationJpaRepository identities;
+
     @Override
-    public Optional<Registration> save(Registration changed) {
+    public Optional<Registration> save(Registration changed) {            // compare-and-set via @Version
         try {
-            RegistrationEntity entity = registrations.findById(changed.id().value()).orElseThrow();
-            if (entity.getVersion() != changed.version()) {
+            Optional<RegistrationEntity> current = registrations.findById(changed.id().value());
+            if (current.isEmpty() || current.get().getVersion() != changed.version()) {
                 return Optional.empty();
             }
-            RegistrationPersistenceMapper.apply(entity, changed);
-            return Optional.of(RegistrationPersistenceMapper.toDomain(registrations.saveAndFlush(entity)));
+            RegistrationPersistenceMapper.apply(current.get(), changed);
+            return Optional.of(RegistrationPersistenceMapper.toDomain(registrations.saveAndFlush(current.get())));
         } catch (ObjectOptimisticLockingFailureException stale) {
             return Optional.empty();
         } catch (DataAccessException failure) {
             throw new RepositoryUnavailableException(failure);
         }
     }
+
+    @Override
+    @Transactional                                                        // identity row + READY together
+    public CompleteResult complete(Registration completed) { … }
 }
 
 // adapter.in.web.controller — a controller is glue: map in, call the use case, map out
 @RestController
+@RequiredArgsConstructor
 public class RegistrationController {
-    private final RegisterCustomerUseCase registerCustomer;
+    @NonNull private final RegisterCustomerUseCase registerCustomer;
+    @NonNull private final RegistrationWebMapper mapper;
 
     @PostMapping(path = "/internal/v1/callback/authentication-creation",
             consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<RegistrationResponse>> create(@Valid @RequestBody RegistrationRequest body) {
-        RegisterCustomerCommand command = RegistrationWebMapper.toCommand(body);
+        RegisterCustomerCommand command = mapper.toCommand(body);
         RegisterCustomerResult result = registerCustomer.register(command);
-        return RegistrationWebMapper.toResponse(result);
+        return mapper.toResponse(result);
     }
 }
 
-// adapter.in.web.mapper — validation of values happens here, as 400
+// adapter.in.web.mapper — an instance because the text comes from ErrorMessages (§9.1)
+@RequiredArgsConstructor
 public final class RegistrationWebMapper {
-    private RegistrationWebMapper() { }
+    @NonNull private final ErrorMessages errors;
 
     /** Bean Validation already rejected bad formats; a value object that still refuses is a 400. */
-    public static RegisterCustomerCommand toCommand(RegistrationRequest request) {
+    public RegisterCustomerCommand toCommand(RegistrationRequest request) {
         try {
             return RegisterCustomerCommand.builder()
                     .customerId(new CustomerId(request.customerId()))
                     .userName(new UserName(request.userName()))
                     .firstName(request.firstName()).lastName(request.lastName())
                     .phoneNumber(new PhoneNumber(request.phoneNumber()))
-                    .email(request.email() == null || request.email().isBlank() ? null : new Email(request.email()))
+                    .email(blank(request.email()) ? null : new Email(request.email()))
                     .build();
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());   // → 400 REQUEST_REJECTED
         }
     }
 
-    public static ResponseEntity<ApiEnvelope<RegistrationResponse>> toResponse(RegisterCustomerResult result) {
+    public ResponseEntity<ApiEnvelope<RegistrationResponse>> toResponse(RegisterCustomerResult result) {
         return switch (result) {
-            case Ready r -> ResponseEntity.status(r.created() ? 201 : 200)
+            case Ready r -> ResponseEntity.status(r.created() ? HttpStatus.CREATED : HttpStatus.OK)
                     .body(ApiEnvelope.success(new RegistrationResponse(r.requestId().value(),
                             r.customerId().value(), r.userName().value(), "READY")));
-            case IdentityConflict c -> ApiEnvelope.failure(HttpStatus.CONFLICT, "IDENTITY_CONFLICT",
-                    "The customer or user name is linked to another identity");
-            case ProfileIncomplete p -> ApiEnvelope.failure(HttpStatus.CONFLICT, "CUSTOMER_PROFILE_INCOMPLETE",
-                    "The customer profile does not allow account creation");
-            case Unavailable u -> ApiEnvelope.failure(HttpStatus.SERVICE_UNAVAILABLE, "ACCOUNT_CREATION_UNAVAILABLE",
-                    "Authentication account creation could not be completed");
+            case IdentityConflict() -> errors.failure(HttpStatus.CONFLICT, ErrorCodes.IDENTITY_CONFLICT);
+            case ProfileIncomplete() -> errors.failure(HttpStatus.CONFLICT, ErrorCodes.CUSTOMER_PROFILE_INCOMPLETE);
+            case Unavailable() -> errors.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.ACCOUNT_CREATION_UNAVAILABLE);
         };
     }
 }

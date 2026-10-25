@@ -1,6 +1,5 @@
 package com.vpbank.dcp.auth.config;
 
-import com.vpbank.dcp.auth.adapter.out.persistence.adapter.RegistrationCompletion;
 import com.vpbank.dcp.auth.adapter.out.persistence.adapter.RegistrationPersistenceAdapter;
 import com.vpbank.dcp.auth.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.adapter.out.persistence.repository.RegistrationJpaRepository;
@@ -12,7 +11,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 /**
  * MySQL through Spring Data JPA. Entities and repositories are picked up from their role
- * packages only; a new table is registered by adding its types there, nothing else.
+ * packages only; a new table is registered by adding its types there, nothing else. Adapters
+ * are typed by their port so the {@code @Transactional} proxy is interface-based.
  */
 @Configuration(proxyBeanMethods = false)
 @EntityScan(basePackages = "com.vpbank.dcp.auth.adapter.out.persistence.entity")
@@ -20,14 +20,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 public class JpaConfiguration {
 
     @Bean
-    RegistrationCompletion registrationCompletion(RegistrationJpaRepository registrations,
-                                                  CustomerAuthenticationJpaRepository identities) {
-        return new RegistrationCompletion(registrations, identities);
-    }
-
-    @Bean
     RegistrationRepository registrationRepository(RegistrationJpaRepository registrations,
-                                                  RegistrationCompletion completion) {
-        return new RegistrationPersistenceAdapter(registrations, completion);
+                                                  CustomerAuthenticationJpaRepository identities) {
+        return new RegistrationPersistenceAdapter(registrations, identities);
     }
 }

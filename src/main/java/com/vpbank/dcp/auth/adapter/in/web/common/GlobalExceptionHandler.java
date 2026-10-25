@@ -24,9 +24,9 @@ public class GlobalExceptionHandler {
     @NonNull private final ErrorMessages errors;
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiEnvelope.Failure> invalid(MethodArgumentNotValidException invalid) {
-        List<ApiEnvelope.FieldDetail> details = invalid.getBindingResult().getFieldErrors().stream()
-                .map(error -> new ApiEnvelope.FieldDetail(error.getField(), error.getDefaultMessage()))
+    public ResponseEntity<ApiEnvelope<Void>> invalid(MethodArgumentNotValidException invalid) {
+        List<FieldDetail> details = invalid.getBindingResult().getFieldErrors().stream()
+                .map(error -> new FieldDetail(error.getField(), error.getDefaultMessage()))
                 .sorted((a, b) -> a.field().compareTo(b.field()))
                 .toList();
         return errors.failure(HttpStatus.BAD_REQUEST, ErrorCodes.REQUEST_REJECTED, details);
@@ -34,25 +34,25 @@ public class GlobalExceptionHandler {
 
     /** A value object refused what Bean Validation let through; the rule name is not user text. */
     @ExceptionHandler(InvalidRequestException.class)
-    public ResponseEntity<ApiEnvelope.Failure> invalidValue(InvalidRequestException invalid) {
+    public ResponseEntity<ApiEnvelope<Void>> invalidValue(InvalidRequestException invalid) {
         LOG.info("Request rejected by a value object: {}", invalid.getMessage());
         return errors.failure(HttpStatus.BAD_REQUEST, ErrorCodes.REQUEST_REJECTED);
     }
 
     @ExceptionHandler({HttpMessageNotReadableException.class, HttpMediaTypeNotSupportedException.class})
-    public ResponseEntity<ApiEnvelope.Failure> unreadable(Exception ignored) {
+    public ResponseEntity<ApiEnvelope<Void>> unreadable(Exception ignored) {
         return errors.failure(HttpStatus.BAD_REQUEST, ErrorCodes.REQUEST_REJECTED);
     }
 
     /** A domain state machine was driven out of order: a bug, not an outage. */
     @ExceptionHandler(RegistrationStateException.class)
-    public ResponseEntity<ApiEnvelope.Failure> bug(RegistrationStateException failure) {
+    public ResponseEntity<ApiEnvelope<Void>> bug(RegistrationStateException failure) {
         LOG.error("Illegal state transition: {}", failure.getMessage());
         return errors.failure(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCodes.INTERNAL_ERROR);
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiEnvelope.Failure> unexpected(Exception failure) {
+    public ResponseEntity<ApiEnvelope<Void>> unexpected(Exception failure) {
         LOG.error("Request failed: exceptionType={}", failure.getClass().getName());
         return errors.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
     }

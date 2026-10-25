@@ -22,12 +22,11 @@ public final class ErrorMessages {
         return messages.getMessage(code, args, LocaleContextHolder.getLocale());
     }
 
-    public ResponseEntity<ApiEnvelope.Failure> failure(HttpStatus status, String code, Object... args) {
+    public <T> ResponseEntity<ApiEnvelope<T>> failure(HttpStatus status, String code, Object... args) {
         return ResponseEntity.status(status).body(ApiEnvelope.failure(code, message(code, args)));
     }
 
-    public ResponseEntity<ApiEnvelope.Failure> failure(HttpStatus status, String code,
-                                                       List<ApiEnvelope.FieldDetail> details) {
+    public <T> ResponseEntity<ApiEnvelope<T>> failure(HttpStatus status, String code, List<FieldDetail> details) {
         return ResponseEntity.status(status).body(ApiEnvelope.failure(code, message(code), details));
     }
 }

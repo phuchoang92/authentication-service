@@ -1,6 +1,8 @@
 package com.vpbank.dcp.auth.adapter.in.web.controller;
 
+import com.vpbank.dcp.auth.adapter.in.web.common.ApiEnvelope;
 import com.vpbank.dcp.auth.adapter.in.web.dto.request.RegistrationRequest;
+import com.vpbank.dcp.auth.adapter.in.web.dto.response.RegistrationResponse;
 import com.vpbank.dcp.auth.adapter.in.web.mapper.RegistrationWebMapper;
 import com.vpbank.dcp.auth.application.port.in.RegisterCustomerCommand;
 import com.vpbank.dcp.auth.application.port.in.RegisterCustomerResult;
@@ -29,7 +31,7 @@ public class RegistrationController {
 
     @PostMapping(path = "/internal/v1/callback/authentication-creation",
             consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> create(@Valid @RequestBody RegistrationRequest body) {
+    public ResponseEntity<ApiEnvelope<RegistrationResponse>> create(@Valid @RequestBody RegistrationRequest body) {
         RegisterCustomerCommand command = mapper.toCommand(body);
         RegisterCustomerResult result = registerCustomer.register(command);
         return mapper.toResponse(result);
