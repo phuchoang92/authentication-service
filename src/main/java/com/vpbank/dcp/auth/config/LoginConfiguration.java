@@ -22,11 +22,15 @@ import com.vpbank.dcp.auth.application.port.out.CustomerAuthenticationRepository
 import com.vpbank.dcp.auth.application.port.out.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.port.out.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.service.CaptchaService;
 import com.vpbank.dcp.auth.application.service.LoginService;
 import com.vpbank.dcp.auth.application.service.PasswordUnlockService;
 import com.vpbank.dcp.auth.application.service.SessionService;
+import com.vpbank.dcp.auth.application.service.TrustedDeviceService;
+import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
+import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -51,10 +55,21 @@ public class LoginConfiguration {
     @Bean
     LoginUseCase loginUseCase(CustomerAuthenticationRepository identities, CredentialVerifierPort credentials,
                               CaptchaStore captchas, SessionStore sessions, TokenEnvelopeSealer sealer,
-                              OpaqueTokenGenerator tokens, SessionPolicy policy, LockoutPolicy lockoutPolicy, Clock clock) {
-        return new LoginService(identities, credentials, captchas, sessions, sealer, tokens, SessionId::random, policy,
-                lockoutPolicy, clock);
+                              OpaqueTokenGenerator tokens, TrustedDeviceService trustedDevices, SessionPolicy policy,
+                              LockoutPolicy lockoutPolicy, DevicePolicy devicePolicy, Clock clock) {
+        return new LoginService(identities, credentials, captchas, sessions, sealer, tokens, SessionId::random,
+                trustedDevices, policy, lockoutPolicy, devicePolicy, clock);
     }
+
+    /**
+     * Exposed by its concrete type: LoginService depends on it directly (§6.1), while the controller
+     * is injected by the ListDevicesUseCase interface it implements (one bean, two views).
+     */
+    @Bean
+    TrustedDeviceService trustedDeviceService(TrustedDeviceRepository devices, DevicePolicy devicePolicy, Clock clock) {
+        return new TrustedDeviceService(devices, devicePolicy, TrustedDeviceId::random, clock);
+    }
+
 
     @Bean
     IssueCaptchaUseCase issueCaptchaUseCase(CustomerAuthenticationRepository identities, CaptchaGenerator generator,

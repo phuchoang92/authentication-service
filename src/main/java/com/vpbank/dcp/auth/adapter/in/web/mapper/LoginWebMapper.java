@@ -13,6 +13,7 @@ import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.Channel;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.Password;
 import com.vpbank.dcp.auth.domain.model.UserName;
 import lombok.NonNull;
@@ -35,6 +36,8 @@ public final class LoginWebMapper {
                     .password(new Password(request.password().toCharArray()))
                     .channel(Channel.valueOf(request.channel()))
                     .deviceId(request.deviceId() == null ? null : new DeviceId(request.deviceId()))
+                    .platform(request.platform() == null ? null : DevicePlatform.valueOf(request.platform()))
+                    .devicePublicKey(request.devicePublicKey() == null ? null : json(request.devicePublicKey()))
                     .tokenEncryptionKey(json(request.tokenEncryptionKey()))
                     .captcha(request.captcha() == null ? null : new CaptchaSolution(
                             new CaptchaId(java.util.UUID.fromString(request.captcha().captchaId())),

@@ -1,6 +1,7 @@
 package com.vpbank.dcp.auth.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -23,6 +24,10 @@ import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DevicePlatform;
+import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.TrustedDevice;
+import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Password;
@@ -52,9 +57,12 @@ class LoginServiceTest {
     private final InMemorySessionStore sessions = new InMemorySessionStore();
     private final TokenEnvelopeSealer sealer = mock(TokenEnvelopeSealer.class);
     private final OpaqueTokenGenerator tokens = mock(OpaqueTokenGenerator.class);
+    private final InMemoryTrustedDeviceRepository devices = new InMemoryTrustedDeviceRepository();
+    private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final LoginService service = new LoginService(identities, credentials, captchas, sessions, sealer, tokens,
-            SessionId::random, new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)),
-            LockoutPolicy.standard(), Clock.fixed(NOW, ZoneOffset.UTC));
+            SessionId::random, new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random, clock),
+            new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)),
+            LockoutPolicy.standard(), DevicePolicy.standard(), clock);
 
     @BeforeEach
     void happyPath() {
@@ -82,6 +90,37 @@ class LoginServiceTest {
         assertThat(sessions.only().channel()).isEqualTo(Channel.MOBILE);
         assertThat(password.value()).containsOnly('\0');
         assertThat(identities.only().version()).isZero(); // no lockout write when nothing to reset
+        // The first device of the customer was trusted and made primary on the way.
+        assertThat(devices.only().deviceId()).isEqualTo(new DeviceId("dev-1"));
+        assertThat(devices.findPrimary(CUSTOMER, Channel.MOBILE)).contains(devices.only().id());
+    }
+
+    @Test
+    void aSecondDeviceGetsARestrictedNeedTrustedDeviceSessionWithATenMinuteTtl() {
+        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), CUSTOMER, Channel.MOBILE,
+                new DeviceId("phone"), DevicePlatform.ANDROID, null, NOW, DevicePolicy.standard());
+        devices.rows.put(phone.id(), phone);
+        devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(CUSTOMER, Channel.MOBILE), phone.id());
+
+        LoginResult result = service.login(command());
+
+        assertThat(result).isInstanceOf(LoginResult.Authenticated.class);
+        LoginResult.Authenticated restricted = (LoginResult.Authenticated) result;
+        assertThat(restricted.status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
+        assertThat(restricted.idleExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
+        assertThat(restricted.absoluteExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
+        assertThat(sessions.only().status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
+        assertThat(devices.rows).hasSize(1); // the tablet is not registered by the direct path
+    }
+
+    @Test
+    void aWebLoginNeedsNoDeviceAndIsAlwaysFull() {
+        LoginCommand web = LoginCommand.builder().userName(ALICE).password(new Password("Secret123".toCharArray()))
+                .channel(Channel.WEB).tokenEncryptionKey(KENC).build();
+        assertThat(((LoginResult.Authenticated) service.login(web)).status()).isEqualTo(SessionStatus.ACTIVE);
+        assertThat(devices.rows).isEmpty();
+        assertThatThrownBy(() -> LoginCommand.builder().userName(ALICE).password(new Password("x".toCharArray()))
+                .channel(Channel.MOBILE).tokenEncryptionKey(KENC).build()).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -209,13 +248,13 @@ class LoginServiceTest {
 
     private static LoginCommand withCaptcha(LoginCommand command, CaptchaId id, String answer) {
         return LoginCommand.builder().userName(command.userName()).password(command.password()).channel(command.channel())
-                .deviceId(command.deviceId()).tokenEncryptionKey(command.tokenEncryptionKey())
+                .deviceId(command.deviceId()).platform(command.platform()).tokenEncryptionKey(command.tokenEncryptionKey())
                 .captcha(new CaptchaSolution(id, new CaptchaAnswer(answer))).build();
     }
 
     private static LoginCommand command(Password password) {
         return LoginCommand.builder().userName(ALICE).password(password).channel(Channel.MOBILE)
-                .deviceId(new DeviceId("dev-1")).tokenEncryptionKey(KENC).build();
+                .deviceId(new DeviceId("dev-1")).platform(DevicePlatform.ANDROID).tokenEncryptionKey(KENC).build();
     }
 
     private static CustomerAuthentication identity(String status, PasswordLockout lockout) {

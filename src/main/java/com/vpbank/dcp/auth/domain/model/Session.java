@@ -8,8 +8,9 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * One login session. Idle expiry slides with eligible activity up to the fixed absolute
- * expiry (DD 06 / flow 16). {@code sessionVersion} is the compare-and-set revision the store
+ * One login session. An ACTIVE session's idle expiry slides with eligible activity up to the
+ * fixed absolute expiry (DD 06 / flow 16). A NEED_TRUSTED_DEVICE session is restricted: one fixed
+ * TTL, never extended (DD 20 §3). {@code sessionVersion} is the compare-and-set revision the store
  * must still see when it saves a change; each saved change increments it in the store.
  */
 @Builder(toBuilder = true)
@@ -38,9 +39,23 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
                 .sessionVersion(0).build();
     }
 
-    /** ACTIVE and neither deadline has passed. */
+    /** A restricted session for a device that still needs trust: idle = absolute = now + TTL. */
+    public static Session startRestricted(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
+                                          Instant now, DevicePolicy policy) {
+        Instant end = now.plus(policy.restrictedSessionTtl());
+        return Session.builder().id(id).customerId(customerId).deviceId(deviceId).channel(channel)
+                .status(SessionStatus.NEED_TRUSTED_DEVICE).createdAt(now).idleExpiresAt(end).absoluteExpiresAt(end)
+                .sessionVersion(0).build();
+    }
+
+    /** Not ended and neither deadline has passed (restricted sessions are live too). */
     public boolean isLive(Instant now) {
-        return status == SessionStatus.ACTIVE && now.isBefore(idleExpiresAt) && now.isBefore(absoluteExpiresAt);
+        return status.live() && now.isBefore(idleExpiresAt) && now.isBefore(absoluteExpiresAt);
+    }
+
+    /** Live and ACTIVE: may call business routes and be extended. */
+    public boolean isFull(Instant now) {
+        return isLive(now) && status.full();
     }
 
     /**
@@ -50,6 +65,9 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
      */
     public Session extend(Instant admittedAt, Instant now, SessionPolicy policy) {
         requireLive(now);
+        if (!status.full()) {
+            throw new SessionStateException("A " + status + " session is never extended");
+        }
         Duration skew = Duration.between(admittedAt, now).abs();
         if (skew.compareTo(policy.maxAdmittedAtSkew()) > 0) {
             throw new IllegalArgumentException("Admission time is outside the accepted skew");
@@ -60,7 +78,7 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
     }
 
     public Session end(Instant now) {
-        if (status != SessionStatus.ACTIVE) {
+        if (!status.live()) {
             throw new SessionStateException("Session is already " + status);
         }
         return toBuilder().status(SessionStatus.ENDED).build();

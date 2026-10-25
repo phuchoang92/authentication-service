@@ -13,6 +13,8 @@ import com.vpbank.dcp.auth.application.port.out.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DeviceRouting;
+import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
@@ -37,8 +39,8 @@ import java.util.function.Supplier;
  * without a valid CAPTCHA bound to this customer is refused before Keycloak and does not count as
  * a password failure (slice 3 policy). Every failure on an existing identity
  * is counted with compare-and-set; only a success resets the count. The password is wiped as soon
- * as the provider has answered. Trusted-device rules are a later slice; this service records the
- * device ID and nothing more.
+ * as the provider has answered. After the password, {@link TrustedDeviceService} decides whether this
+ * device gets a full ACTIVE session or a restricted NEED_TRUSTED_DEVICE one (DD 20 §2).
  */
 @RequiredArgsConstructor
 public final class LoginService implements LoginUseCase {
@@ -49,8 +51,10 @@ public final class LoginService implements LoginUseCase {
     @NonNull private final TokenEnvelopeSealer sealer;
     @NonNull private final OpaqueTokenGenerator tokens;
     @NonNull private final Supplier<SessionId> sessionIds;
+    @NonNull private final TrustedDeviceService trustedDevices;
     @NonNull private final SessionPolicy policy;
     @NonNull private final LockoutPolicy lockoutPolicy;
+    @NonNull private final DevicePolicy devicePolicy;
     @NonNull private final Clock clock;
 
     /** A challenge is consumed on first use whether right or wrong, so a guess costs a new CAPTCHA. */
@@ -98,8 +102,15 @@ public final class LoginService implements LoginUseCase {
             if (identity.get().lockout().failedCount() > 0) {
                 identities.saveLockoutIfCurrent(identity.get(), identity.get().lockout().reset());
             }
-            Session session = Session.start(sessionIds.get(), identity.get().customerId(), command.deviceId(),
-                    command.channel(), clock.instant(), policy);
+            SessionId sessionId = sessionIds.get();
+            DeviceRouting routing = trustedDevices.routeAfterPassword(identity.get().customerId(), command.channel(),
+                    command.deviceId(), command.platform(), command.devicePublicKey(), sessionId.toString());
+            Session session = switch (routing) {
+                case DeviceRouting.FullSession() -> Session.start(sessionId, identity.get().customerId(),
+                        command.deviceId(), command.channel(), clock.instant(), policy);
+                case DeviceRouting.NeedTrust() -> Session.startRestricted(sessionId, identity.get().customerId(),
+                        command.deviceId(), command.channel(), clock.instant(), devicePolicy);
+            };
             OpaqueToken token = tokens.next();
             String envelope = sealer.seal(command.tokenEncryptionKey(), token, session);
             sessions.create(session, token);

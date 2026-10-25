@@ -15,6 +15,7 @@ public final class ErrorCodes {
     public static final String CAPTCHA_REQUIRED = "CAPTCHA_REQUIRED";
     public static final String LOGIN_UNAVAILABLE = "LOGIN_UNAVAILABLE";
     public static final String SESSION_REQUIRED = "SESSION_REQUIRED";
+    public static final String DEVICE_TRUST_REQUIRED = "DEVICE_TRUST_REQUIRED";
     public static final String SESSION_GONE = "SESSION_GONE";
     public static final String SESSION_CONFLICT = "SESSION_CONFLICT";
     public static final String CUSTOMER_UNKNOWN = "CUSTOMER_UNKNOWN";

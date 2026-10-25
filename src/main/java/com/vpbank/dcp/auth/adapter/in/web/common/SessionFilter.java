@@ -3,6 +3,7 @@ package com.vpbank.dcp.auth.adapter.in.web.common;
 import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
 import com.vpbank.dcp.auth.application.port.in.SessionSummary;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
+import com.vpbank.dcp.auth.domain.model.SessionStatus;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,9 +22,10 @@ import java.util.Optional;
 /**
  * The session check for {@code /api/**}: {@code /api/ns/**} (no session) and {@code /internal/**}
  * pass through; everything else needs {@code Authorization: Bearer k1.<43>} that resolves to a
- * live session, which is then available to controllers as a request attribute. Resolving never
- * touches idle time (the BFF's extend call does). A failure writes the envelope itself because
- * filters run before controller advice.
+ * live session, which is then available to controllers as a request attribute. A restricted
+ * NEED_TRUSTED_DEVICE session may only log out or call the trusted-device routes (DD 20 §3);
+ * anything else is 403 DEVICE_TRUST_REQUIRED. Resolving never touches idle time (the BFF's extend
+ * call does). A failure writes the envelope itself because filters run before controller advice.
  */
 @RequiredArgsConstructor
 public final class SessionFilter extends OncePerRequestFilter {
@@ -31,6 +33,8 @@ public final class SessionFilter extends OncePerRequestFilter {
     public static final String TOKEN_ATTRIBUTE = "com.vpbank.dcp.auth.session.token";
     static final String PROTECTED_PREFIX = "/api/";
     static final String OPEN_PREFIX = "/api/ns/";
+    /** What a restricted session may still reach. */
+    static final java.util.List<String> RESTRICTED_ALLOWED = java.util.List.of("/api/v1/logout", "/api/v1/trusted-device/");
     private static final String BEARER = "Bearer ";
 
     @NonNull private final CurrentSessionUseCase sessions;
@@ -50,7 +54,11 @@ public final class SessionFilter extends OncePerRequestFilter {
         Optional<OpaqueToken> token = bearer(request.getHeader(HttpHeaders.AUTHORIZATION));
         Optional<SessionSummary> session = token.flatMap(sessions::resolve);
         if (session.isEmpty()) {
-            reject(request, response);
+            reject(request, response, HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
+            return;
+        }
+        if (session.get().status() != SessionStatus.ACTIVE && !restrictedAllowed(request.getRequestURI())) {
+            reject(request, response, HttpStatus.FORBIDDEN, ErrorCodes.DEVICE_TRUST_REQUIRED);
             return;
         }
         request.setAttribute(SESSION_ATTRIBUTE, session.get());
@@ -69,13 +77,18 @@ public final class SessionFilter extends OncePerRequestFilter {
         }
     }
 
-    private void reject(HttpServletRequest request, HttpServletResponse response) throws IOException {
-        response.setStatus(HttpStatus.UNAUTHORIZED.value());
+    private static boolean restrictedAllowed(String path) {
+        return RESTRICTED_ALLOWED.stream().anyMatch(allowed -> allowed.endsWith("/") ? path.startsWith(allowed) : path.equals(allowed));
+    }
+
+    private void reject(HttpServletRequest request, HttpServletResponse response, HttpStatus status, String code)
+            throws IOException {
+        response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
-        String message = errors.message(locales.resolveLocale(request), ErrorCodes.SESSION_REQUIRED)
+        String message = errors.message(locales.resolveLocale(request), code)
                 .replace("\\", "\\\\").replace("\"", "\\\"");
-        response.getWriter().write("{\"success\":false,\"error\":{\"code\":\"" + ErrorCodes.SESSION_REQUIRED
+        response.getWriter().write("{\"success\":false,\"error\":{\"code\":\"" + code
                 + "\",\"message\":\"" + message + "\",\"details\":[]}}");
     }
 }

@@ -40,7 +40,7 @@ public final class SessionService implements CurrentSessionUseCase, ExtendSessio
         Instant now = clock.instant();
         return sessions.findByToken(token).map(StoredSession::session).filter(session -> session.isLive(now))
                 .map(session -> new SessionSummary(session.id(), session.customerId(), session.deviceId(),
-                        session.channel(), session.idleExpiresAt(), session.absoluteExpiresAt()));
+                        session.channel(), session.status(), session.idleExpiresAt(), session.absoluteExpiresAt()));
     }
 
     @Override
@@ -54,8 +54,9 @@ public final class SessionService implements CurrentSessionUseCase, ExtendSessio
         try {
             for (int attempt = 0; attempt < EXTEND_ATTEMPTS; attempt++) {
                 Instant now = clock.instant();
+                // Only a full ACTIVE session is extended; a restricted one has a fixed TTL (DD 20 §3).
                 Optional<Session> current = sessions.findByLookup(lookup).map(StoredSession::session)
-                        .filter(session -> session.isLive(now));
+                        .filter(session -> session.isFull(now));
                 if (current.isEmpty()) {
                     return new ExtendSessionResult.Gone();
                 }

@@ -1,0 +1,7 @@
+package com.vpbank.dcp.auth.domain.model;
+
+/** TRUST_LEVEL of a device row: a registered installation is NONE until trust is granted. */
+public enum TrustLevel {
+    NONE,
+    TRUSTED
+}

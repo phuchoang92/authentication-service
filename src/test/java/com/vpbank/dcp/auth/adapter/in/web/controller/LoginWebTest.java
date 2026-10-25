@@ -20,6 +20,8 @@ import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.ExtendSessionResult;
 import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginResult;
+import com.vpbank.dcp.auth.application.port.in.DeviceSummary;
+import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.in.LogoutCommand;
 import com.vpbank.dcp.auth.application.port.in.LogoutResult;
@@ -49,7 +51,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /** Web slice for slice 2: login, logout behind the session filter, extend; use cases mocked. */
 @WebMvcTest(controllers = {LoginController.class, SessionController.class, SessionExtensionController.class,
-        CaptchaController.class, PasswordUnlockController.class},
+        CaptchaController.class, PasswordUnlockController.class, DeviceController.class},
         properties = "auth.login.enabled=true")
 @Import({WebConfiguration.class, LoginWebTest.Beans.class})
 class LoginWebTest {
@@ -57,7 +59,7 @@ class LoginWebTest {
     private static final Instant IDLE = Instant.parse("2026-10-25T10:15:00Z");
     private static final Instant ABSOLUTE = Instant.parse("2026-10-25T10:20:00Z");
     private static final String LOGIN_BODY = """
-            {"userName":"alice","password":"Secret123","channel":"MOBILE","deviceId":"dev-1",
+            {"userName":"alice","password":"Secret123","channel":"MOBILE","deviceId":"dev-1","platform":"ANDROID",
              "tokenEncryptionKey":{"kty":"EC","crv":"P-256","x":"abc","y":"def"}}""";
     private static final String EXTEND_BODY = """
             {"sessionLookup":{"lookupKeyVersion":"k1","lookupDigest":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
@@ -81,6 +83,7 @@ class LoginWebTest {
     @MockitoBean CurrentSessionUseCase current;
     @MockitoBean IssueCaptchaUseCase captchas;
     @MockitoBean UnlockPasswordUseCase unlock;
+    @MockitoBean ListDevicesUseCase devices;
 
     @Test
     void loginIs201WithTheEnvelopeAndNeverTheTokenAndNoSessionIsNeeded() throws Exception {
@@ -157,6 +160,38 @@ class LoginWebTest {
     }
 
     @Test
+    void anActiveSessionListsItsDevicesMaskedWhileARestrictedOneMayOnlyLogOut() throws Exception {
+        String restrictedToken = "k1." + "B".repeat(43);
+        when(current.resolve(new OpaqueToken(TOKEN))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
+                new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("dev-1"), Channel.MOBILE,
+                SessionStatus.ACTIVE, IDLE, ABSOLUTE)));
+        when(current.resolve(new OpaqueToken(restrictedToken))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
+                new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("tablet-99"), Channel.MOBILE,
+                SessionStatus.NEED_TRUSTED_DEVICE, IDLE, IDLE)));
+        when(devices.list(new CustomerId("90359"), Channel.MOBILE)).thenReturn(java.util.List.of(DeviceSummary.builder()
+                .deviceId(new com.vpbank.dcp.auth.domain.model.DeviceId("dev-12345678"))
+                .platform(com.vpbank.dcp.auth.domain.model.DevicePlatform.ANDROID)
+                .status(com.vpbank.dcp.auth.domain.model.DeviceStatus.ACTIVE)
+                .trustLevel(com.vpbank.dcp.auth.domain.model.TrustLevel.TRUSTED).primary(true)
+                .trustedAt(IDLE).expiresAt(ABSOLUTE).lastLoginAt(IDLE).build()));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/devices")
+                        .header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].deviceId").value("…5678"))
+                .andExpect(jsonPath("$.data[0].primary").value(true))
+                .andExpect(jsonPath("$.data[0].status").value("ACTIVE"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/devices")
+                        .header("Authorization", "Bearer " + restrictedToken).header("Accept-Language", "en"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("DEVICE_TRUST_REQUIRED"))
+                .andExpect(jsonPath("$.error.message").value("This device is not trusted yet, please complete device verification"));
+        when(logout.logout(any())).thenReturn(new LogoutResult.Ended());
+        mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + restrictedToken)).andExpect(status().isNoContent());
+    }
+
+    @Test
     void unlockIsInternalAndMapsEveryOutcome() throws Exception {
         when(unlock.unlock(new CustomerId("90359"))).thenReturn(new UnlockPasswordResult.Unlocked());
         mvc.perform(post("/internal/v1/customers/90359/password-unlock")).andExpect(status().isNoContent());
@@ -191,7 +226,7 @@ class LoginWebTest {
         verifyNoInteractions(logout);
 
         when(current.resolve(new OpaqueToken(TOKEN))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
-                new CustomerId("90359"), null, Channel.MOBILE, IDLE, ABSOLUTE)));
+                new CustomerId("90359"), null, Channel.MOBILE, SessionStatus.ACTIVE, IDLE, ABSOLUTE)));
         when(logout.logout(new LogoutCommand(new OpaqueToken(TOKEN)))).thenReturn(new LogoutResult.Ended());
         mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + TOKEN)).andExpect(status().isNoContent());
         verify(logout).logout(new LogoutCommand(new OpaqueToken(TOKEN)));

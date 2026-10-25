@@ -52,3 +52,13 @@ auth:
     idle: PT15M
     absolute: PT20M
     max-admitted-at-skew: PT30S
+  device:
+    lookup-key-id: ${AUTH_DEVICE_LOOKUP_KEY_ID:d1}
+    lookup-hmac-keys-base64:
+      d1: ${AUTH_DEVICE_LOOKUP_HMAC_KEY_D1_BASE64:}
+    encryption-key-id: ${AUTH_DEVICE_ENCRYPTION_KEY_ID:e1}
+    encryption-keys-base64:
+      e1: ${AUTH_DEVICE_ENCRYPTION_KEY_E1_BASE64:}
+    trust-duration: P180D
+    max-live-devices: 5
+    restricted-session-ttl: PT10M

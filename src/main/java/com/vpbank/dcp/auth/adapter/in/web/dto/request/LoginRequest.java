@@ -10,7 +10,8 @@ import java.util.Map;
 
 /**
  * {@code POST /api/ns/v1/login}. {@code tokenEncryptionKey} is the app's public P-256 JWK (DD 06);
- * {@code captcha} is sent once a login answered 428 CAPTCHA_REQUIRED.
+ * {@code deviceId} and {@code platform} are required on MOBILE, {@code devicePublicKey} (P-256 JWK)
+ * is optional; {@code captcha} is sent once a login answered 428 CAPTCHA_REQUIRED.
  */
 public record LoginRequest(
         @NotBlank(message = "{auth.required}")
@@ -18,6 +19,8 @@ public record LoginRequest(
         @NotBlank(message = "{auth.required}") @Size(max = 128, message = "{auth.tooLong}") String password,
         @NotBlank(message = "{auth.required}") @Pattern(regexp = "MOBILE|WEB", message = "{auth.format}") String channel,
         @Pattern(regexp = "[A-Za-z0-9._-]{1,64}", message = "{auth.format}") String deviceId,
+        @Pattern(regexp = "ANDROID|IOS", message = "{auth.format}") String platform,
+        Map<String, Object> devicePublicKey,
         @NotNull(message = "{auth.required}") Map<String, Object> tokenEncryptionKey,
         @Valid CaptchaDto captcha) {
 

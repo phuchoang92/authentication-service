@@ -73,6 +73,19 @@ class SessionServiceTest {
     }
 
     @Test
+    void aRestrictedSessionResolvesButIsNeverExtended() {
+        OpaqueToken restrictedToken = new OpaqueToken("k1." + "B".repeat(43));
+        sessions.create(Session.startRestricted(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE, T0,
+                com.vpbank.dcp.auth.domain.model.DevicePolicy.standard()), restrictedToken);
+
+        assertThat(service.resolve(restrictedToken)).hasValueSatisfying(summary ->
+                assertThat(summary.status()).isEqualTo(com.vpbank.dcp.auth.domain.model.SessionStatus.NEED_TRUSTED_DEVICE));
+        assertThat(service.extend(ExtendSessionCommand.builder().lookupKeyVersion("k1").lookupDigest("B".repeat(43))
+                .admittedAt(clock.now).routeId("accounts.read").build())).isInstanceOf(ExtendSessionResult.Gone.class);
+        assertThat(service.logout(new LogoutCommand(restrictedToken))).isInstanceOf(LogoutResult.Ended.class);
+    }
+
+    @Test
     void logoutEndsTheSessionAndIsIdempotent() {
         assertThat(service.logout(new LogoutCommand(TOKEN))).isInstanceOf(LogoutResult.Ended.class);
         assertThat(sessions.rows).isEmpty();

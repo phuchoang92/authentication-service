@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -49,8 +50,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * The whole application boots against real MySQL and Valkey with registration and login on. One
  * customer is registered, fails twice (CAPTCHA now required), solves a CAPTCHA, logs in (token
  * envelope decrypted with the test's Kenc), extends the session the BFF way, logs out, then fails
- * until locked and is unlocked by the bank. Partner ports (Customer, Keycloak admin + Direct Grant,
- * Notification) are mocked; the CAPTCHA generator is replaced by a fixed answer.
+ * until locked and is unlocked by the bank; finally a second device gets a restricted session that
+ * can neither list devices nor extend, while the first device sees itself as the trusted primary.
+ * Partner ports (Customer, Keycloak admin + Direct Grant, Notification) are mocked; the CAPTCHA
+ * generator is replaced by a fixed answer.
  */
 @Testcontainers
 @SpringBootTest(properties = {
@@ -86,6 +89,8 @@ class ApplicationBootIT {
         registry.add("spring.data.redis.url", () -> "redis://" + VALKEY.getHost() + ":" + VALKEY.getMappedPort(6379));
         registry.add("auth.registration.request-digest-key-base64", () -> Base64.getEncoder().encodeToString(new byte[32]));
         registry.add("auth.session.lookup-hmac-keys-base64.k1", () -> Base64.getEncoder().encodeToString(new byte[32]));
+        registry.add("auth.device.lookup-hmac-keys-base64.d1", () -> Base64.getEncoder().encodeToString(new byte[32]));
+        registry.add("auth.device.encryption-keys-base64.e1", () -> Base64.getEncoder().encodeToString(new byte[32]));
     }
 
     @Autowired MockMvc mvc;
@@ -110,7 +115,7 @@ class ApplicationBootIT {
         // Two wrong passwords (same answer as an unknown user); the third attempt needs a CAPTCHA.
         ECKey kenc = new ECKeyGenerator(Curve.P_256).generate();
         String loginBody = "{\"userName\":\"alice\",\"password\":\"Secret123\",\"channel\":\"MOBILE\","
-                + "\"deviceId\":\"dev-1\",\"tokenEncryptionKey\":" + kenc.toPublicJWK().toJSONString() + "}";
+                + "\"deviceId\":\"dev-1\",\"platform\":\"ANDROID\",\"tokenEncryptionKey\":" + kenc.toPublicJWK().toJSONString() + "}";
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Rejected());
         for (int i = 0; i < 2; i++) {
             mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
@@ -170,11 +175,48 @@ class ApplicationBootIT {
         assertThat(identities.findById("90359").orElseThrow().getPasswordFailedCount()).isEqualTo(3);
         assertThat(identities.findById("90359").orElseThrow().getPasswordLockoutTime()).isNotNull();
 
-        // The bank unlocks; the next correct login works without a CAPTCHA.
+        // The bank unlocks; the next correct login works without a CAPTCHA and is ACTIVE on the trusted primary.
         mvc.perform(post("/internal/v1/customers/90359/password-unlock")).andExpect(status().isNoContent());
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Verified(ISSUER, "sub-1"));
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
-                .andExpect(status().isCreated());
+        MvcResult phoneLogin = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("ACTIVE")).andReturn();
+        String phoneToken = tokenOf(phoneLogin, kenc);
+
+        // A second installation: right password, but NEED_TRUSTED_DEVICE with a 10-minute restricted session.
+        String tabletBody = loginBody.replace("\"deviceId\":\"dev-1\",\"platform\":\"ANDROID\"",
+                "\"deviceId\":\"tablet-2\",\"platform\":\"IOS\"");
+        MvcResult tabletLogin = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(tabletBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
+        String tabletToken = tokenOf(tabletLogin, kenc);
+        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + tabletToken))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error.code").value("DEVICE_TRUST_REQUIRED"));
+        mvc.perform(post("/internal/v1/sessions/extend").contentType(MediaType.APPLICATION_JSON)
+                        .content(extendBodyFor(tabletToken)))
+                .andExpect(status().isGone());
+        mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + tabletToken)).andExpect(status().isNoContent());
+
+        // The phone sees one device: itself, trusted and primary; the tablet was never registered.
+        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + phoneToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].deviceId").value("…ev-1"))
+                .andExpect(jsonPath("$.data[0].primary").value(true))
+                .andExpect(jsonPath("$.data[0].trustLevel").value("TRUSTED"));
+    }
+
+    private static String tokenOf(MvcResult login, ECKey kenc) throws Exception {
+        JWEObject jwe = JWEObject.parse(field(login.getResponse().getContentAsString(), "tokenEnvelope"));
+        jwe.decrypt(new ECDHDecrypter(kenc));
+        return field(jwe.getPayload().toString(), "token");
+    }
+
+    private static String extendBodyFor(String token) throws Exception {
+        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+        mac.init(new javax.crypto.spec.SecretKeySpec(new byte[32], "HmacSHA256"));
+        String digest = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(token.getBytes()));
+        return "{\"sessionLookup\":{\"lookupKeyVersion\":\"k1\",\"lookupDigest\":\"" + digest + "\"},"
+                + "\"admittedAt\":\"" + java.time.Instant.now() + "\",\"routeId\":\"accounts.read\"}";
     }
 
     private static String field(String json, String name) {
