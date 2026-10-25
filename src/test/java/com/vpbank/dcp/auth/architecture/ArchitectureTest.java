@@ -33,6 +33,8 @@ class ArchitectureTest {
                 .adapter("customer", ROOT + ".adapter.out.customer..")
                 .adapter("keycloak", ROOT + ".adapter.out.keycloak..")
                 .adapter("notification", ROOT + ".adapter.out.notification..")
+                .adapter("valkey", ROOT + ".adapter.out.valkey..")
+                .adapter("jose", ROOT + ".adapter.out.jose..")
                 .withOptionalLayers(true)
                 // config wires every ring; it is the only package allowed to see all of them
                 .ignoreDependency(JavaClass.Predicates.resideInAPackage(ROOT + ".config.."),
@@ -117,6 +119,8 @@ class ArchitectureTest {
                 .should().resideInAPackage(ROOT + ".adapter.in.web.controller").check(production);
         classes().that().haveSimpleNameEndingWith("Service")
                 .should().resideInAPackage(ROOT + ".application.service").check(production);
+        classes().that().haveSimpleNameEndingWith("Filter")
+                .should().resideInAPackage(ROOT + ".adapter.in.web.common").check(production);
     }
 
     @Test

@@ -1,6 +1,9 @@
 spring:
   application:
     name: authentication-service-v2
+  data:
+    redis:
+      url: ${AUTH_VALKEY_URL:redis://localhost:6379}
   datasource:
     url: ${AUTH_DB_URL}
     username: ${AUTH_DB_USER}
@@ -34,3 +37,18 @@ auth:
     notification:
       origin: ${AUTH_NOTIFICATION_ORIGIN:}
       service-token: ${AUTH_NOTIFICATION_SERVICE_TOKEN:}
+  login:
+    # Off by default: no caller authentication yet on /api/ns and /internal.
+    enabled: ${AUTH_LOGIN_ENABLED:false}
+    keycloak:
+      base-url: ${AUTH_KC_BASE_URL:}
+      realm: ${AUTH_KC_REALM:}
+      client-id: ${AUTH_KC_LOGIN_CLIENT_ID:authentication-service}
+      client-secret: ${AUTH_KC_LOGIN_CLIENT_SECRET:}
+  session:
+    lookup-key-version: ${AUTH_SESSION_LOOKUP_KEY_VERSION:k1}
+    lookup-hmac-keys-base64:
+      k1: ${AUTH_SESSION_LOOKUP_HMAC_KEY_K1_BASE64:}
+    idle: PT15M
+    absolute: PT20M
+    max-admitted-at-skew: PT30S

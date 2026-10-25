@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * User-facing error text, resolved from {@code messages/errors_<lang>} for the request's locale
@@ -19,7 +20,12 @@ public final class ErrorMessages {
     @NonNull private final MessageSource messages;
 
     public String message(String code, Object... args) {
-        return messages.getMessage(code, args, LocaleContextHolder.getLocale());
+        return message(LocaleContextHolder.getLocale(), code, args);
+    }
+
+    /** For filters, which run before Spring MVC has resolved the request locale. */
+    public String message(Locale locale, String code, Object... args) {
+        return messages.getMessage(code, args, locale);
     }
 
     public <T> ResponseEntity<ApiEnvelope<T>> failure(HttpStatus status, String code, Object... args) {

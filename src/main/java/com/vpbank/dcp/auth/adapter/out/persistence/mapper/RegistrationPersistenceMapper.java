@@ -2,6 +2,7 @@ package com.vpbank.dcp.auth.adapter.out.persistence.mapper;
 
 import com.vpbank.dcp.auth.adapter.out.persistence.entity.CustomerAuthenticationEntity;
 import com.vpbank.dcp.auth.adapter.out.persistence.entity.RegistrationEntity;
+import com.vpbank.dcp.auth.application.port.out.CustomerAuthentication;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.Registration;
 import com.vpbank.dcp.auth.domain.model.RegistrationId;
@@ -54,6 +55,17 @@ public final class RegistrationPersistenceMapper {
                 .identityIssuer(completed.identityIssuer())
                 .identitySubject(completed.identitySubject())
                 .status(CustomerAuthenticationEntity.STATUS_ACTIVE)
+                .build();
+    }
+
+    /** The identity row as the login flow reads it. */
+    public static CustomerAuthentication toIdentity(CustomerAuthenticationEntity entity) {
+        return CustomerAuthentication.builder()
+                .customerId(new CustomerId(entity.getCustomerId()))
+                .userName(new UserName(entity.getUserName()))
+                .identityIssuer(entity.getIdentityIssuer())
+                .identitySubject(entity.getIdentitySubject())
+                .status(entity.getStatus())
                 .build();
     }
 }

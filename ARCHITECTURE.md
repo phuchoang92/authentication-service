@@ -136,8 +136,20 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-25):** the code matches the tree above; `ArchitectureTest` enforces the
-**[arch]** rules of §4 and §10. Login and Trusted Device examples below are illustrative only.
+**Current (2026-10-25, slice 2 implemented):** the tree above plus the login/session
+capability in the same role packages — `domain.model` (`Session`, `SessionPolicy`, `OpaqueToken`,
+`Password`, `DeviceId`, `Channel`, `SessionStatus`, `SessionId`), `application.port.in`
+(`LoginUseCase`, `LogoutUseCase`, `ExtendSessionUseCase`, `CurrentSessionUseCase` and their
+commands/results), `application.port.out` (`CredentialVerifierPort`, `SessionStore` addressed by
+`SessionLookup`, `TokenEnvelopeSealer`, `OpaqueTokenGenerator`, `CustomerAuthenticationRepository`),
+`application.service` (`LoginService`, `SessionService`), adapters `adapter.out.valkey`
+(`SessionKeys`, `SessionHashCodec`, `ValkeySessionAdapter`), `adapter.out.jose`
+(`NimbusTokenEnvelopeSealer`), `adapter.out.keycloak` (`KeycloakDirectGrantAdapter`,
+`KeycloakIdTokenVerifier`), web `LoginController`, `SessionController`, `SessionExtensionController`,
+`SessionFilter` (`/api/**` minus `/api/ns/**`), and `config.LoginConfiguration`,
+`ValkeyConfiguration`, `LoginProperties`, `SessionProperties`. `ArchitectureTest` enforces the
+**[arch]** rules of §4 and §10. Login and Trusted Device composition in §6.1 is still illustrative
+(slice 3). See `docs/plans/slice-2-login-session.md` for the slice's decisions.
 
 ---
 
@@ -465,7 +477,8 @@ architecture-test updates; this documentation update does not enable them in sou
 | Command / result | `<Verb><Noun>Command`, `<Verb><Noun>Result` | `RegisterCustomerCommand` |
 | Service | `<Verb><Noun>Service` for one operation, or `<Capability>Service` for cohesive operations | `RegisterCustomerService`, `TrustedDeviceService` |
 | Outbound port | `<Noun>Port` for partners, `<Noun>Repository` for storage | `IdentityProviderPort`, `RegistrationRepository` |
-| Adapter | `<Tech><Noun>Adapter` | `KeycloakAdminAdapter`, `RegistrationPersistenceAdapter` |
+| Adapter | `<Tech><Noun>Adapter` | `KeycloakAdminAdapter`, `RegistrationPersistenceAdapter`, `ValkeySessionAdapter` |
+| Servlet filter | `<Noun>Filter`, in `adapter.in.web.common`; resolves its own locale and writes the envelope itself | `SessionFilter` |
 | JPA entity / repository | `<Noun>Entity`, `<Noun>JpaRepository` | `RegistrationEntity` |
 | Web DTO | `<Noun>Request`, `<Noun>Response` | `RegistrationRequest` |
 | Mapper | `<Noun><Layer>Mapper` | `RegistrationWebMapper`, `RegistrationPersistenceMapper` |
