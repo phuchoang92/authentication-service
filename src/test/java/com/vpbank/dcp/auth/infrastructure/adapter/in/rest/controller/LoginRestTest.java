@@ -10,26 +10,33 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.vpbank.dcp.auth.application.command.LogoutCommand;
+import com.vpbank.dcp.auth.application.port.in.ConfirmEnrollmentUseCase;
 import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
 import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
+import com.vpbank.dcp.auth.application.port.in.InitEnrollmentUseCase;
 import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.in.LogoutUseCase;
 import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
+import com.vpbank.dcp.auth.application.port.in.VerifyEnrollmentUseCase;
 import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
+import com.vpbank.dcp.auth.application.result.ConfirmEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
 import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
+import com.vpbank.dcp.auth.application.result.InitEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.application.result.LogoutResult;
 import com.vpbank.dcp.auth.application.result.SessionSummary;
 import com.vpbank.dcp.auth.application.result.UnlockPasswordResult;
+import com.vpbank.dcp.auth.application.result.VerifyEnrollmentResult;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.enums.TrustLevel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
@@ -37,6 +44,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.LoginRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.PasswordUnlockRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.SessionRestMapper;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.TrustedDeviceRestMapper;
 import com.vpbank.dcp.auth.infrastructure.config.RestConfiguration;
 import java.time.Instant;
 import java.util.Optional;
@@ -54,7 +62,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /** Web slice for slice 2: login, logout behind the session filter, extend; use cases mocked. */
 @WebMvcTest(controllers = {LoginController.class, SessionController.class, SessionExtensionController.class,
-        CaptchaController.class, PasswordUnlockController.class, DeviceController.class},
+        CaptchaController.class, PasswordUnlockController.class, DeviceController.class, TrustedDeviceController.class},
         properties = "auth.login.enabled=true")
 @Import({RestConfiguration.class, LoginRestTest.Beans.class})
 class LoginRestTest {
@@ -73,6 +81,7 @@ class LoginRestTest {
         @Bean LoginRestMapper loginRestMapper(ErrorMessages errors) { return new LoginRestMapper(errors); }
         @Bean SessionRestMapper sessionRestMapper(ErrorMessages errors) { return new SessionRestMapper(errors); }
         @Bean PasswordUnlockRestMapper passwordUnlockRestMapper(ErrorMessages errors) { return new PasswordUnlockRestMapper(errors); }
+        @Bean TrustedDeviceRestMapper trustedDeviceRestMapper(ErrorMessages errors) { return new TrustedDeviceRestMapper(errors); }
         @Bean SessionFilter sessionFilter(CurrentSessionUseCase sessions, ErrorMessages errors,
                                           org.springframework.web.servlet.LocaleResolver locales) {
             return new SessionFilter(sessions, errors, locales);
@@ -87,6 +96,73 @@ class LoginRestTest {
     @MockitoBean IssueCaptchaUseCase captchas;
     @MockitoBean UnlockPasswordUseCase unlock;
     @MockitoBean ListDevicesUseCase devices;
+    @MockitoBean InitEnrollmentUseCase initEnrollment;
+    @MockitoBean VerifyEnrollmentUseCase verifyEnrollment;
+    @MockitoBean ConfirmEnrollmentUseCase confirmEnrollment;
+
+    @Test
+    void trustedDeviceRoutesNeedARestrictedSessionAndMapTheirOutcomes() throws Exception {
+        String restrictedToken = "k1." + "C".repeat(43);
+        when(current.resolve(new OpaqueToken(TOKEN))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
+                new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("dev-1"), Channel.MOBILE,
+                SessionStatus.ACTIVE, IDLE, ABSOLUTE)));
+        when(current.resolve(new OpaqueToken(restrictedToken))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
+                new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("tablet-2"), Channel.MOBILE,
+                SessionStatus.NEED_TRUSTED_DEVICE, IDLE, IDLE)));
+        String initBody = "{\"devicePublicJwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"abc\",\"y\":\"def\"},\"platform\":\"IOS\"}";
+
+        // No session at all: the filter answers before the controller.
+        mvc.perform(post("/api/v1/trusted-device/init").contentType(MediaType.APPLICATION_JSON).content(initBody))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("SESSION_REQUIRED"));
+        verifyNoInteractions(initEnrollment);
+
+        // A restricted session passes the filter; the use case answers.
+        EnrollmentId enrollmentId = EnrollmentId.random();
+        when(initEnrollment.init(any())).thenReturn(new InitEnrollmentResult.KeyExchange(enrollmentId,
+                "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"sx\",\"y\":\"sy\"}", "eyJ.challenge", IDLE));
+        mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(initBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("KEY_EXCHANGE"))
+                .andExpect(jsonPath("$.data.enrollmentId").value(enrollmentId.value().toString()))
+                .andExpect(jsonPath("$.data.serverPublicJwk.x").value("sx"))
+                .andExpect(jsonPath("$.data.challenge").value("eyJ.challenge"));
+        var initCaptor = ArgumentCaptor.forClass(com.vpbank.dcp.auth.application.command.InitEnrollmentCommand.class);
+        verify(initEnrollment).init(initCaptor.capture());
+        org.assertj.core.api.Assertions.assertThat(initCaptor.getValue().token().value()).isEqualTo(restrictedToken);
+        org.assertj.core.api.Assertions.assertThat(initCaptor.getValue().platform()).isEqualTo(DevicePlatform.IOS);
+
+        // An ACTIVE session reaches the use case, which refuses: 409.
+        when(initEnrollment.init(any())).thenReturn(new InitEnrollmentResult.Conflict());
+        mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + TOKEN)
+                        .header("Accept-Language", "en").contentType(MediaType.APPLICATION_JSON).content(initBody))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("STATE_CONFLICT"))
+                .andExpect(jsonPath("$.error.message").value("This step is not valid in the current state"));
+
+        when(verifyEnrollment.verify(any())).thenReturn(new VerifyEnrollmentResult.WrongChallenge(1));
+        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"challengeResponse\":\"eyJ.response\"}"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("WRONG_CHALLENGE"))
+                .andExpect(jsonPath("$.error.details[0].field").value("attemptsLeft"))
+                .andExpect(jsonPath("$.error.details[0].message").value("1"));
+        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.details[0].field").value("challengeResponse"));
+
+        when(confirmEnrollment.confirm(any())).thenReturn(new ConfirmEnrollmentResult.Trusted("eyJ.env", IDLE, ABSOLUTE));
+        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tokenEncryptionKey\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"abc\",\"y\":\"def\"}}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.tokenEnvelope").value("eyJ.env"))
+                .andExpect(jsonPath("$..token").doesNotExist());
+        when(confirmEnrollment.confirm(any())).thenReturn(new ConfirmEnrollmentResult.MfaPending());
+        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tokenEncryptionKey\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"abc\",\"y\":\"def\"}}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MFA_NOT_PASSED"));
+    }
 
     @Test
     void loginIs201WithTheEnvelopeAndNeverTheTokenAndNoSessionIsNeeded() throws Exception {

@@ -37,6 +37,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.LoginRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.PasswordUnlockRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.SessionRestMapper;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.TrustedDeviceRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.captcha.AwtCaptchaGenerator;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.jose.NimbusChallengeSealer;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.jose.NimbusServerKeyPairGenerator;
@@ -265,6 +266,11 @@ public class LoginConfiguration {
     @Bean
     SessionRestMapper sessionRestMapper(ErrorMessages errorMessages) {
         return new SessionRestMapper(errorMessages);
+    }
+
+    @Bean
+    TrustedDeviceRestMapper trustedDeviceRestMapper(ErrorMessages errorMessages) {
+        return new TrustedDeviceRestMapper(errorMessages);
     }
 
     @Bean

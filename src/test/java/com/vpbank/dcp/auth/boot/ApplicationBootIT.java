@@ -10,8 +10,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.nimbusds.jose.EncryptionMethod;
+import com.nimbusds.jose.JOSEObjectType;
+import com.nimbusds.jose.JWEAlgorithm;
+import com.nimbusds.jose.JWEHeader;
 import com.nimbusds.jose.JWEObject;
+import com.nimbusds.jose.Payload;
 import com.nimbusds.jose.crypto.ECDHDecrypter;
+import com.nimbusds.jose.crypto.ECDHEncrypter;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
@@ -21,6 +27,9 @@ import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.CustomerDirectoryPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort.CreateUserResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort;
+import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CreateResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.SmsSenderPort;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
@@ -28,6 +37,7 @@ import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.UserName;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import java.util.Base64;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -104,6 +114,7 @@ class ApplicationBootIT {
     @MockitoBean SmsSenderPort sms;
     @MockitoBean CredentialVerifierPort credentials;
     @MockitoBean CaptchaGenerator captchaGenerator;
+    @MockitoBean MfaTransactionPort mfa;
 
     @Test
     void registersFailsSolvesACaptchaLogsInExtendsLogsOutGetsLockedAndIsUnlocked() throws Exception {
@@ -207,6 +218,72 @@ class ApplicationBootIT {
                 .andExpect(jsonPath("$.data[0].deviceId").value("…ev-1"))
                 .andExpect(jsonPath("$.data[0].primary").value(true))
                 .andExpect(jsonPath("$.data[0].trustLevel").value("TRUSTED"));
+
+        // The tablet logs in again and enrolls: init (challenge to its key) → verify (FACE at MFA) → confirm.
+        MvcResult tabletAgain = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(tabletBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
+        String restrictedToken = tokenOf(tabletAgain, kenc);
+        ECKey deviceKey = new ECKeyGenerator(Curve.P_256).generate();
+        MvcResult init = mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"devicePublicJwk\":" + deviceKey.toPublicJWK().toJSONString() + ",\"platform\":\"IOS\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("KEY_EXCHANGE"))
+                .andExpect(jsonPath("$.data.serverPublicJwk.crv").value("P-256"))
+                .andExpect(jsonPath("$..serverPrivateJwk").doesNotExist())
+                .andReturn();
+        String initJson = init.getResponse().getContentAsString();
+        String challengeResponse = answerChallenge(initJson, deviceKey);
+
+        when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-txn-1", java.time.Instant.now().plusSeconds(300)));
+        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"challengeResponse\":\"" + challengeResponse + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("MFA_REQUIRED"))
+                .andExpect(jsonPath("$.data.mfaTransactionId").value("mfa-txn-1"));
+
+        when(mfa.check(eq("mfa-txn-1"), any(), any())).thenReturn(new CheckResult.Pending());
+        ECKey tabletKenc = new ECKeyGenerator(Curve.P_256).generate();
+        String confirmBody = "{\"tokenEncryptionKey\":" + tabletKenc.toPublicJWK().toJSONString() + "}";
+        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(confirmBody))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MFA_NOT_PASSED"));
+        when(mfa.check(eq("mfa-txn-1"), any(), any())).thenReturn(new CheckResult.Passed("receipt-digest"));
+        MvcResult confirm = mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(confirmBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$..token").doesNotExist())
+                .andReturn();
+
+        // The restricted session is gone; the new ACTIVE token is sealed to the key sent at confirm and sees two devices.
+        mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + restrictedToken)).andExpect(status().isUnauthorized());
+        String tabletActiveToken = tokenOf(confirm, tabletKenc);
+        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + tabletActiveToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[?(@.deviceId == '…ev-1')].primary").value(false))
+                .andExpect(jsonPath("$.data[?(@.deviceId == '…et-2')].primary").value(true))
+                .andExpect(jsonPath("$.data[?(@.deviceId == '…et-2')].trustLevel").value("TRUSTED"));
+    }
+
+    /** Plays the app: open the challenge with the device key and re-seal it to Ksrv (DD 20 §6a). */
+    private static String answerChallenge(String initJson, ECKey deviceKey) throws Exception {
+        JWEObject challengeJwe = JWEObject.parse(field(initJson, "challenge"));
+        challengeJwe.decrypt(new ECDHDecrypter(deviceKey));
+        Map<String, Object> challengePayload = challengeJwe.getPayload().toJSONObject();
+
+        Matcher serverJwk = Pattern.compile("\"serverPublicJwk\":(\\{[^}]+\\})").matcher(initJson);
+        assertThat(serverJwk.find()).isTrue();
+        ECKey ksrv = ECKey.parse(serverJwk.group(1));
+
+        JWEHeader header = new JWEHeader.Builder(JWEAlgorithm.ECDH_ES, EncryptionMethod.A256GCM)
+                .type(new JOSEObjectType("trusted-device-challenge-response+jwe"))
+                .build();
+        JWEObject response = new JWEObject(header, new Payload(challengePayload));
+        response.encrypt(new ECDHEncrypter(ksrv));
+        return response.serialize();
     }
 
     private static String tokenOf(MvcResult login, ECKey kenc) throws Exception {

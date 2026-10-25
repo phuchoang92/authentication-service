@@ -13,12 +13,11 @@ import com.vpbank.dcp.auth.domain.model.UserName;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.JwkJson;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.ErrorCodes;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.LoginRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.response.LoginResponse;
-import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -34,7 +33,7 @@ public final class LoginRestMapper {
             // Device fields are optional on WEB; the use case checks they are present together on MOBILE.
             DeviceId deviceId = request.deviceId() == null ? null : new DeviceId(request.deviceId());
             DevicePlatform platform = request.platform() == null ? null : DevicePlatform.valueOf(request.platform());
-            String devicePublicKey = request.devicePublicKey() == null ? null : json(request.devicePublicKey());
+            String devicePublicKey = request.devicePublicKey() == null ? null : JwkJson.toJson(request.devicePublicKey());
             CaptchaSolution captchaSolution = request.captcha() == null ? null : toCaptchaSolution(request.captcha());
 
             return LoginCommand.builder()
@@ -44,7 +43,7 @@ public final class LoginRestMapper {
                     .deviceId(deviceId)
                     .platform(platform)
                     .devicePublicKey(devicePublicKey)
-                    .tokenEncryptionKey(json(request.tokenEncryptionKey()))
+                    .tokenEncryptionKey(JwkJson.toJson(request.tokenEncryptionKey()))
                     .captcha(captchaSolution)
                     .build();
         } catch (IllegalArgumentException invalid) {
@@ -82,20 +81,5 @@ public final class LoginRestMapper {
                 authenticated.idleExpiresAt(),
                 authenticated.absoluteExpiresAt());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiEnvelope.success(response));
-    }
-
-    /** Minimal JSON for a flat JWK object (strings only); anything else is not a public JWK we accept. */
-    static String json(Map<String, Object> jwk) {
-        boolean flat = jwk.values().stream().allMatch(value -> value instanceof String);
-        if (!flat) {
-            throw new IllegalArgumentException("tokenEncryptionKey must be a flat JWK object");
-        }
-        return jwk.entrySet().stream()
-                .map(member -> "\"" + escape(member.getKey()) + "\":\"" + escape((String) member.getValue()) + "\"")
-                .collect(Collectors.joining(",", "{", "}"));
-    }
-
-    private static String escape(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

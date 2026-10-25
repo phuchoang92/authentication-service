@@ -1,6 +1,6 @@
 # Slice 5 — device enrollment: init → verify → confirm (DB phase 4)
 
-Status: **approved 2026-10-25, in progress** (turn 1 running). Schema: `phase-4-enrollment.sql`
+Status: **implemented 2026-10-25** (turns 1–3; see README for the test run). Schema: `phase-4-enrollment.sql`
 (`TRUSTED_DEVICE_ENROLLMENT`; `PRIMARY_ENROLLMENT_ID`, `FACE_AUTHENTICATED`, `PRIMARY_MODE` on the
 primary row; `ENROLLMENT_ID` on audit). Flow: DD 20 §4 (settled), MFA contract DD 20 §5 (proposed,
 implemented behind a port), wire details DD 20 §6a where not contradicted below.
@@ -15,7 +15,7 @@ implemented behind a port), wire details DD 20 §6a where not contradicted below
 | MFA | `MfaTransactionPort` (create / check) per DD 20 §5; `HttpMfaTransactionAdapter` for `POST {mfa}/internal/v1/transactions` and `POST …/{id}/check`, receipt = compact ES256 JWS verified against a **pinned** public key, exact claim set; `MockRestServiceServer` tests. Real MFA wired when the team confirms |
 | Ksrv | P-256 pair generated at init, kept **only** in the restricted session (Valkey, encrypted-at-rest is out of scope), used at verify, dropped at confirm/expiry. Persisting it for Smart OTP is phase 5 |
 | Device key | new device: `devicePublicJwk` is required at init; known device with a stored key: `{}` and the stored key is used (DD 20 "keep the old key"); known device sending a **different** key → treated as reinstall: allowed, the new key replaces the old one only on confirm PASSED |
-| Verify attempts | 3 per enrollment (configurable 1–10), counted before the check; the last wrong answer fails the enrollment and ends the restricted session |
+| Verify attempts | 3 per enrollment (configurable, `auth.login.enrollment-max-verify-attempts`), counted before the check; the last wrong answer fails the enrollment and ends the restricted session |
 | Order | init → verify → confirm, each step once; out of order → `409 STATE_CONFLICT` |
 | Confirm outcomes | `PASSED` → trust; `PENDING` → `409 MFA_NOT_PASSED` keep session; `FAILED` → fail enrollment, end session, `401 MFA_FAILED`; `EXPIRED`/404 → `401 MFA_EXPIRED`, end session; bad signature/claims → `400 REQUEST_REJECTED` + security log, no state change; MFA 5xx/timeout → `503`, nothing changes |
 | Trust commit (one SQL transaction) | device row: existing live row of this installation → `EXPIRED` (replaced) and a new `ACTIVE`/`TRUSTED` row with the confirmed key; cap: expire oldest by last login beyond 5; `PRIMARY_TRUSTED_DEVICE` → this device, `PRIMARY_ENROLLMENT_ID`, `FACE_AUTHENTICATED=1`, `PRIMARY_MODE=FACE_CONFIRMED`; enrollment `COMPLETED`; audit events 0..n (`DEVICE_TRUSTED`/`DEVICE_RETRUSTED`, `PRIMARY_CHANGED`, `DEVICE_EXPIRED`…) with `ENROLLMENT_ID` and the SHA-256 of the MFA receipt in `METADATA` |
