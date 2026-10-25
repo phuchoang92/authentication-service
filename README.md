@@ -3,9 +3,13 @@
 New authentication service, built bottom-up from the DB design phases in
 `../authentication-service-src/docs/db-phases/`. No code from the earlier trees is used.
 
-**Status (2026-10-25): slice 1 done.** Schema phase 1 (Flyway `V1__identity.sql`) and the
-registration API `POST /internal/v1/callback/authentication-creation` (contract §1 of
-`new-customer-onboarding-api-plan.md`), off by default.
+**Status (2026-10-25): slice 1 done and refactored onto [ARCHITECTURE.md](ARCHITECTURE.md)**
+(layer-first hexagonal, Spring Data JPA, localized errors). Schema phase 1 (Flyway
+`V1__identity.sql`) and the registration API `POST /internal/v1/callback/authentication-creation`
+(contract §1 of `new-customer-onboarding-api-plan.md`), off by default.
+
+Error messages are returned in the language of the `Accept-Language` header: `vi` (default) or
+`en`; the catalogue is `src/main/resources/messages/errors_<lang>.properties`.
 
 Flow: reserve → Customer profile check (ELIGIBLE, verified phone/email) → Keycloak user created
 **disabled** → permanent password set → SMS `ACCEPTED` → user enabled → identity + `READY`.
@@ -18,7 +22,6 @@ A retry with the same data returns the same `requestId`; an unfinished earlier a
 - The endpoint has no caller authentication yet; enable it only on an internal network.
 - If enabling the Keycloak user succeeds but the identity insert then finds the username taken,
   the Keycloak user stays enabled without an Auth identity (reported as conflict; needs cleanup).
-- No test boots the whole application against a real MySQL yet.
 
 ## Build
 
@@ -28,10 +31,12 @@ Java 25, Maven 3.9, Docker for the MySQL integration tests:
 mvn -o verify
 ```
 
-Last run (2026-10-25): 93 unit tests (service, value types, 3 HTTP adapters with
-`MockRestServiceServer`, web with MockMvc, configuration, ArchUnit) and `JdbcRegistrationStoreIT`
-6 tests against MySQL 8.4 (Testcontainers): 0 failures, 0 skipped. No real Customer, Keycloak or
-Notification service was called.
+Last run (2026-10-25): 122 tests, 0 failures — 115 unit (domain state machine and value
+objects, service with mocked ports, web and persistence mappers, error catalogue, 3 HTTP adapters
+with `MockRestServiceServer`, MockMvc, configuration, 8 ArchUnit rules) and 7 against MySQL 8.4
+on Testcontainers (`RegistrationPersistenceAdapterIT` with JPA schema validation, and
+`ApplicationBootIT` booting the whole application with the partner ports mocked). No real
+Customer, Keycloak or Notification service was called.
 
 ## Configuration
 

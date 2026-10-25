@@ -7,6 +7,16 @@ spring:
     password: ${AUTH_DB_PASSWORD}
   flyway:
     enabled: true
+  jpa:
+    # Flyway owns the schema; Hibernate only checks that the entities match it.
+    hibernate:
+      ddl-auto: validate
+      naming:
+        # Table and column names are used exactly as written in the entities (upper case, like the DDL).
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
 
 auth:
   registration:
