@@ -1,8 +1,9 @@
 package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
@@ -52,6 +53,22 @@ final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
         audit.add(correlationId + ":0:DEVICE_TRUSTED");
         audit.add(correlationId + ":1:PRIMARY_ASSIGNED");
         return new TrustFirstResult.Trusted(device);
+    }
+
+    final java.util.List<TrustConfirmation> confirmations = new ArrayList<>();
+
+    @Override
+    public TrustedDevice trustConfirmed(TrustConfirmation confirmation, String correlationId) {
+        check();
+        if (confirmation.replaced() != null) {
+            rows.put(confirmation.replaced().id(), confirmation.replaced());
+        }
+        confirmation.expiredByCap().forEach(d -> rows.put(d.id(), d));
+        rows.put(confirmation.device().id(), confirmation.device());
+        primaries.put(new Key(confirmation.device().customerId(), confirmation.device().channel()), confirmation.device().id());
+        confirmations.add(confirmation);
+        audit.add(correlationId + ":DEVICE_TRUSTED:" + confirmation.enrollment().id());
+        return confirmation.device();
     }
 
     @Override

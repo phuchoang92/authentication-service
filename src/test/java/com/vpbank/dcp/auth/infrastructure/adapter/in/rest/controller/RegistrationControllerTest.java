@@ -9,17 +9,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.RegistrationRestMapper;
 import com.vpbank.dcp.auth.application.command.RegisterCustomerCommand;
-import com.vpbank.dcp.auth.application.result.RegisterCustomerResult;
 import com.vpbank.dcp.auth.application.port.in.RegisterCustomerUseCase;
-import com.vpbank.dcp.auth.infrastructure.config.RestConfiguration;
+import com.vpbank.dcp.auth.application.result.RegisterCustomerResult;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.Email;
 import com.vpbank.dcp.auth.domain.model.PhoneNumber;
 import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.UserName;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.RegistrationRestMapper;
+import com.vpbank.dcp.auth.infrastructure.config.RestConfiguration;
 import java.util.UUID;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;

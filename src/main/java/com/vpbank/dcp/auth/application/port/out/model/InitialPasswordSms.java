@@ -1,12 +1,11 @@
 package com.vpbank.dcp.auth.application.port.out.model;
 
-import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.PhoneNumber;
+import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.UserName;
-import lombok.Builder;
-
 import java.util.Objects;
+import lombok.Builder;
 
 /**
  * The first-password SMS. {@code messageId} is the registration request id, so Notification

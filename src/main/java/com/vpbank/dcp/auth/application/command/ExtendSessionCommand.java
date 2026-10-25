@@ -1,9 +1,8 @@
 package com.vpbank.dcp.auth.application.command;
 
-import lombok.Builder;
-
 import java.time.Instant;
 import java.util.Objects;
+import lombok.Builder;
 
 /**
  * The BFF names the session by its lookup (key version + base64url HMAC digest), never by the

@@ -3,7 +3,6 @@ package com.vpbank.dcp.auth.application.port.out.repository;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
-
 import java.time.Instant;
 
 /**

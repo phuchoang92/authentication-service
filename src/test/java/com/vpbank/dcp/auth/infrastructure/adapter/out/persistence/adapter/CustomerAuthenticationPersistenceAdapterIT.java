@@ -2,14 +2,14 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
-import com.vpbank.dcp.auth.infrastructure.config.JpaConfiguration;
+import com.vpbank.dcp.auth.domain.enums.PasswordStatus;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
-import com.vpbank.dcp.auth.domain.model.PasswordStatus;
 import com.vpbank.dcp.auth.domain.model.UserName;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.config.JpaConfiguration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import org.junit.jupiter.api.BeforeEach;

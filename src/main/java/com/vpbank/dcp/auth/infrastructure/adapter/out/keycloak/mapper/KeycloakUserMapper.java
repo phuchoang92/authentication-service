@@ -1,10 +1,9 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.keycloak.mapper;
 
+import com.vpbank.dcp.auth.application.port.out.model.NewIdentityUser;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.keycloak.dto.CreateUserRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.keycloak.dto.CredentialRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.keycloak.dto.EnableUserRequest;
-import com.vpbank.dcp.auth.application.port.out.model.NewIdentityUser;
-
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;

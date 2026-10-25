@@ -1,6 +1,7 @@
 package com.vpbank.dcp.auth.domain.model;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.SortedMap;
@@ -26,7 +27,7 @@ public record LockoutPolicy(int captchaAfter, SortedMap<Integer, Duration> tempo
 
     /** The default policy: CAPTCHA after 2, 15 min at 3, 24 h at 4, permanent at 5. */
     public static LockoutPolicy standard() {
-        return new LockoutPolicy(2, new TreeMap<>(java.util.Map.of(3, Duration.ofMinutes(15), 4, Duration.ofHours(24))), 5);
+        return new LockoutPolicy(2, new TreeMap<>(Map.of(3, Duration.ofMinutes(15), 4, Duration.ofHours(24))), 5);
     }
 
     /** The temporary lock to apply at exactly this failure count, if any. */

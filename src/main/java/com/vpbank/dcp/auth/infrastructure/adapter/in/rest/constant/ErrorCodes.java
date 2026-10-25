@@ -1,4 +1,4 @@
-package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common;
+package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant;
 
 /**
  * Every error code the API can return. Each one has a line in every {@code messages/errors_<lang>}
@@ -16,6 +16,13 @@ public final class ErrorCodes {
     public static final String LOGIN_UNAVAILABLE = "LOGIN_UNAVAILABLE";
     public static final String SESSION_REQUIRED = "SESSION_REQUIRED";
     public static final String DEVICE_TRUST_REQUIRED = "DEVICE_TRUST_REQUIRED";
+    public static final String DEVICE_KEY_REQUIRED = "DEVICE_KEY_REQUIRED";
+    public static final String STATE_CONFLICT = "STATE_CONFLICT";
+    public static final String WRONG_CHALLENGE = "WRONG_CHALLENGE";
+    public static final String NO_USABLE_FACTOR = "NO_USABLE_FACTOR";
+    public static final String MFA_NOT_PASSED = "MFA_NOT_PASSED";
+    public static final String MFA_FAILED = "MFA_FAILED";
+    public static final String MFA_EXPIRED = "MFA_EXPIRED";
     public static final String SESSION_GONE = "SESSION_GONE";
     public static final String SESSION_CONFLICT = "SESSION_CONFLICT";
     public static final String CUSTOMER_UNKNOWN = "CUSTOMER_UNKNOWN";

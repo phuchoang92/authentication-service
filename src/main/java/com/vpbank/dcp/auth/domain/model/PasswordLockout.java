@@ -1,9 +1,11 @@
 package com.vpbank.dcp.auth.domain.model;
 
-import lombok.Builder;
-
+import com.vpbank.dcp.auth.domain.enums.PasswordStatus;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
+import lombok.Builder;
 
 /**
  * The lockout part of an identity (phase 2 columns). Status and lockout time always change
@@ -37,13 +39,19 @@ public record PasswordLockout(PasswordStatus status, int failedCount, Instant lo
 
     /** One more consecutive failure: escalate per the policy. An expired temporary lock does not reset anything. */
     public PasswordLockout afterFailure(Instant now, LockoutPolicy policy) {
-        int count = failedCount + 1;
-        if (count >= policy.permanentAt()) {
-            return new PasswordLockout(PasswordStatus.PERMANENTLY_LOCKED, count, null);
+        int nextFailedCount = failedCount + 1;
+
+        if (nextFailedCount >= policy.permanentAt()) {
+            return new PasswordLockout(PasswordStatus.PERMANENTLY_LOCKED, nextFailedCount, null);
         }
-        return policy.temporaryLockAt(count)
-                .map(lock -> new PasswordLockout(PasswordStatus.LOCKED, count, now.plus(lock)))
-                .orElseGet(() -> new PasswordLockout(PasswordStatus.ACTIVE, count, null));
+
+        Optional<Duration> temporaryLock = policy.temporaryLockAt(nextFailedCount);
+        if (temporaryLock.isPresent()) {
+            Instant lockedUntil = now.plus(temporaryLock.get());
+            return new PasswordLockout(PasswordStatus.LOCKED, nextFailedCount, lockedUntil);
+        }
+
+        return new PasswordLockout(PasswordStatus.ACTIVE, nextFailedCount, null);
     }
 
     /** A successful login, or the bank's unlock. */

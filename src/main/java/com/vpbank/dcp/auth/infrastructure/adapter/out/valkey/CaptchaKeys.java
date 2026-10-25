@@ -2,7 +2,6 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.valkey;
 
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
-
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.Base64;

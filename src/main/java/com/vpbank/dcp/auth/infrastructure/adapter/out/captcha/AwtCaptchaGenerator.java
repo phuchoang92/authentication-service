@@ -2,10 +2,6 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.captcha;
 
 import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
-
-import javax.imageio.ImageIO;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
@@ -15,6 +11,9 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.security.SecureRandom;
+import javax.imageio.ImageIO;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
 /**
  * Server-drawn CAPTCHA with the JDK alone (headless AWT): five characters without look-alikes,
@@ -32,50 +31,52 @@ public final class AwtCaptchaGenerator implements CaptchaGenerator {
         System.setProperty("java.awt.headless", "true");
     }
 
-    @NonNull private final SecureRandom random;
+    @NonNull private final SecureRandom secureRandom;
 
     @Override
     public GeneratedCaptcha next() {
-        char[] text = new char[LENGTH];
+        char[] answerText = new char[LENGTH];
         for (int i = 0; i < LENGTH; i++) {
-            text[i] = ALPHABET.charAt(random.nextInt(ALPHABET.length()));
+            answerText[i] = ALPHABET.charAt(secureRandom.nextInt(ALPHABET.length()));
         }
-        return new GeneratedCaptcha(new CaptchaAnswer(new String(text)), draw(text));
+        CaptchaAnswer answer = new CaptchaAnswer(new String(answerText));
+        byte[] imagePng = draw(answerText);
+        return new GeneratedCaptcha(answer, imagePng);
     }
 
     private byte[] draw(char[] text) {
         BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = image.createGraphics();
+        Graphics2D graphics = image.createGraphics();
         try {
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setColor(new Color(245, 245, 240));
-            g.fillRect(0, 0, WIDTH, HEIGHT);
-            g.setStroke(new BasicStroke(1.5f));
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            graphics.setColor(new Color(245, 245, 240));
+            graphics.fillRect(0, 0, WIDTH, HEIGHT);
+            graphics.setStroke(new BasicStroke(1.5f));
             for (int i = 0; i < 6; i++) {
-                g.setColor(new Color(random.nextInt(120) + 80, random.nextInt(120) + 80, random.nextInt(120) + 80));
-                g.drawLine(random.nextInt(WIDTH), random.nextInt(HEIGHT), random.nextInt(WIDTH), random.nextInt(HEIGHT));
+                graphics.setColor(new Color(secureRandom.nextInt(120) + 80, secureRandom.nextInt(120) + 80, secureRandom.nextInt(120) + 80));
+                graphics.drawLine(secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT), secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT));
             }
             for (int i = 0; i < 150; i++) {
-                g.setColor(new Color(random.nextInt(160) + 60, random.nextInt(160) + 60, random.nextInt(160) + 60));
-                g.fillRect(random.nextInt(WIDTH), random.nextInt(HEIGHT), 1, 1);
+                graphics.setColor(new Color(secureRandom.nextInt(160) + 60, secureRandom.nextInt(160) + 60, secureRandom.nextInt(160) + 60));
+                graphics.fillRect(secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT), 1, 1);
             }
             Font font = new Font(Font.SANS_SERIF, Font.BOLD, 34);
             int step = WIDTH / (LENGTH + 1);
             for (int i = 0; i < text.length; i++) {
-                Graphics2D glyph = (Graphics2D) g.create();
+                Graphics2D glyph = (Graphics2D) graphics.create();
                 try {
-                    int x = step * (i + 1) - 10 + random.nextInt(7) - 3;
-                    int y = HEIGHT / 2 + 12 + random.nextInt(9) - 4;
-                    glyph.rotate(Math.toRadians(random.nextInt(50) - 25), x, y);
+                    int x = step * (i + 1) - 10 + secureRandom.nextInt(7) - 3;
+                    int y = HEIGHT / 2 + 12 + secureRandom.nextInt(9) - 4;
+                    glyph.rotate(Math.toRadians(secureRandom.nextInt(50) - 25), x, y);
                     glyph.setFont(font);
-                    glyph.setColor(new Color(random.nextInt(80), random.nextInt(80), random.nextInt(120) + 40));
+                    glyph.setColor(new Color(secureRandom.nextInt(80), secureRandom.nextInt(80), secureRandom.nextInt(120) + 40));
                     glyph.drawString(String.valueOf(text[i]), x, y);
                 } finally {
                     glyph.dispose();
                 }
             }
         } finally {
-            g.dispose();
+            graphics.dispose();
         }
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             ImageIO.write(image, "png", out);

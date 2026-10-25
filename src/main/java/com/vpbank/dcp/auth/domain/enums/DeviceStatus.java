@@ -1,4 +1,4 @@
-package com.vpbank.dcp.auth.domain.model;
+package com.vpbank.dcp.auth.domain.enums;
 
 /**
  * STATUS of a TRUSTED_DEVICE row. PENDING, ACTIVE and SUSPENDED are live (LIVE_SLOT = 1);

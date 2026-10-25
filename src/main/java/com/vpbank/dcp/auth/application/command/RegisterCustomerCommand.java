@@ -4,9 +4,8 @@ import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.Email;
 import com.vpbank.dcp.auth.domain.model.PhoneNumber;
 import com.vpbank.dcp.auth.domain.model.UserName;
-import lombok.Builder;
-
 import java.util.Objects;
+import lombok.Builder;
 
 /**
  * What the Customer service asks for when onboarding ends. Formats were checked when the value

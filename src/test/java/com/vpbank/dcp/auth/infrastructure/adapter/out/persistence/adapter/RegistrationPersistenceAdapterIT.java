@@ -2,18 +2,18 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.RegistrationJpaRepository;
-import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository.CompleteResult;
 import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository.ReserveResult;
-import com.vpbank.dcp.auth.infrastructure.config.JpaConfiguration;
+import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository;
+import com.vpbank.dcp.auth.domain.enums.RegistrationState;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.Registration;
 import com.vpbank.dcp.auth.domain.model.RegistrationId;
-import com.vpbank.dcp.auth.domain.model.RegistrationState;
 import com.vpbank.dcp.auth.domain.model.RequestDigest;
 import com.vpbank.dcp.auth.domain.model.UserName;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.RegistrationJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.config.JpaConfiguration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;

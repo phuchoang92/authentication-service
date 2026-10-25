@@ -3,10 +3,11 @@ package com.vpbank.dcp.auth.application.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.auth.application.command.ExtendSessionCommand;
-import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
 import com.vpbank.dcp.auth.application.command.LogoutCommand;
+import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
 import com.vpbank.dcp.auth.application.result.LogoutResult;
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Session;
@@ -79,7 +80,7 @@ class SessionServiceTest {
                 com.vpbank.dcp.auth.domain.model.DevicePolicy.standard()), restrictedToken);
 
         assertThat(service.resolve(restrictedToken)).hasValueSatisfying(summary ->
-                assertThat(summary.status()).isEqualTo(com.vpbank.dcp.auth.domain.model.SessionStatus.NEED_TRUSTED_DEVICE));
+                assertThat(summary.status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE));
         assertThat(service.extend(ExtendSessionCommand.builder().lookupKeyVersion("k1").lookupDigest("B".repeat(43))
                 .admittedAt(clock.now).routeId("accounts.read").build())).isInstanceOf(ExtendSessionResult.Gone.class);
         assertThat(service.logout(new LogoutCommand(restrictedToken))).isInstanceOf(LogoutResult.Ended.class);

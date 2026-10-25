@@ -1,7 +1,8 @@
-package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common;
+package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.config.RestConfiguration;
 import java.io.IOException;
 import java.io.InputStreamReader;

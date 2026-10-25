@@ -1,9 +1,10 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.controller;
 
+import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
+import com.vpbank.dcp.auth.application.result.UnlockPasswordResult;
+import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.PasswordUnlockRestMapper;
-import com.vpbank.dcp.auth.application.result.UnlockPasswordResult;
-import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,12 +18,13 @@ import org.springframework.web.bind.annotation.RestController;
 @ConditionalOnProperty(prefix = "auth.login", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class PasswordUnlockController {
-    @NonNull private final UnlockPasswordUseCase unlock;
-    @NonNull private final PasswordUnlockRestMapper mapper;
+    @NonNull private final UnlockPasswordUseCase unlockPasswordUseCase;
+    @NonNull private final PasswordUnlockRestMapper passwordUnlockRestMapper;
 
     @PostMapping(path = "/internal/v1/customers/{customerId}/password-unlock")
     public ResponseEntity<ApiEnvelope<Void>> unlock(@PathVariable String customerId) {
-        UnlockPasswordResult result = unlock.unlock(mapper.toCustomerId(customerId));
-        return mapper.toResponse(result);
+        CustomerId unlockedCustomerId = passwordUnlockRestMapper.toCustomerId(customerId);
+        UnlockPasswordResult result = unlockPasswordUseCase.unlock(unlockedCustomerId);
+        return passwordUnlockRestMapper.toResponse(result);
     }
 }

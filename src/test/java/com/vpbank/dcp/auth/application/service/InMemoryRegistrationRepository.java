@@ -1,10 +1,10 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
-import com.vpbank.dcp.auth.domain.model.Registration;
-import com.vpbank.dcp.auth.domain.model.RegistrationState;
+import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository;
+import com.vpbank.dcp.auth.domain.enums.RegistrationState;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.Registration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;

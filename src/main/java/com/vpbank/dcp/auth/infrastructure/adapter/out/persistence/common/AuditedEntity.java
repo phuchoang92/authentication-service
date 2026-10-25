@@ -4,9 +4,8 @@ import jakarta.persistence.Column;
 import jakarta.persistence.MappedSuperclass;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
-import lombok.Getter;
-
 import java.time.Instant;
+import lombok.Getter;
 
 /** CREATED_AT / UPDATED_AT of every table, set by JPA callbacks; never business data. */
 @MappedSuperclass

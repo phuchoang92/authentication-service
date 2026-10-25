@@ -7,11 +7,18 @@ calls between services and role-based domain/application/rest/persistence packag
 documentation targets in this update; no source or architecture tests are changed.
 The separate `application.command` / `application.result` packages, role-based subpackages
 under `application.port.out`, the `rest` naming, and the common `infrastructure` parent for
-adapters/config below are approved targets too; the current source still uses the previous
-names (§3).
+adapters/config form the selected layout. Current notes (§3) distinguish recorded
+implementation status from newly approved documentation targets.
+Business enums in `domain.enums` and adapter-owned `constant` packages (§11.1) are also
+documentation targets; this update does not move enum/constant source files or tests.
 
 This phase builds the business flow bottom-up. It adds no CAS, concurrency or performance
 design; the existing registration, persistence and security contracts remain unchanged.
+
+[CODE_CONVENTIONS.md](CODE_CONVENTIONS.md) defines dependency/local naming and readable
+business-step presentation. Package structure belongs here; those code-writing rules apply
+to new and changed source. Read it before changing v2 Java code. This documentation update
+does not refactor existing production code.
 
 ---
 
@@ -69,8 +76,10 @@ infrastructure.config      ──► all rings (creates beans)
 role, without business subpackages such as `registration`, `login`, `session` or
 `trusteddevice`. Business ownership is expressed by class names and responsibilities,
 not folders: `Registration`, `LoginService`, `TrustedDeviceService`, and their contracts.
-All domain values, including values used by several flows, live in `domain.model`; no
-separate `domain.shared` package is needed.
+Domain aggregates and value objects, including values used by several flows, live in
+`domain.model`; business enums live in `domain.enums`. No separate `domain.shared` package
+is needed. Fixed literals stay with their owning class or adapter (§11.1), not in a
+service-wide constants package.
 Partner adapters remain grouped by external system (`customer`, `keycloak`, `notification`).
 
 ---
@@ -82,9 +91,9 @@ com.vpbank.dcp.auth
 ├── AuthenticationApplication                 @SpringBootApplication, nothing else
 │
 ├── domain                                    ring 1 — pure Java
-│   ├── model                                 Registration (aggregate), RegistrationState,
-│   │                                         RegistrationId, RequestDigest,
+│   ├── model                                 Registration (aggregate), RegistrationId, RequestDigest,
 │   │                                         CustomerId, UserName, PhoneNumber, Email
+│   ├── enums                                 RegistrationState, DeviceStatus, DevicePlatform, TrustLevel
 │   └── exception                             RegistrationStateException
 │
 ├── application                               ring 2 — pure Java, orchestrates the domain
@@ -112,7 +121,8 @@ com.vpbank.dcp.auth
     │   │   └── rest                              ring 3 — Spring MVC REST API
     │   │       ├── common                        ApiEnvelope<T>, ApiError, FieldDetail, InvalidRequestException,
     │   │       │                                 GlobalExceptionHandler, ResponseHeadersFilter,
-    │   │       │                                 ErrorCodes (every code), ErrorMessages (localized text by code)
+    │   │       │                                 ErrorMessages (localized text by code)
+    │   │       ├── constant                      ErrorCodes (shared REST error-code literals)
     │   │       ├── controller                    RegistrationController
     │   │       ├── dto
     │   │       │   ├── request                   RegistrationRequest
@@ -132,11 +142,13 @@ com.vpbank.dcp.auth
     │       │   └── mapper                        CustomerProfileMapper
     │       ├── keycloak
     │       │   ├── KeycloakAdminAdapter          implements IdentityProviderPort
+    │       │   ├── constant                      KeycloakEndpoints (when shared; otherwise private constants)
     │       │   ├── dto                           TokenResponse, CreateUserRequest, CredentialRequest,
     │       │   │                                 EnableUserRequest
     │       │   └── mapper                        KeycloakUserMapper
     │       └── notification
     │           ├── NotificationHttpAdapter       implements SmsSenderPort
+    │           ├── constant                      shared fixed literals, only when needed
     │           ├── dto                           SmsRequest, SmsResponse
     │           └── mapper                        SmsMapper
     │
@@ -150,17 +162,28 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-25, slices 1–4 implemented on this layout):** the source matches the tree
-above — `infrastructure.adapter.in.rest` (`*RestMapper`, `RestConfiguration`),
-`infrastructure.adapter.out.*`, `infrastructure.config`, `application.command` /
-`application.result`, `application.port.in` with use-case interfaces only, and
-`application.port.out.{repository,gateway,model,exception}` with no top-level types at the root.
-`ArchitectureTest` enforces these splits, the ban on `infrastructure` imports from domain and
-application, the controller/mapper contract rule, the outbound-contract independence rule, the
-onion rings, service cycles and the Lombok allow-list. Implemented flows: registration (slice 1),
-login/session (slice 2), password lockout with CAPTCHA (slice 3), trusted devices (slice 4:
-`TrustedDeviceService` called by `LoginService` — the §6.1 composition is real). Slice decisions:
-`docs/plans/slice-2-login-session.md`, `slice-3-password-lockout.md`, `slice-4-trusted-device.md`.
+**Current (2026-10-25, slices 1–4 implemented, slice 5 turns 1–2 implemented, layout and
+conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
+`RestConfiguration`), `infrastructure.adapter.out.*`, `infrastructure.config`,
+`application.command` / `application.result`, `application.port.in` with use-case interfaces
+only, and `application.port.out.{repository,gateway,model,exception}` with no top-level types at
+the root. Business enums live in `domain.enums` (`DomainEnumCodesTest` freezes their names, which
+are the stored and wire codes), `ErrorCodes` lives in `infrastructure.adapter.in.rest.constant`,
+and the one partner `constant` package so far is `adapter.out.keycloak.constant.KeycloakEndpoints`
+(paths shared by three Keycloak classes). Production code follows
+[CODE_CONVENTIONS.md](CODE_CONVENTIONS.md): role-named dependencies, one business step per
+statement, one builder field per line, effects outside argument lists. `ArchitectureTest`
+enforces the preceding splits, the enum and constant homes, the ban on `infrastructure` imports
+from domain and application, the controller rule (no `domain` dependency; the REST mapper builds
+value objects), the outbound-contract independence rule, the onion rings, service cycles and the
+Lombok allow-list. Implemented flows: registration (slice 1), login/session (slice 2), password
+lockout with CAPTCHA (slice 3), trusted devices (slice 4: `TrustedDeviceService` called by
+`LoginService` — the §6.1 composition is real), enrollment domain/application/out adapters
+(slice 5 turns 1–2; the REST routes are turn 3). Slice decisions:
+`docs/plans/slice-2-login-session.md`, `slice-3-password-lockout.md`, `slice-4-trusted-device.md`,
+`slice-5-enrollment.md`.
+That record does not verify the new enum/constant layout. Its implementation slice must
+update architecture checks and preserve enum wire/storage codes; no tests are run here.
 
 ---
 
@@ -168,7 +191,7 @@ login/session (slice 2), password lockout with CAPTCHA (slice 3), trusted device
 
 | Ring | Package | Contains | May import | Must not import **[arch]** |
 |---|---|---|---|---|
-| Domain | `domain..` | `model` (aggregates, value objects, enums), `exception` | `java..`, `lombok.Builder`, domain types | Spring, Jakarta, `application`, `infrastructure..` |
+| Domain | `domain..` | `model` (aggregates, value objects), `enums` (business states/categories), `exception` | `java..`, `lombok.Builder`, domain types | Spring, Jakarta, `application`, `infrastructure..` |
 | Application | `application..` | `command`, `result`, `port.in` (HTTP UseCase interfaces only), `port.out.repository`, `port.out.gateway`, `port.out.model`, `port.out.exception`, `service` (including optional plain-Java settings) | domain types for its own business rules, shared domain values, its own outbound ports and helpers, other services and published `command` / `result` contracts (§6.1), `java..`, `javax.crypto..`, `lombok.Builder`; `lombok.RequiredArgsConstructor` and `lombok.NonNull` for constructor injection (§10) | Spring, Jakarta, `infrastructure..` (including framework properties); bypassing another service's ownership through its repository or internal aggregate |
 | Adapter in | `infrastructure.adapter.in..` | controllers, request/response DTOs, REST mappers, envelope, error handler, filters | `application.port.in`, `application.command`, `application.result`, domain values for REST mapping only, Spring MVC, Jakarta Validation | `infrastructure.adapter.out..`, JPA entities, `application..service`; controllers also follow the narrower rule below |
 | Adapter out | `infrastructure.adapter.out..` | JPA entities + Spring Data repositories + persistence adapter; HTTP clients + wire DTOs + adapter | `application..port.out`, `domain..`, Spring Data / JPA / RestClient | `infrastructure.adapter.in..`, another `infrastructure.adapter.out.<x>` package, `application..service` |
@@ -184,7 +207,7 @@ Additional **[arch]** rules:
   becomes a bean only when it needs a dependency.
 - **[arch]** A controller depends only on `application.port.in`, `application.command`,
   `application.result`, REST `dto`/`mapper`,
-  `infrastructure.adapter.in.rest.common` and Spring MVC — never on `domain..model`, `port.out`, `service`
+  `infrastructure.adapter.in.rest.common` and Spring MVC — never on `domain..` (including model/enums), `port.out`, `service`
   or entities.
 - A class whose name ends in `Request` or `Response` lives in a `dto` package (REST or partner).
 - A class whose name ends in `Mapper` lives in a `mapper` package and is `final`; static methods
@@ -196,7 +219,8 @@ Additional **[arch]** rules:
   `application.port.out.gateway`. Both groups are outbound ports.
 - `application.port.in` contains inbound interfaces only. Application operation commands
   and their input values live in `application.command`; operation results and their output
-  values live in `application.result`. Genuine shared domain values remain in `domain.model`.
+  values live in `application.result`. Genuine shared domain values remain in `domain.model`;
+  business states/categories live in `domain.enums`.
   Outbound-only input/output values live in `application.port.out.model`, and dependency
   failure exceptions in `application.port.out.exception`, not in the service command/result
   packages. A small outcome used by only one port may remain nested in that interface.
@@ -210,6 +234,10 @@ Additional **[arch]** rules:
 - All adapters live under `infrastructure.adapter`; framework wiring/properties live under
   `infrastructure.config`. Core-owned ports stay under `application.port`. No domain or
   application dependency on any `infrastructure` type is allowed.
+- Business enums use `domain.enums` (plural; `enum` is a Java keyword). Shared fixed
+  non-SQL literals use the owning adapter's `constant` package; single-class literals stay
+  private and adjustable values stay in properties. Port outcomes and provider enums follow
+  the ownership exceptions in §11.1, not a blanket "all enums in domain" rule.
 - Lombok allow-list, see §10.
 
 ---
@@ -220,7 +248,12 @@ Additional **[arch]** rules:
 |---|---|---|
 | A thing with identity and a lifecycle (registration, session, device) | `domain.model` | immutable `record`, `@Builder(toBuilder = true)`, named transition methods returning a new instance |
 | A validated small value (customer ID, phone, PIN length) | `domain.model` | `record` with compact constructor that throws `IllegalArgumentException`; `toString` redacts personal data |
-| A fixed list (states, statuses) | `domain.model` | `enum`, with helper methods such as `finished()` |
+| Business states/categories | `domain.enums` | `enum`, with pure helpers such as `finished()`; no I/O or collaborators |
+| A small outcome belonging to one port | nested in that outbound interface | enum or sealed result; does not become a domain enum solely because its set is closed |
+| Provider-specific enum | owning `infrastructure.adapter.out.<partner>.dto` or its internal types | provider wire representation; mapped to core values without leaking into domain |
+| Fixed literal used by one class | owning class | `private static final`; prefer existing framework/library constants |
+| Fixed non-SQL literals shared within an adapter | owning adapter's `constant` package | focused final holder with private constructor, e.g. `ErrorCodes` or `KeycloakEndpoints`; no global constants dump |
+| Adjustable lifetime, limit or timeout | `infrastructure.config` properties | validated configuration; never converted to a constant merely to shorten wiring |
 | "This step is not allowed from this state" | `domain.exception` | extends `IllegalStateException`; a bug, mapped to 500 |
 | Published input to a service operation | `application.command` | `XxxCommand` record and operation-specific input values (`@Builder` if > 4 fields), used by HTTP use cases or direct service callers; no other capability's internal domain types |
 | Published output of a service operation | `application.result` | `sealed interface XxxResult` when outcomes differ, plus operation-specific output values; immutable values, not entities or internal aggregates; business failures are outcomes, not exceptions |
@@ -284,17 +317,21 @@ POST /internal/v1/callback/authentication-creation
   ▼ application.port.in.RegisterCustomerUseCase.register(command)
   │
   ▼ application.service.RegisterCustomerService
-  │   digester.digest(command)                           RequestDigester (HMAC-SHA256)
-  │   registrations.findLatest(customerId)               RegistrationRepository (port.out.repository)
-  │   customers.profile(customerId)                      CustomerDirectoryPort (port.out.gateway)
-  │   Registration.reserve(...)  → registrations.reserve  domain creates, adapter stores
-  │   identities.createDisabledUser(NewIdentityUser)     gateway interface + port.out.model input
-  │   registrations.save(reg.markUserCreated(iss, sub))  domain transition, adapter CAS
-  │   identities.setPassword(sub, password)
-  │   sms.sendInitialPassword(InitialPasswordSms)        SmsSenderPort
-  │   registrations.save(reg.markSmsAccepted())
-  │   identities.enable(sub)
-  │   registrations.complete(reg.complete())             one DB transaction: identity row + READY
+  │   requestDigester.digest(command)                    RequestDigester (HMAC-SHA256)
+  │   registrationRepository.findLatest(customerId)      outbound storage read
+  │   customerDirectoryPort.profile(customerId)          outbound partner read
+  │   registration = Registration.reserve(...)          domain creation
+  │   registrationRepository.reserve(registration)       storage reservation
+  │   identityProviderPort.createDisabledUser(newIdentityUser)
+  │   userCreatedRegistration = registration.markUserCreated(identityIssuer, identitySubject)
+  │   registrationRepository.save(userCreatedRegistration)
+  │   identityProviderPort.setPassword(identitySubject, password)
+  │   smsSenderPort.sendInitialPassword(initialPasswordSms)
+  │   smsAcceptedRegistration = userCreatedRegistration.markSmsAccepted()
+  │   registrationRepository.save(smsAcceptedRegistration)
+  │   identityProviderPort.enable(identitySubject)
+  │   completedRegistration = smsAcceptedRegistration.complete()
+  │   registrationRepository.complete(completedRegistration)  identity row + READY, one DB transaction
   │   → RegisterCustomerResult.Ready / IdentityConflict / ProfileIncomplete / Unavailable
   ▼
   infrastructure.adapter.in.rest.mapper.RegistrationRestMapper.toResponse(result)
@@ -513,11 +550,11 @@ Illustrative service composition; method bodies and unrelated dependencies omitt
 // application.service — still plain Java, assembled by config
 @RequiredArgsConstructor
 public final class LoginService {
-    @NonNull private final TrustedDeviceService trustedDevices;
+    @NonNull private final TrustedDeviceService trustedDeviceService;
 }
 ```
 
-Config can instantiate this class with `new LoginService(trustedDevices)`. The annotation
+Config can instantiate this class with `new LoginService(trustedDeviceService)`. The annotation
 belongs on the class, not on an `@Bean` factory method. These new allowances require future
 architecture-test updates; this documentation update does not enable them in source checks.
 
@@ -539,6 +576,8 @@ architecture-test updates; this documentation update does not enable them in sou
 | Mapper | `<Noun><Layer>Mapper` | `RegistrationRestMapper`, `RegistrationPersistenceMapper` |
 | Configuration | `<Capability>Configuration`, `<Capability>Properties` | `RegistrationConfiguration` |
 | Optional plain-Java application settings | `<Capability>Settings` | `RegistrationSettings` (only when a cohesive settings group is needed) |
+| Business enum | business noun in `domain.enums`, no mandatory `Enum` suffix | `RegistrationState`, `DeviceStatus`, `TrustLevel` |
+| Shared constant holder | specific purpose in the owning adapter's `constant` package | `ErrorCodes`, `KeycloakEndpoints`; not `Constants` or `CommonConstants` |
 | Test | `<Class>Test` (unit), `<Class>IT` (needs Docker) | `RegisterCustomerServiceTest`, `RegistrationPersistenceAdapterIT` |
 
 Method naming in mappers: `toCommand`, `toResponse`, `toEntity`, `toDomain`, `apply`.
@@ -548,6 +587,50 @@ Aggregate transitions are verbs in the event form the contract uses:
 Name service methods after business operations. A capability service may expose both reads
 and updates; `Commands`/`Queries` interfaces and an interface per method are not required.
 
+### 11.1 Enums, fixed constants and configurable properties
+
+- Use `domain.enums` for business choices such as `RegistrationState`, `DeviceStatus`,
+  `DevicePlatform` and `TrustLevel`. Aggregates/value objects stay in `domain.model` and
+  import those enums. Enums have pure behavior, with no framework dependencies, I/O or
+  stateful services.
+- Keep small single-port outcomes, such as `RegistrationRepository.CompleteResult`, nested
+  in their interface. Provider-only codes/enums stay in the owning adapter; mapping them
+  inward does not turn provider protocol names into domain concepts.
+- Preserve API/storage/signed enum codes independently of package moves. Never persist
+  ordinals. Use explicit codecs or an intentionally frozen, tested name-based mapping;
+  unknown security values must not default to an accepted state.
+- Keep single-consumer literals `private static final`. When several classes within an
+  adapter share fixed non-SQL literals, use a focused holder in that adapter's `constant`
+  package: REST `ErrorCodes`, or partner `KeycloakEndpoints`, for example. A holder is final
+  with a private constructor; no constant interfaces or service-wide `Constants` class.
+  Reuse suitable framework/library constants. Create a package only when actual shared
+  literals justify it; do not pre-create empty constant packages for every adapter.
+- `ErrorCodes` belongs to `infrastructure.adapter.in.rest.constant`; `ErrorMessages` and
+  error handling stay in `rest.common`. This is an ownership/package change, not a change
+  to error codes, localization catalogue keys, status mapping or public messages.
+- Provider-specific constants stay with that provider's adapter. SQL text retains its
+  owning persistence repository's SQL holder rules; do not move native SQL into `constant`.
+- Adjustable timeouts, request/session lifetimes and policy limits remain validated
+  properties in `infrastructure.config`, passed to application as described in §12. Do not
+  place secrets in constants or enums. Business enums, fixed literals and tunable policy
+  values are distinct roles, not interchangeable ways to store the same setting.
+
+### 11.2 Readable business steps and variable names
+
+Follow [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md) for the detailed rules and the trust/audit examples.
+
+- Dependencies expose their role: `trustedDeviceRepository`, `trustedDeviceService`,
+  `devicePolicy`, `registrationRestMapper`; collections describe their contents.
+- Give meaningful business steps their own statements and name intermediate states.
+  Build a nontrivial input before invoking a repository/partner; do not hide transitions,
+  I/O or counter increments inside argument lists.
+- In multi-field builders, put each field and `.build()` on separate lines. Separate
+  mapping, persistence and result conversion when nesting would obscure execution order.
+- Prefer clear flow over minimum line count. Do not add empty helpers, dependency bags
+  or data wrappers just to shorten methods or call sites.
+- These are review conventions, not claimed formatter/ArchUnit enforcement. Formatting
+  alone does not establish business, transaction or concurrency correctness.
+
 ---
 
 ## 12. Configuration and wiring
@@ -555,7 +638,7 @@ and updates; `Commands`/`Queries` interfaces and an interface per method are not
 - Business classes carry **no** Spring annotations. `infrastructure.config.<Capability>Configuration`
   creates them with `@Bean`, so the object graph of a feature is readable in one file.
 - For cross-capability calls, inject the owning service class through the caller's
-  constructor, e.g. `LoginService(TrustedDeviceService trustedDevices, ...)`. Expose the
+  constructor, e.g. `LoginService(TrustedDeviceService trustedDeviceService, ...)`. Expose the
   service bean by its concrete type for that injection; controller wiring still uses its
   inbound UseCase interface. Do not add service locators, circular wiring or forwarding beans.
 - Adapters that need Spring proxies (`@Transactional`) are created as beans too, typed by
@@ -594,7 +677,7 @@ and updates; `Commands`/`Queries` interfaces and an interface per method are not
 | `infrastructure.adapter.out.<partner>` | unit | `MockRestServiceServer` | request shape, status mapping, timeout → unavailable |
 | `infrastructure.config` | slice | `ApplicationContextRunner` | flag off = no beans; invalid values or missing required settings fail startup naming the key; validated properties map to the correct scalar/plain-Java settings |
 | whole app | integration | `@SpringBootTest` + `@AutoConfigureMockMvc` + Testcontainers MySQL, the three partner **ports** replaced by `@MockitoBean` (partner HTTP is already proven by the adapter tests) | boot with Flyway + JPA validation, REST → use case → JPA → database, retry answered from the database |
-| rules | static | ArchUnit | implemented §4, §10 and naming rules; infrastructure paths, REST names, command/result separation, outbound role packages, layer boundaries and service cycles require future test updates |
+| rules | static | ArchUnit | implemented §4, §10 and naming rules; new enum/constant ownership and pending layout rules require test updates in their implementation slices |
 
 Conventions: a test class sits in the same package as the class under test; names read as
 sentences (`aRetryAfterReadyReturnsTheSameRequestWithoutCallingAnyone`); tests needing Docker
@@ -613,6 +696,10 @@ also need explicit architecture-test updates; Spring's `@WebMvcTest` annotation 
 For infrastructure grouping, verify adapters/config use the new parent and domain/application
 have no imports from `infrastructure`. Existing port ownership and runtime call order stay
 unchanged; the parent package is not an additional workflow component.
+For enum/constant changes, check business enums use `domain.enums`, provider enums stay
+within adapters, and shared fixed literals have the appropriate owner. Before accepting
+source moves, test that stored/wire enum codes and public error codes remain identical.
+These enum/constant checks are implementation requirements, not results of this document edit.
 Constructor-policy implementation checks must preserve required-dependency null checks,
 allow the annotations in §10, and keep framework properties out of application. Tests for
 configuration bounds (such as a zero/negative request lifetime) belong at startup binding/
@@ -636,8 +723,9 @@ requirements, not executed test results here.
 ## 15. Adding a new capability — checklist
 
 1. Design docs first: DB phase SQL + API contract exist and are approved.
-2. `domain.model`: aggregate record with transitions, value objects and enums;
-   `domain.exception`: domain exceptions. No business subpackages. Unit test.
+2. `domain.model`: aggregate record with transitions and value objects; `domain.enums`:
+   business enums; `domain.exception`: domain exceptions. Apply §11.1 for port/provider enums,
+   constants and properties. No business subpackages. Unit test.
 3. `application.command` / `application.result`: published operation inputs/outputs.
    `application.port.in`: UseCase interfaces for HTTP entry operations only, not for every
    method called by another service. Keep outbound-specific payloads with `port.out`.
@@ -646,7 +734,8 @@ requirements, not executed test results here.
    outcomes nested when useful. Do not introduce another copy of a service command (§5.1).
 5. `application.service`: the service; inject other capability services only through
    their published entry points (§6.1), without cycles. Test with mocked ports/called services
-   and an in-memory repository double. Use §10 for constructors; preserve required null checks.
+   and an in-memory repository double. Use §10 for constructors and §11.2/code conventions
+   for names and readable flow; preserve required null checks.
 6. Flyway `V<n>__<phase>.sql` copied from the design phase file, unchanged.
 7. `infrastructure.adapter.out.persistence`: add types to `entity`, `repository`, `mapper`, `adapter` by role;
    no capability subpackage. Verify with `@DataJpaTest` IT.
@@ -658,8 +747,10 @@ requirements, not executed test results here.
 11. Update `ArchitectureTest` for role-only packages, layer boundaries and service dependency
     cycles in the implementation slice, including the `infrastructure` parent and the ban
     on its imports in domain/application. Review business ownership at class/method level.
-    Verify entities/repositories are covered by the existing explicit role-package scans.
+    Verify entities/repositories are covered by the existing explicit role-package scans,
+    and enum/constant ownership checks reflect §11.1 while retaining existing external codes.
 12. README: status, settings table, open gaps. ADR if a new technology decision was made.
+    Review [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md); formatters do not replace this review.
 
 ---
 
@@ -686,15 +777,18 @@ public sealed interface RegisterCustomerResult {
     record Unavailable() implements RegisterCustomerResult { }
 }
 
-// domain.model — the state machine lives here
+// domain.model — the state machine lives here; imports domain.enums.RegistrationState
 @Builder(toBuilder = true)
 public record Registration(RegistrationId id, CustomerId customerId, UserName userName,
                            RequestDigest requestDigest, RegistrationState state,
                            String identityIssuer, String identitySubject, Instant expiresAt, long version) {
     public Registration markUserCreated(String issuer, String subject) {
         requireState(RegistrationState.RESERVED);
-        return toBuilder().state(RegistrationState.USER_CREATED)
-                .identityIssuer(issuer).identitySubject(subject).build();
+        return toBuilder()
+                .state(RegistrationState.USER_CREATED)
+                .identityIssuer(issuer)
+                .identitySubject(subject)
+                .build();
     }
 }
 
@@ -709,18 +803,23 @@ public interface RegistrationRepository {
 // infrastructure.adapter.out.persistence.adapter — translates Spring exceptions; owns the one two-table transaction
 @RequiredArgsConstructor
 public class RegistrationPersistenceAdapter implements RegistrationRepository {
-    @NonNull private final RegistrationJpaRepository registrations;
-    @NonNull private final CustomerAuthenticationJpaRepository identities;
+    @NonNull private final RegistrationJpaRepository registrationJpaRepository;
+    @NonNull private final CustomerAuthenticationJpaRepository customerAuthenticationJpaRepository;
 
     @Override
     public Optional<Registration> save(Registration changed) {            // compare-and-set via @Version
         try {
-            Optional<RegistrationEntity> current = registrations.findById(changed.id().value());
-            if (current.isEmpty() || current.get().getVersion() != changed.version()) {
+            Optional<RegistrationEntity> currentRegistration = registrationJpaRepository.findById(changed.id().value());
+            if (currentRegistration.isEmpty() || currentRegistration.get().getVersion() != changed.version()) {
                 return Optional.empty();
             }
-            RegistrationPersistenceMapper.apply(current.get(), changed);
-            return Optional.of(RegistrationPersistenceMapper.toDomain(registrations.saveAndFlush(current.get())));
+
+            RegistrationEntity registrationEntity = currentRegistration.get();
+            RegistrationPersistenceMapper.apply(registrationEntity, changed);
+
+            RegistrationEntity savedRegistration = registrationJpaRepository.saveAndFlush(registrationEntity);
+            Registration restoredRegistration = RegistrationPersistenceMapper.toDomain(savedRegistration);
+            return Optional.of(restoredRegistration);
         } catch (ObjectOptimisticLockingFailureException stale) {
             return Optional.empty();
         } catch (DataAccessException failure) {
@@ -737,22 +836,23 @@ public class RegistrationPersistenceAdapter implements RegistrationRepository {
 @RestController
 @RequiredArgsConstructor
 public class RegistrationController {
-    @NonNull private final RegisterCustomerUseCase registerCustomer;
-    @NonNull private final RegistrationRestMapper mapper;
+    @NonNull private final RegisterCustomerUseCase registerCustomerUseCase;
+    @NonNull private final RegistrationRestMapper registrationRestMapper;
 
     @PostMapping(path = "/internal/v1/callback/authentication-creation",
             consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<RegistrationResponse>> create(@Valid @RequestBody RegistrationRequest body) {
-        RegisterCustomerCommand command = mapper.toCommand(body);
-        RegisterCustomerResult result = registerCustomer.register(command);
-        return mapper.toResponse(result);
+        RegisterCustomerCommand registrationCommand = registrationRestMapper.toCommand(body);
+        RegisterCustomerResult registrationResult = registerCustomerUseCase.register(registrationCommand);
+        return registrationRestMapper.toResponse(registrationResult);
     }
 }
 
 // infrastructure.adapter.in.rest.mapper — an instance because the text comes from ErrorMessages (§9.1)
+// Imports: infrastructure.adapter.in.rest.constant.ErrorCodes
 @RequiredArgsConstructor
 public final class RegistrationRestMapper {
-    @NonNull private final ErrorMessages errors;
+    @NonNull private final ErrorMessages errorMessages;
 
     /** Bean Validation already rejected bad formats; a value object that still refuses is a 400. */
     public RegisterCustomerCommand toCommand(RegistrationRequest request) {
@@ -760,7 +860,8 @@ public final class RegistrationRestMapper {
             return RegisterCustomerCommand.builder()
                     .customerId(new CustomerId(request.customerId()))
                     .userName(new UserName(request.userName()))
-                    .firstName(request.firstName()).lastName(request.lastName())
+                    .firstName(request.firstName())
+                    .lastName(request.lastName())
                     .phoneNumber(new PhoneNumber(request.phoneNumber()))
                     .email(blank(request.email()) ? null : new Email(request.email()))
                     .build();
@@ -771,12 +872,26 @@ public final class RegistrationRestMapper {
 
     public ResponseEntity<ApiEnvelope<RegistrationResponse>> toResponse(RegisterCustomerResult result) {
         return switch (result) {
-            case Ready r -> ResponseEntity.status(r.created() ? HttpStatus.CREATED : HttpStatus.OK)
-                    .body(ApiEnvelope.success(new RegistrationResponse(r.requestId().value(),
-                            r.customerId().value(), r.userName().value(), "READY")));
-            case IdentityConflict() -> errors.failure(HttpStatus.CONFLICT, ErrorCodes.IDENTITY_CONFLICT);
-            case ProfileIncomplete() -> errors.failure(HttpStatus.CONFLICT, ErrorCodes.CUSTOMER_PROFILE_INCOMPLETE);
-            case Unavailable() -> errors.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.ACCOUNT_CREATION_UNAVAILABLE);
+            case Ready ready -> {
+                HttpStatus responseStatus = ready.created() ? HttpStatus.CREATED : HttpStatus.OK;
+                RegistrationResponse registrationResponse = new RegistrationResponse(
+                        ready.requestId().value(),
+                        ready.customerId().value(),
+                        ready.userName().value(),
+                        "READY");
+
+                yield ResponseEntity.status(responseStatus)
+                        .body(ApiEnvelope.success(registrationResponse));
+            }
+            case IdentityConflict() -> errorMessages.failure(
+                    HttpStatus.CONFLICT,
+                    ErrorCodes.IDENTITY_CONFLICT);
+            case ProfileIncomplete() -> errorMessages.failure(
+                    HttpStatus.CONFLICT,
+                    ErrorCodes.CUSTOMER_PROFILE_INCOMPLETE);
+            case Unavailable() -> errorMessages.failure(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    ErrorCodes.ACCOUNT_CREATION_UNAVAILABLE);
         };
     }
 }
@@ -797,6 +912,8 @@ public final class RegistrationRestMapper {
 | 2026-10-25 | Outbound contracts grouped by role | `port.out.repository` and `gateway` hold interfaces, `model` holds standalone dependency input/output values, `exception` holds distinguished dependency failures; service commands remain separate | flat outbound package; business subpackages; duplicate commands or forwarding payload wrappers |
 | 2026-10-25 | REST naming for the HTTP inbound adapter | `infrastructure.adapter.in.rest`, `*RestMapper` and `RestConfiguration` describe the supported API surface | `infrastructure.adapter.in.web`, `*WebMapper` and `WebConfiguration` as target names |
 | 2026-10-25 | Common infrastructure parent | `infrastructure.adapter` holds technical adapters and `infrastructure.config` assembles them; domain/application never import infrastructure; ports remain application-owned | root adapter/config packages; moving core ports into infrastructure; an extra runtime layer |
+| 2026-10-25 | Business enums and owned constants | business enums use `domain.enums`; single-port outcomes and provider enums retain their owners; private or adapter-scoped fixed literals stay separate from configurable properties; package moves preserve external codes | business enums mixed into model; one global enum/constants dump; adjustable policy as constants |
+| 2026-10-25 | Explicit business steps and role-based variable names | CODE_CONVENTIONS.md requires readable builders, named intermediate states, visible effects and descriptive dependencies; clarity takes priority over line count | compressed effectful expressions; ambiguous dependency names; arbitrary helper extraction |
 | 2026-10-25 | Direct service calls between capabilities | the owning service exposes cohesive business operations through constructor injection and published commands/results; no cycles | calls through another capability's repository; forwarding interfaces; internal HTTP hops |
 | 2026-10-25 | Role-only layer-first packages throughout | domain/application/rest/persistence group by role; class names and contracts express business ownership; supersedes the earlier mixed capability/role layout | business subpackages in domain/application/rest/persistence; a separate domain.shared package |
 | 2026-10-25 | Cohesive service operations without required CQRS | an operation may read, validate, update and return data; the owning capability keeps its rules | mandatory Commands/Queries interfaces or a UseCase for every method |

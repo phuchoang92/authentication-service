@@ -9,32 +9,35 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vpbank.dcp.auth.application.command.LogoutCommand;
+import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
+import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
+import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
+import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
+import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
+import com.vpbank.dcp.auth.application.port.in.LogoutUseCase;
+import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
+import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
+import com.vpbank.dcp.auth.application.result.DeviceSummary;
+import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
+import com.vpbank.dcp.auth.application.result.LoginResult;
+import com.vpbank.dcp.auth.application.result.LogoutResult;
+import com.vpbank.dcp.auth.application.result.SessionSummary;
+import com.vpbank.dcp.auth.application.result.UnlockPasswordResult;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
+import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
+import com.vpbank.dcp.auth.domain.enums.TrustLevel;
+import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.OpaqueToken;
+import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.LoginRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.PasswordUnlockRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.SessionRestMapper;
-import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
-import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
-import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
-import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
-import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
-import com.vpbank.dcp.auth.application.result.LoginResult;
-import com.vpbank.dcp.auth.application.result.DeviceSummary;
-import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
-import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
-import com.vpbank.dcp.auth.application.command.LogoutCommand;
-import com.vpbank.dcp.auth.application.result.LogoutResult;
-import com.vpbank.dcp.auth.application.port.in.LogoutUseCase;
-import com.vpbank.dcp.auth.application.result.SessionSummary;
-import com.vpbank.dcp.auth.application.result.UnlockPasswordResult;
-import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
 import com.vpbank.dcp.auth.infrastructure.config.RestConfiguration;
-import com.vpbank.dcp.auth.domain.model.Channel;
-import com.vpbank.dcp.auth.domain.model.CustomerId;
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
-import com.vpbank.dcp.auth.domain.model.SessionId;
-import com.vpbank.dcp.auth.domain.model.SessionStatus;
 import java.time.Instant;
 import java.util.Optional;
 import org.hamcrest.Matchers;
@@ -170,9 +173,9 @@ class LoginRestTest {
                 SessionStatus.NEED_TRUSTED_DEVICE, IDLE, IDLE)));
         when(devices.list(new CustomerId("90359"), Channel.MOBILE)).thenReturn(java.util.List.of(DeviceSummary.builder()
                 .deviceId(new com.vpbank.dcp.auth.domain.model.DeviceId("dev-12345678"))
-                .platform(com.vpbank.dcp.auth.domain.model.DevicePlatform.ANDROID)
-                .status(com.vpbank.dcp.auth.domain.model.DeviceStatus.ACTIVE)
-                .trustLevel(com.vpbank.dcp.auth.domain.model.TrustLevel.TRUSTED).primary(true)
+                .platform(DevicePlatform.ANDROID)
+                .status(DeviceStatus.ACTIVE)
+                .trustLevel(TrustLevel.TRUSTED).primary(true)
                 .trustedAt(IDLE).expiresAt(ABSOLUTE).lastLoginAt(IDLE).build()));
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/devices")

@@ -1,23 +1,22 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.valkey;
 
-import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
-
-import java.security.MessageDigest;
-import java.nio.charset.StandardCharsets;
-import java.time.Clock;
-import java.time.Instant;
-import java.util.List;
-import java.util.Map;
 
 /**
  * {@link CaptchaStore} on Valkey: one HASH per challenge {@code {customerId, answerDigest, expiresAtMs}}
@@ -32,19 +31,20 @@ public final class ValkeyCaptchaStore implements CaptchaStore {
     /** Unknown user names get a challenge bound to nobody. */
     static final String NOBODY = "";
 
-    @NonNull private final StringRedisTemplate redis;
-    @NonNull private final CaptchaKeys keys;
+    @NonNull private final StringRedisTemplate stringRedisTemplate;
+    @NonNull private final CaptchaKeys captchaKeys;
     @NonNull private final Clock clock;
 
     @Override
     public void save(CaptchaId id, CustomerId customerId, CaptchaAnswer answer, Instant expiresAt) {
-        String key = keys.forChallenge(id);
+        String key = captchaKeys.forChallenge(id);
+        String boundCustomer = customerId == null ? NOBODY : customerId.value();
         Map<String, String> fields = Map.of(
-                F_CUSTOMER, customerId == null ? NOBODY : customerId.value(),
-                F_DIGEST, keys.answerDigest(answer),
+                F_CUSTOMER, boundCustomer,
+                F_DIGEST, captchaKeys.answerDigest(answer),
                 F_EXPIRES, Long.toString(expiresAt.toEpochMilli()));
         try {
-            redis.execute(new SessionCallback<List<Object>>() {
+            stringRedisTemplate.execute(new SessionCallback<List<Object>>() {
                 @Override
                 @SuppressWarnings("unchecked")
                 public <K, V> List<Object> execute(RedisOperations<K, V> operations) {
@@ -62,9 +62,9 @@ public final class ValkeyCaptchaStore implements CaptchaStore {
 
     @Override
     public boolean consume(CaptchaId id, CustomerId customerId, CaptchaAnswer answer) {
-        String key = keys.forChallenge(id);
+        String key = captchaKeys.forChallenge(id);
         try {
-            Map<Object, Object> taken = redis.execute(new SessionCallback<Map<Object, Object>>() {
+            Map<Object, Object> consumedFields = stringRedisTemplate.execute(new SessionCallback<Map<Object, Object>>() {
                 @Override
                 @SuppressWarnings("unchecked")
                 public <K, V> Map<Object, Object> execute(RedisOperations<K, V> operations) {
@@ -77,28 +77,41 @@ public final class ValkeyCaptchaStore implements CaptchaStore {
                     }
                     ops.multi();
                     ops.delete(key);
-                    List<Object> result = ops.exec();
-                    return result == null || result.isEmpty() ? null : fields; // null: someone else consumed it first
+                    List<Object> execResult = ops.exec();
+                    boolean deletedByThisCall = execResult != null && !execResult.isEmpty();
+                    if (!deletedByThisCall) {
+                        return null; // someone else consumed it first
+                    }
+                    return fields;
                 }
             });
-            return taken != null && matches(taken, customerId, answer);
+            if (consumedFields == null) {
+                return false;
+            }
+            return matches(consumedFields, customerId, answer);
         } catch (DataAccessException failure) {
             throw new RepositoryUnavailableException(failure);
         }
     }
 
     private boolean matches(Map<Object, Object> fields, CustomerId customerId, CaptchaAnswer answer) {
-        String owner = String.valueOf(fields.get(F_CUSTOMER));
-        String expires = String.valueOf(fields.get(F_EXPIRES));
-        String digest = String.valueOf(fields.get(F_DIGEST));
+        String boundCustomer = String.valueOf(fields.get(F_CUSTOMER));
+        String expiresAtMillis = String.valueOf(fields.get(F_EXPIRES));
+        String storedAnswerDigest = String.valueOf(fields.get(F_DIGEST));
+
         boolean live;
         try {
-            live = clock.instant().toEpochMilli() < Long.parseLong(expires);
+            live = clock.instant().toEpochMilli() < Long.parseLong(expiresAtMillis);
         } catch (NumberFormatException malformed) {
             return false;
         }
-        boolean sameOwner = customerId != null && customerId.value().equals(owner);
-        return live && sameOwner && MessageDigest.isEqual(digest.getBytes(StandardCharsets.UTF_8),
-                keys.answerDigest(answer).getBytes(StandardCharsets.UTF_8));
+
+        boolean sameOwner = customerId != null && customerId.value().equals(boundCustomer);
+
+        byte[] storedDigest = storedAnswerDigest.getBytes(StandardCharsets.UTF_8);
+        byte[] givenDigest = captchaKeys.answerDigest(answer).getBytes(StandardCharsets.UTF_8);
+        boolean sameAnswer = MessageDigest.isEqual(storedDigest, givenDigest);
+
+        return live && sameOwner && sameAnswer;
     }
 }

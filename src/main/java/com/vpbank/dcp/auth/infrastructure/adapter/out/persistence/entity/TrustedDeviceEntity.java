@@ -1,9 +1,9 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity;
 
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
+import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
+import com.vpbank.dcp.auth.domain.enums.TrustLevel;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.AuditedEntity;
-import com.vpbank.dcp.auth.domain.model.DevicePlatform;
-import com.vpbank.dcp.auth.domain.model.DeviceStatus;
-import com.vpbank.dcp.auth.domain.model.TrustLevel;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -11,14 +11,13 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import java.time.Instant;
+import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-
-import java.time.Instant;
-import java.util.UUID;
 
 /**
  * Row of TRUSTED_DEVICE (phase 3). The app's device ID is never stored in clear: HMAC for lookup,

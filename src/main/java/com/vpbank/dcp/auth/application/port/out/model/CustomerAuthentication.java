@@ -3,9 +3,8 @@ package com.vpbank.dcp.auth.application.port.out.model;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
 import com.vpbank.dcp.auth.domain.model.UserName;
-import lombok.Builder;
-
 import java.util.Objects;
+import lombok.Builder;
 
 /**
  * A customer's login identity as stored: which Keycloak user it is, whether it may log in, and

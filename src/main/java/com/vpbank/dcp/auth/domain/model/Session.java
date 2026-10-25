@@ -1,22 +1,24 @@
 package com.vpbank.dcp.auth.domain.model;
 
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.exception.SessionStateException;
-import lombok.Builder;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import lombok.Builder;
 
 /**
  * One login session. An ACTIVE session's idle expiry slides with eligible activity up to the
  * fixed absolute expiry (DD 06 / flow 16). A NEED_TRUSTED_DEVICE session is restricted: one fixed
- * TTL, never extended (DD 20 §3). {@code sessionVersion} is the compare-and-set revision the store
- * must still see when it saves a change; each saved change increments it in the store.
+ * TTL, never extended (DD 20 §3); it carries the enrollment context of the trust flow (null until
+ * init). {@code sessionVersion} is the compare-and-set revision the store must still see when it
+ * saves a change; each saved change increments it in the store.
  */
 @Builder(toBuilder = true)
 public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
                       SessionStatus status, Instant createdAt, Instant idleExpiresAt,
-                      Instant absoluteExpiresAt, long sessionVersion) {
+                      Instant absoluteExpiresAt, long sessionVersion, EnrollmentContext enrollment) {
     public Session {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(customerId, "customerId");
@@ -33,19 +35,35 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
     /** A fresh ACTIVE session: idle = now + idle, absolute = now + absolute, version 0. */
     public static Session start(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
                                 Instant now, SessionPolicy policy) {
-        return Session.builder().id(id).customerId(customerId).deviceId(deviceId).channel(channel)
-                .status(SessionStatus.ACTIVE).createdAt(now)
-                .idleExpiresAt(now.plus(policy.idle())).absoluteExpiresAt(now.plus(policy.absolute()))
-                .sessionVersion(0).build();
+        return Session.builder()
+                .id(id)
+                .customerId(customerId)
+                .deviceId(deviceId)
+                .channel(channel)
+                .status(SessionStatus.ACTIVE)
+                .createdAt(now)
+                .idleExpiresAt(now.plus(policy.idle()))
+                .absoluteExpiresAt(now.plus(policy.absolute()))
+                .sessionVersion(0)
+                .build();
     }
 
     /** A restricted session for a device that still needs trust: idle = absolute = now + TTL. */
     public static Session startRestricted(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
                                           Instant now, DevicePolicy policy) {
-        Instant end = now.plus(policy.restrictedSessionTtl());
-        return Session.builder().id(id).customerId(customerId).deviceId(deviceId).channel(channel)
-                .status(SessionStatus.NEED_TRUSTED_DEVICE).createdAt(now).idleExpiresAt(end).absoluteExpiresAt(end)
-                .sessionVersion(0).build();
+        // A restricted session has one fixed deadline: idle and absolute expiry are the same instant.
+        Instant restrictedExpiresAt = now.plus(policy.restrictedSessionTtl());
+        return Session.builder()
+                .id(id)
+                .customerId(customerId)
+                .deviceId(deviceId)
+                .channel(channel)
+                .status(SessionStatus.NEED_TRUSTED_DEVICE)
+                .createdAt(now)
+                .idleExpiresAt(restrictedExpiresAt)
+                .absoluteExpiresAt(restrictedExpiresAt)
+                .sessionVersion(0)
+                .build();
     }
 
     /** Not ended and neither deadline has passed (restricted sessions are live too). */
@@ -72,9 +90,10 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
         if (skew.compareTo(policy.maxAdmittedAtSkew()) > 0) {
             throw new IllegalArgumentException("Admission time is outside the accepted skew");
         }
-        Instant slid = admittedAt.plus(policy.idle());
-        Instant newIdle = min(absoluteExpiresAt, max(idleExpiresAt, slid));
-        return toBuilder().idleExpiresAt(newIdle).build();
+        // The idle window slides from the admission time, never shrinks and never passes the absolute expiry.
+        Instant slidIdleExpiresAt = admittedAt.plus(policy.idle());
+        Instant newIdleExpiresAt = min(absoluteExpiresAt, max(idleExpiresAt, slidIdleExpiresAt));
+        return toBuilder().idleExpiresAt(newIdleExpiresAt).build();
     }
 
     public Session end(Instant now) {
@@ -85,6 +104,15 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
     }
 
     /** The store saw this version; the next change builds on it. */
+    /** Init attached the enrollment: its ID, the device key and Ksrv, the challenge digest. Restricted sessions only. */
+    public Session withEnrollment(EnrollmentContext context) {
+        if (status != SessionStatus.NEED_TRUSTED_DEVICE) {
+            throw new SessionStateException("Only a restricted session carries an enrollment");
+        }
+        Objects.requireNonNull(context, "context");
+        return toBuilder().enrollment(context).build();
+    }
+
     public Session withSessionVersion(long storedVersion) {
         return toBuilder().sessionVersion(storedVersion).build();
     }

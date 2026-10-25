@@ -2,7 +2,6 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.valkey;
 
 import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
-
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.Base64;

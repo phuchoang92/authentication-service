@@ -4,13 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DeviceRouting;
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
+import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
+import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
+import com.vpbank.dcp.auth.domain.enums.TrustLevel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
-import com.vpbank.dcp.auth.domain.model.DeviceStatus;
-import com.vpbank.dcp.auth.domain.model.TrustLevel;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.time.Clock;
@@ -111,6 +112,35 @@ class TrustedDeviceServiceTest {
         assertThat(expired).extracting(d -> d.deviceId().value()).containsExactly("d4");
         assertThat(devices.rows.get(expired.getFirst().id()).status()).isEqualTo(DeviceStatus.EXPIRED);
         assertThat(service.expireBeyondCap(live.subList(0, 3), "corr-cap")).isEmpty();
+    }
+
+    @Test
+    void confirmTrustReplacesTheSameInstallationEnforcesTheCapAndMakesTheDevicePrimary() {
+        for (int i = 0; i < 5; i++) {
+            TrustedDevice d = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, new DeviceId("d" + i),
+                    DevicePlatform.ANDROID, null, NOW.minus(Duration.ofDays(i)), DevicePolicy.standard());
+            devices.rows.put(d.id(), d);
+        }
+        TrustedDevice oldTablet = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
+                DevicePlatform.IOS, "{old}", NOW.minus(Duration.ofDays(9)), DevicePolicy.standard());
+        devices.rows.put(oldTablet.id(), oldTablet);
+        com.vpbank.dcp.auth.domain.model.DeviceEnrollment enrollment = com.vpbank.dcp.auth.domain.model.DeviceEnrollment
+                .start(com.vpbank.dcp.auth.domain.model.EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET, oldTablet.id(),
+                        NOW.plusSeconds(600)).markMfaRequired("mfa-1");
+
+        TrustedDevice trusted = service.confirmTrust(enrollment, DevicePlatform.IOS, "{new}", "receipt", "corr-c");
+
+        assertThat(trusted.publicKey()).isEqualTo("{new}");
+        assertThat(devices.rows.get(oldTablet.id()).status()).isEqualTo(DeviceStatus.EXPIRED); // replaced, not counted as a peer
+        assertThat(devices.rows.values().stream().filter(d -> d.status().live()).count()).isEqualTo(5); // 4 others + the tablet
+        assertThat(devices.rows.values().stream().filter(d -> d.deviceId().value().equals("d4")).findFirst().orElseThrow().status())
+                .isEqualTo(DeviceStatus.EXPIRED); // the oldest by last login left for the cap
+        assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).contains(trusted.id());
+        assertThat(devices.confirmations.getFirst().enrollment().state())
+                .isEqualTo(EnrollmentState.COMPLETED);
+        assertThat(service.knownDevice(ALICE, Channel.MOBILE, TABLET)).hasValueSatisfying(k ->
+                assertThat(k.publicKey()).isEqualTo("{new}"));
+        assertThat(service.knownDevice(ALICE, Channel.MOBILE, new DeviceId("nobody"))).isEmpty();
     }
 
     @Test

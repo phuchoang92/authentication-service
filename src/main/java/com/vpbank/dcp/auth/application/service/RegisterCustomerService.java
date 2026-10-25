@@ -1,32 +1,32 @@
 package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.command.RegisterCustomerCommand;
-import com.vpbank.dcp.auth.application.result.RegisterCustomerResult;
 import com.vpbank.dcp.auth.application.port.in.RegisterCustomerUseCase;
+import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.gateway.CustomerDirectoryPort;
-import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
 import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort.CreateUserResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.SmsSenderPort;
+import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
 import com.vpbank.dcp.auth.application.port.out.model.InitialPasswordSms;
 import com.vpbank.dcp.auth.application.port.out.model.NewIdentityUser;
-import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository.CompleteResult;
 import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository.ReserveResult;
-import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
-import com.vpbank.dcp.auth.application.port.out.gateway.SmsSenderPort;
+import com.vpbank.dcp.auth.application.result.RegisterCustomerResult;
+import com.vpbank.dcp.auth.domain.enums.RegistrationState;
 import com.vpbank.dcp.auth.domain.model.Registration;
 import com.vpbank.dcp.auth.domain.model.RegistrationId;
-import com.vpbank.dcp.auth.domain.model.RegistrationState;
 import com.vpbank.dcp.auth.domain.model.RequestDigest;
-
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
-
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
 /**
  * Creates the login account of a customer who finished onboarding (contract §1):
@@ -42,35 +42,52 @@ import java.util.function.Supplier;
  */
 @RequiredArgsConstructor
 public final class RegisterCustomerService implements RegisterCustomerUseCase {
-    @NonNull private final RegistrationRepository registrations;
-    @NonNull private final CustomerDirectoryPort customers;
-    @NonNull private final IdentityProviderPort identities;
-    @NonNull private final SmsSenderPort sms;
-    @NonNull private final RequestDigester digester;
-    @NonNull private final InitialPasswordGenerator passwords;
+    /** The first result the app can learn after a successful registration is "created now". */
+    private static final boolean CREATED_NOW = true;
+    private static final boolean CREATED_EARLIER = false;
+
+    @NonNull private final RegistrationRepository registrationRepository;
+    @NonNull private final CustomerDirectoryPort customerDirectoryPort;
+    @NonNull private final IdentityProviderPort identityProviderPort;
+    @NonNull private final SmsSenderPort smsSenderPort;
+    @NonNull private final RequestDigester requestDigester;
+    @NonNull private final InitialPasswordGenerator initialPasswordGenerator;
     @NonNull private final Clock clock;
     @NonNull private final Duration requestLifetime;
-    @NonNull private final Supplier<RegistrationId> requestIds;
+    @NonNull private final Supplier<RegistrationId> registrationIdGenerator;
 
     @Override
     public RegisterCustomerResult register(RegisterCustomerCommand command) {
         Objects.requireNonNull(command, "command");
-        RequestDigest digest = digester.digest(command);
+        RequestDigest requestDigest = requestDigester.digest(command);
+
         try {
-            Optional<RegisterCustomerResult> earlier = registrations.findLatest(command.customerId())
-                    .flatMap(previous -> answerForEarlier(previous, digest));
-            if (earlier.isPresent()) {
-                return earlier.get();
+            Optional<Registration> latestRegistration = registrationRepository.findLatest(command.customerId());
+            Optional<RegisterCustomerResult> answerForLatest = latestRegistration
+                    .flatMap(earlier -> answerForEarlier(earlier, requestDigest));
+            if (answerForLatest.isPresent()) {
+                return answerForLatest.get();
             }
+
             if (!profileMatches(command)) {
                 return new RegisterCustomerResult.ProfileIncomplete();
             }
-            Registration fresh = Registration.reserve(requestIds.get(), command.customerId(),
-                    command.userName(), digest, clock.instant().plus(requestLifetime));
-            return switch (registrations.reserve(fresh)) {
-                case ReserveResult.Reserved(var reserved) -> createAccount(command, reserved);
-                case ReserveResult.CustomerHasOpen(var existing) ->
-                        answerForEarlier(existing, digest).orElseGet(RegisterCustomerResult.Unavailable::new);
+
+            Instant requestExpiresAt = clock.instant().plus(requestLifetime);
+            Registration freshRegistration = Registration.reserve(
+                    registrationIdGenerator.get(),
+                    command.customerId(),
+                    command.userName(),
+                    requestDigest,
+                    requestExpiresAt);
+
+            ReserveResult reserveResult = registrationRepository.reserve(freshRegistration);
+            return switch (reserveResult) {
+                case ReserveResult.Reserved(Registration reservedRegistration) ->
+                        createAccount(command, reservedRegistration);
+                case ReserveResult.CustomerHasOpen(Registration openRegistration) ->
+                        answerForEarlier(openRegistration, requestDigest)
+                                .orElseGet(RegisterCustomerResult.Unavailable::new);
                 case ReserveResult.UserNameTaken() -> new RegisterCustomerResult.IdentityConflict();
             };
         } catch (RepositoryUnavailableException | PartnerUnavailableException failure) {
@@ -82,67 +99,104 @@ public final class RegisterCustomerService implements RegisterCustomerUseCase {
      * A retry or a second call for a customer who already has a request. Empty when the earlier
      * request FAILED, so a new one may start.
      */
-    private static Optional<RegisterCustomerResult> answerForEarlier(Registration earlier, RequestDigest digest) {
-        if (earlier.state() == RegistrationState.FAILED) {
+    private static Optional<RegisterCustomerResult> answerForEarlier(Registration earlierRegistration,
+                                                                     RequestDigest requestDigest) {
+        if (earlierRegistration.state() == RegistrationState.FAILED) {
             return Optional.empty();
         }
-        if (!earlier.isSameRequest(digest)) {
+
+        if (!earlierRegistration.isSameRequest(requestDigest)) {
             return Optional.of(new RegisterCustomerResult.IdentityConflict());
         }
-        if (earlier.state() == RegistrationState.READY) {
-            return Optional.of(new RegisterCustomerResult.Ready(earlier.id(), earlier.customerId(),
-                    earlier.userName(), false));
+
+        if (earlierRegistration.state() == RegistrationState.READY) {
+            RegisterCustomerResult.Ready readyEarlier = new RegisterCustomerResult.Ready(
+                    earlierRegistration.id(),
+                    earlierRegistration.customerId(),
+                    earlierRegistration.userName(),
+                    CREATED_EARLIER);
+            return Optional.of(readyEarlier);
         }
+
         // Same data, still open: an earlier attempt is in progress or its outcome is unknown.
         return Optional.of(new RegisterCustomerResult.Unavailable());
     }
 
     /** ELIGIBLE, and the phone (and email, when sent) is the one the Customer service verified. */
     private boolean profileMatches(RegisterCustomerCommand command) {
-        Optional<CustomerProfile> found = customers.profile(command.customerId());
-        if (found.isEmpty()) {
+        Optional<CustomerProfile> foundProfile = customerDirectoryPort.profile(command.customerId());
+        if (foundProfile.isEmpty()) {
             return false;
         }
-        CustomerProfile profile = found.get();
-        boolean emailOk = command.email() == null
+        CustomerProfile profile = foundProfile.get();
+
+        boolean emailMatches = command.email() == null
                 || (profile.emailVerified() && command.email().sameAs(profile.email()));
-        return profile.eligible() && profile.phoneVerified()
-                && command.phoneNumber().value().equals(profile.phone()) && emailOk;
+        boolean phoneMatches = profile.phoneVerified()
+                && command.phoneNumber().value().equals(profile.phone());
+
+        return profile.eligible() && phoneMatches && emailMatches;
     }
 
-    private RegisterCustomerResult createAccount(RegisterCustomerCommand command, Registration reserved) {
-        CreateUserResult created = identities.createDisabledUser(NewIdentityUser.builder()
-                .userName(command.userName()).firstName(command.firstName()).lastName(command.lastName())
-                .email(command.email()).emailVerified(command.email() != null).build());
-        if (created instanceof CreateUserResult.UserNameTaken) {
-            registrations.save(reserved.fail());
+    private RegisterCustomerResult createAccount(RegisterCustomerCommand command, Registration reservedRegistration) {
+        NewIdentityUser newIdentityUser = NewIdentityUser.builder()
+                .userName(command.userName())
+                .firstName(command.firstName())
+                .lastName(command.lastName())
+                .email(command.email())
+                .emailVerified(command.email() != null)
+                .build();
+
+        CreateUserResult createUserResult = identityProviderPort.createDisabledUser(newIdentityUser);
+        if (createUserResult instanceof CreateUserResult.UserNameTaken) {
+            Registration failedRegistration = reservedRegistration.fail();
+            registrationRepository.save(failedRegistration);
             return new RegisterCustomerResult.IdentityConflict();
         }
-        var user = (CreateUserResult.Created) created;
-        Optional<Registration> userCreated = registrations.save(
-                reserved.markUserCreated(user.identityIssuer(), user.identitySubject()));
-        if (userCreated.isEmpty()) {
+        CreateUserResult.Created createdUser = (CreateUserResult.Created) createUserResult;
+
+        Registration userCreatedRegistration = reservedRegistration.markUserCreated(
+                createdUser.identityIssuer(),
+                createdUser.identitySubject());
+        Optional<Registration> savedUserCreated = registrationRepository.save(userCreatedRegistration);
+        if (savedUserCreated.isEmpty()) {
             return new RegisterCustomerResult.Unavailable();
         }
 
-        String password = passwords.next();
-        identities.setPassword(user.identitySubject(), password);
-        boolean accepted = sms.sendInitialPassword(InitialPasswordSms.builder()
-                .messageId(reserved.id()).customerId(command.customerId()).phone(command.phoneNumber())
-                .userName(command.userName()).password(password).build());
-        Optional<Registration> smsAccepted = accepted
-                ? registrations.save(userCreated.get().markSmsAccepted()) : Optional.empty();
-        if (smsAccepted.isEmpty()) {
+        String initialPassword = initialPasswordGenerator.next();
+        identityProviderPort.setPassword(createdUser.identitySubject(), initialPassword);
+
+        InitialPasswordSms initialPasswordSms = InitialPasswordSms.builder()
+                .messageId(reservedRegistration.id())
+                .customerId(command.customerId())
+                .phone(command.phoneNumber())
+                .userName(command.userName())
+                .password(initialPassword)
+                .build();
+        boolean smsAccepted = smsSenderPort.sendInitialPassword(initialPasswordSms);
+        if (!smsAccepted) {
             return new RegisterCustomerResult.Unavailable();
         }
 
-        identities.enable(user.identitySubject());
-        Registration completed = smsAccepted.get().complete();
-        return switch (registrations.complete(completed)) {
-            case COMPLETED -> new RegisterCustomerResult.Ready(completed.id(), completed.customerId(),
-                    completed.userName(), true);
+        Registration smsAcceptedRegistration = savedUserCreated.get().markSmsAccepted();
+        Optional<Registration> savedSmsAccepted = registrationRepository.save(smsAcceptedRegistration);
+        if (savedSmsAccepted.isEmpty()) {
+            return new RegisterCustomerResult.Unavailable();
+        }
+
+        identityProviderPort.enable(createdUser.identitySubject());
+
+        Registration completedRegistration = savedSmsAccepted.get().complete();
+        CompleteResult completeResult = registrationRepository.complete(completedRegistration);
+        return switch (completeResult) {
+            case COMPLETED -> new RegisterCustomerResult.Ready(
+                    completedRegistration.id(),
+                    completedRegistration.customerId(),
+                    completedRegistration.userName(),
+                    CREATED_NOW);
             case IDENTITY_TAKEN -> {
-                registrations.save(smsAccepted.get().fail());
+                Registration failedRegistration = savedSmsAccepted.get().fail();
+                registrationRepository.save(failedRegistration);
                 yield new RegisterCustomerResult.IdentityConflict();
             }
             case STALE -> new RegisterCustomerResult.Unavailable();

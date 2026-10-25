@@ -1,25 +1,28 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.result.DeviceSummary;
 import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
+import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.TrustFirstResult;
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.application.result.DeviceSummary;
+import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
-
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
 /**
  * Owns the device rules (ARCHITECTURE §6.1): which installation is trusted, which is primary, and
@@ -28,18 +31,24 @@ import java.util.function.Supplier;
  */
 @RequiredArgsConstructor
 public final class TrustedDeviceService implements ListDevicesUseCase {
-    @NonNull private final TrustedDeviceRepository devices;
-    @NonNull private final DevicePolicy policy;
-    @NonNull private final Supplier<TrustedDeviceId> deviceIds;
+    /** Devices that never logged in sort as the oldest when the cap chooses what to expire. */
+    private static final Comparator<TrustedDevice> OLDEST_LOGIN_FIRST =
+            Comparator.comparing(device -> device.lastLoginAt() == null ? Instant.EPOCH : device.lastLoginAt());
+
+    @NonNull private final TrustedDeviceRepository trustedDeviceRepository;
+    @NonNull private final DevicePolicy devicePolicy;
+    @NonNull private final Supplier<TrustedDeviceId> trustedDeviceIdGenerator;
     @NonNull private final Clock clock;
 
     /** What the login may issue after a correct password. */
     public sealed interface DeviceRouting {
         /** Trusted primary device, or a channel without device trust: a full ACTIVE session. */
-        record FullSession() implements DeviceRouting { }
+        record FullSession() implements DeviceRouting {
+        }
 
         /** New, not primary, expired or only registered: a restricted NEED_TRUSTED_DEVICE session. */
-        record NeedTrust() implements DeviceRouting { }
+        record NeedTrust() implements DeviceRouting {
+        }
     }
 
     /**
@@ -53,22 +62,53 @@ public final class TrustedDeviceService implements ListDevicesUseCase {
             return new DeviceRouting.FullSession();
         }
         Instant now = clock.instant();
-        List<TrustedDevice> live = devices.findLive(customerId, channel);
-        if (live.isEmpty()) {
-            TrustedDevice first = TrustedDevice.trustedNow(deviceIds.get(), customerId, channel, deviceId, platform,
-                    devicePublicKey, now, policy);
-            return switch (devices.trustFirstDevice(first, correlationId)) {
-                case TrustFirstResult.Trusted(var trusted) -> new DeviceRouting.FullSession();
-                case TrustFirstResult.AlreadyHasDevice() -> new DeviceRouting.NeedTrust();
-            };
+
+        List<TrustedDevice> liveTrustedDevices = trustedDeviceRepository.findLive(customerId, channel);
+        if (liveTrustedDevices.isEmpty()) {
+            return trustFirstDevice(customerId, channel, deviceId, platform, devicePublicKey, now, correlationId);
         }
-        Optional<TrustedDevice> device = live.stream().filter(d -> d.deviceId().equals(deviceId)).findFirst();
-        Optional<TrustedDeviceId> primary = devices.findPrimary(customerId, channel);
-        if (device.isEmpty() || !device.get().isTrusted(now) || !primary.equals(device.map(TrustedDevice::id))) {
+
+        Optional<TrustedDevice> thisDevice = findByDeviceId(liveTrustedDevices, deviceId);
+        Optional<TrustedDeviceId> primaryDeviceId = trustedDeviceRepository.findPrimary(customerId, channel);
+        if (thisDevice.isEmpty()) {
             return new DeviceRouting.NeedTrust();
         }
-        devices.saveIfCurrent(device.get().recordLogin(now), correlationId); // display data; a lost race is harmless
+        TrustedDevice device = thisDevice.get();
+
+        if (!device.isTrusted(now)) {
+            return new DeviceRouting.NeedTrust();
+        }
+
+        boolean isPrimary = primaryDeviceId.isPresent() && primaryDeviceId.get().equals(device.id());
+        if (!isPrimary) {
+            return new DeviceRouting.NeedTrust();
+        }
+
+        // Display data only: a lost race against another login is harmless.
+        TrustedDevice deviceWithLogin = device.recordLogin(now);
+        trustedDeviceRepository.saveIfCurrent(deviceWithLogin, correlationId);
+
         return new DeviceRouting.FullSession();
+    }
+
+    private DeviceRouting trustFirstDevice(CustomerId customerId, Channel channel, DeviceId deviceId,
+                                           DevicePlatform platform, String devicePublicKey, Instant now,
+                                           String correlationId) {
+        TrustedDevice firstDevice = TrustedDevice.trustedNow(
+                trustedDeviceIdGenerator.get(),
+                customerId,
+                channel,
+                deviceId,
+                platform,
+                devicePublicKey,
+                now,
+                devicePolicy);
+
+        TrustFirstResult trustFirstResult = trustedDeviceRepository.trustFirstDevice(firstDevice, correlationId);
+        return switch (trustFirstResult) {
+            case TrustFirstResult.Trusted(TrustedDevice trustedDevice) -> new DeviceRouting.FullSession();
+            case TrustFirstResult.AlreadyHasDevice() -> new DeviceRouting.NeedTrust();
+        };
     }
 
     /**
@@ -76,27 +116,117 @@ public final class TrustedDeviceService implements ListDevicesUseCase {
      * by last login are expired (DD 20 §7). Used by the trust flow of phase 4; with the direct path
      * only the first device is ever trusted, so it cannot trigger yet.
      */
-    public List<TrustedDevice> expireBeyondCap(List<TrustedDevice> live, String correlationId) {
-        int excess = live.size() - policy.maxLiveDevices() + 1;
-        if (excess <= 0) {
-            return List.of();
+    public List<TrustedDevice> expireBeyondCap(List<TrustedDevice> liveTrustedDevices, String correlationId) {
+        List<TrustedDevice> oldestBeyondCap = oldestBeyondCap(liveTrustedDevices);
+
+        for (TrustedDevice oldDevice : oldestBeyondCap) {
+            TrustedDevice expiredDevice = oldDevice.expire();
+            trustedDeviceRepository.saveIfCurrent(expiredDevice, correlationId);
         }
-        List<TrustedDevice> oldest = live.stream()
-                .sorted(Comparator.comparing(d -> d.lastLoginAt() == null ? Instant.EPOCH : d.lastLoginAt()))
-                .limit(excess).toList();
-        oldest.forEach(device -> devices.saveIfCurrent(device.expire(), correlationId));
-        return oldest;
+
+        return oldestBeyondCap;
+    }
+
+    /** What another service may know about a live installation (never the aggregate). */
+    public Optional<KnownDeviceSummary> knownDevice(CustomerId customerId, Channel channel, DeviceId deviceId) {
+        Optional<TrustedDevice> liveDevice = trustedDeviceRepository.findLive(customerId, channel, deviceId);
+
+        return liveDevice.map(device -> new KnownDeviceSummary(
+                device.id(),
+                device.platform(),
+                device.publicKey()));
+    }
+
+    /**
+     * The enrollment flow passed FACE (DD 20 §4): this installation becomes trusted with the key it
+     * proved and the customer's primary on the channel. A previous live row of the same installation
+     * is replaced (a reinstall or a re-trust), the device cap is enforced, and everything is written in
+     * one transaction with the enrollment and its audit trail. The old primary stays trusted (§7).
+     */
+    public TrustedDevice confirmTrust(DeviceEnrollment enrollment, DevicePlatform platform, String devicePublicJwk,
+                                      String receiptDigest, String correlationId) {
+        Instant now = clock.instant();
+
+        List<TrustedDevice> liveTrustedDevices =
+                trustedDeviceRepository.findLive(enrollment.customerId(), enrollment.channel());
+
+        Optional<TrustedDevice> replacedDevice = findByDeviceId(liveTrustedDevices, enrollment.deviceId());
+
+        List<TrustedDevice> otherLiveDevices = new ArrayList<>(liveTrustedDevices);
+        replacedDevice.ifPresent(otherLiveDevices::remove);
+
+        List<TrustedDevice> devicesExpiredByCap = new ArrayList<>();
+        for (TrustedDevice oldDevice : oldestBeyondCap(otherLiveDevices)) {
+            devicesExpiredByCap.add(oldDevice.expire());
+        }
+
+        TrustedDevice newTrustedDevice = TrustedDevice.trustedByEnrollment(
+                trustedDeviceIdGenerator.get(),
+                enrollment.customerId(),
+                enrollment.channel(),
+                enrollment.deviceId(),
+                platform,
+                devicePublicJwk,
+                now,
+                devicePolicy);
+
+        TrustedDevice expiredReplacedDevice = replacedDevice
+                .map(TrustedDevice::expire)
+                .orElse(null);
+
+        DeviceEnrollment completedEnrollment = enrollment.complete();
+
+        TrustConfirmation trustConfirmation = TrustConfirmation.builder()
+                .device(newTrustedDevice)
+                .replaced(expiredReplacedDevice)
+                .expiredByCap(devicesExpiredByCap)
+                .enrollment(completedEnrollment)
+                .receiptDigest(receiptDigest)
+                .build();
+
+        return trustedDeviceRepository.trustConfirmed(
+                trustConfirmation,
+                correlationId);
     }
 
     @Override
     public List<DeviceSummary> list(CustomerId customerId, Channel channel) {
-        Optional<TrustedDeviceId> primary = devices.findPrimary(customerId, channel);
-        return devices.findLive(customerId, channel).stream()
-                .map(device -> DeviceSummary.builder().deviceId(device.deviceId()).platform(device.platform())
-                        .status(device.status()).trustLevel(device.trustLevel())
-                        .primary(primary.isPresent() && primary.get().equals(device.id()))
-                        .trustedAt(device.trustedAt()).expiresAt(device.expiresAt()).lastLoginAt(device.lastLoginAt())
-                        .build())
+        Optional<TrustedDeviceId> primaryDeviceId = trustedDeviceRepository.findPrimary(customerId, channel);
+        List<TrustedDevice> liveTrustedDevices = trustedDeviceRepository.findLive(customerId, channel);
+
+        List<DeviceSummary> summaries = new ArrayList<>();
+        for (TrustedDevice device : liveTrustedDevices) {
+            boolean isPrimary = primaryDeviceId.isPresent() && primaryDeviceId.get().equals(device.id());
+            DeviceSummary summary = DeviceSummary.builder()
+                    .deviceId(device.deviceId())
+                    .platform(device.platform())
+                    .status(device.status())
+                    .trustLevel(device.trustLevel())
+                    .primary(isPrimary)
+                    .trustedAt(device.trustedAt())
+                    .expiresAt(device.expiresAt())
+                    .lastLoginAt(device.lastLoginAt())
+                    .build();
+            summaries.add(summary);
+        }
+        return List.copyOf(summaries);
+    }
+
+    /** The live rows that must go so that one more device fits under the cap; empty when it already fits. */
+    private List<TrustedDevice> oldestBeyondCap(List<TrustedDevice> liveTrustedDevices) {
+        int excessAfterNewDevice = liveTrustedDevices.size() - devicePolicy.maxLiveDevices() + 1;
+        if (excessAfterNewDevice <= 0) {
+            return List.of();
+        }
+        return liveTrustedDevices.stream()
+                .sorted(OLDEST_LOGIN_FIRST)
+                .limit(excessAfterNewDevice)
                 .toList();
+    }
+
+    private static Optional<TrustedDevice> findByDeviceId(List<TrustedDevice> devices, DeviceId deviceId) {
+        return devices.stream()
+                .filter(device -> device.deviceId().equals(deviceId))
+                .findFirst();
     }
 }

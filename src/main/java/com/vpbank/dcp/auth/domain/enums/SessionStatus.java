@@ -1,4 +1,4 @@
-package com.vpbank.dcp.auth.domain.model;
+package com.vpbank.dcp.auth.domain.enums;
 
 /**
  * ACTIVE sessions admit business requests. NEED_TRUSTED_DEVICE is a restricted session: the

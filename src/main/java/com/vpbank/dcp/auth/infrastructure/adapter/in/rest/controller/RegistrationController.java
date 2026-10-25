@@ -1,12 +1,12 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.controller;
 
+import com.vpbank.dcp.auth.application.command.RegisterCustomerCommand;
+import com.vpbank.dcp.auth.application.port.in.RegisterCustomerUseCase;
+import com.vpbank.dcp.auth.application.result.RegisterCustomerResult;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.RegistrationRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.response.RegistrationResponse;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.RegistrationRestMapper;
-import com.vpbank.dcp.auth.application.command.RegisterCustomerCommand;
-import com.vpbank.dcp.auth.application.result.RegisterCustomerResult;
-import com.vpbank.dcp.auth.application.port.in.RegisterCustomerUseCase;
 import jakarta.validation.Valid;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
@@ -26,14 +26,14 @@ import org.springframework.web.bind.annotation.RestController;
 @ConditionalOnProperty(prefix = "auth.registration", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class RegistrationController {
-    @NonNull private final RegisterCustomerUseCase registerCustomer;
-    @NonNull private final RegistrationRestMapper mapper;
+    @NonNull private final RegisterCustomerUseCase registerCustomerUseCase;
+    @NonNull private final RegistrationRestMapper registrationRestMapper;
 
     @PostMapping(path = "/internal/v1/callback/authentication-creation",
             consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<RegistrationResponse>> create(@Valid @RequestBody RegistrationRequest body) {
-        RegisterCustomerCommand command = mapper.toCommand(body);
-        RegisterCustomerResult result = registerCustomer.register(command);
-        return mapper.toResponse(result);
+        RegisterCustomerCommand command = registrationRestMapper.toCommand(body);
+        RegisterCustomerResult result = registerCustomerUseCase.register(command);
+        return registrationRestMapper.toResponse(result);
     }
 }

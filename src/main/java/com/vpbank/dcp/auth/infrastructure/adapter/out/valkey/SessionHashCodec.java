@@ -1,12 +1,14 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.valkey;
 
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.EnrollmentContext;
+import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
-import com.vpbank.dcp.auth.domain.model.SessionStatus;
-
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,10 +34,23 @@ public final class SessionHashCodec {
     static final String F_IDLE_EXPIRES_AT = "idleExpiresAtMs";
     static final String F_ABSOLUTE_EXPIRES_AT = "absoluteExpiresAtMs";
     static final String F_SESSION_VERSION = "sessionVersion";
+    /**
+     * Enrollment context of a restricted session (DD 20 §4): all present or all absent. Ksrv's private key lives only here.
+     */
+    static final String F_ENROLLMENT_ID = "enrollmentId";
+    static final String F_DEVICE_JWK = "deviceJwk";
+    static final String F_DEVICE_PLATFORM = "devicePlatform";
+    static final String F_SERVER_PUBLIC_JWK = "serverPublicJwk";
+    static final String F_SERVER_PRIVATE_JWK = "serverPrivateJwk";
+    static final String F_CHALLENGE_DIGEST = "challengeDigest";
+    static final String F_KEY_PROVEN = "keyProven";
     private static final Set<String> REQUIRED = Set.of(F_SCHEMA, F_SESSION_ID, F_CUSTOMER_ID, F_CHANNEL, F_STATUS,
             F_CREATED_AT, F_IDLE_EXPIRES_AT, F_ABSOLUTE_EXPIRES_AT, F_SESSION_VERSION);
+    private static final Set<String> ENROLLMENT = Set.of(F_ENROLLMENT_ID, F_DEVICE_JWK, F_DEVICE_PLATFORM, F_SERVER_PUBLIC_JWK,
+            F_SERVER_PRIVATE_JWK, F_CHALLENGE_DIGEST, F_KEY_PROVEN);
     private static final Set<String> KNOWN = Set.of(F_SCHEMA, F_SESSION_ID, F_CUSTOMER_ID, F_DEVICE_ID, F_CHANNEL,
-            F_STATUS, F_CREATED_AT, F_IDLE_EXPIRES_AT, F_ABSOLUTE_EXPIRES_AT, F_SESSION_VERSION);
+            F_STATUS, F_CREATED_AT, F_IDLE_EXPIRES_AT, F_ABSOLUTE_EXPIRES_AT, F_SESSION_VERSION, F_ENROLLMENT_ID, F_DEVICE_JWK,
+            F_DEVICE_PLATFORM, F_SERVER_PUBLIC_JWK, F_SERVER_PRIVATE_JWK, F_CHALLENGE_DIGEST, F_KEY_PROVEN);
 
     private SessionHashCodec() {
     }
@@ -54,17 +69,54 @@ public final class SessionHashCodec {
         fields.put(F_IDLE_EXPIRES_AT, millis(session.idleExpiresAt()));
         fields.put(F_ABSOLUTE_EXPIRES_AT, millis(session.absoluteExpiresAt()));
         fields.put(F_SESSION_VERSION, Long.toString(session.sessionVersion()));
+        if (session.enrollment() != null) {
+            EnrollmentContext enrollmentContext = session.enrollment();
+            fields.put(F_ENROLLMENT_ID, enrollmentContext.enrollmentId().value().toString());
+            fields.put(F_DEVICE_JWK, enrollmentContext.devicePublicJwk());
+            fields.put(F_DEVICE_PLATFORM, enrollmentContext.platform().name());
+            fields.put(F_SERVER_PUBLIC_JWK, enrollmentContext.serverPublicJwk());
+            fields.put(F_SERVER_PRIVATE_JWK, enrollmentContext.serverPrivateJwk());
+            fields.put(F_CHALLENGE_DIGEST, enrollmentContext.challengeDigest());
+            fields.put(F_KEY_PROVEN, flag(enrollmentContext.keyProven()));
+        }
         return fields;
     }
 
     public static Optional<Session> decode(Map<String, String> fields) {
-        if (fields == null || !fields.keySet().containsAll(REQUIRED) || !KNOWN.containsAll(fields.keySet())
-                || !SCHEMA_VERSION.equals(fields.get(F_SCHEMA))) {
+        if (fields == null) {
             return Optional.empty();
         }
+        boolean hasEveryRequiredField = fields.keySet().containsAll(REQUIRED);
+        boolean hasOnlyKnownFields = KNOWN.containsAll(fields.keySet());
+        boolean isCurrentSchema = SCHEMA_VERSION.equals(fields.get(F_SCHEMA));
+        if (!hasEveryRequiredField || !hasOnlyKnownFields || !isCurrentSchema) {
+            return Optional.empty();
+        }
+
+        boolean hasAnyEnrollmentField = fields.keySet().stream().anyMatch(ENROLLMENT::contains);
+        boolean hasEveryEnrollmentField = fields.keySet().containsAll(ENROLLMENT);
+        if (hasAnyEnrollmentField && !hasEveryEnrollmentField) {
+            return Optional.empty();
+        }
+
         try {
             String deviceId = fields.get(F_DEVICE_ID);
-            return Optional.of(Session.builder()
+
+            EnrollmentContext enrollmentContext = null;
+            if (hasAnyEnrollmentField) {
+                enrollmentContext = EnrollmentContext.builder()
+                        .enrollmentId(new EnrollmentId(UUID.fromString(fields.get(F_ENROLLMENT_ID))))
+                        .devicePublicJwk(fields.get(F_DEVICE_JWK))
+                        .platform(DevicePlatform.valueOf(fields.get(F_DEVICE_PLATFORM)))
+                        .serverPublicJwk(fields.get(F_SERVER_PUBLIC_JWK))
+                        .serverPrivateJwk(fields.get(F_SERVER_PRIVATE_JWK))
+                        .challengeDigest(fields.get(F_CHALLENGE_DIGEST))
+                        .keyProven(flag(fields.get(F_KEY_PROVEN)))
+                        .build();
+            }
+
+            Session session = Session.builder()
+                    .enrollment(enrollmentContext)
                     .id(new SessionId(UUID.fromString(fields.get(F_SESSION_ID))))
                     .customerId(new CustomerId(fields.get(F_CUSTOMER_ID)))
                     .deviceId(deviceId == null ? null : new DeviceId(deviceId))
@@ -74,10 +126,25 @@ public final class SessionHashCodec {
                     .idleExpiresAt(instant(fields.get(F_IDLE_EXPIRES_AT)))
                     .absoluteExpiresAt(instant(fields.get(F_ABSOLUTE_EXPIRES_AT)))
                     .sessionVersion(Long.parseLong(fields.get(F_SESSION_VERSION)))
-                    .build());
+                    .build();
+            return Optional.of(session);
         } catch (IllegalArgumentException malformed) {
             return Optional.empty();
         }
+    }
+
+    private static String flag(boolean value) {
+        return value ? "1" : "0";
+    }
+
+    private static boolean flag(String value) {
+        if ("1".equals(value)) {
+            return true;
+        }
+        if ("0".equals(value)) {
+            return false;
+        }
+        throw new IllegalArgumentException("Flag must be 0 or 1");
     }
 
     static String millis(Instant instant) {

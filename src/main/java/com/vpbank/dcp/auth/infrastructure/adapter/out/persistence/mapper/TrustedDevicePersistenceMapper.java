@@ -1,15 +1,15 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.PrimaryTrustedDeviceEntity;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.TrustedDeviceAuditEntity;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.TrustedDeviceEntity;
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.PrimaryMode;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
-
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.PrimaryTrustedDeviceEntity;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.TrustedDeviceAuditEntity;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.TrustedDeviceEntity;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -70,17 +70,28 @@ public final class TrustedDevicePersistenceMapper {
                 changed.lastLoginAt());
     }
 
+    /** The direct path of phase 3: first device, no FACE. */
     public static PrimaryTrustedDeviceEntity toPrimary(TrustedDevice device, Instant assignedAt) {
         return PrimaryTrustedDeviceEntity.builder()
                 .key(new PrimaryTrustedDeviceEntity.Key(device.customerId().value(), device.channel().name()))
                 .primaryDeviceId(device.id().value())
                 .assignedAt(assignedAt)
+                .faceAuthenticated(false)
+                .primaryMode(PrimaryMode.DIRECT_PRIMARY)
                 .build();
     }
 
     public static TrustedDeviceAuditEntity toAudit(TrustedDevice device, String correlationId, int sequence,
                                                    String eventType, String cause, String reasonCode, Instant occurredAt) {
+        return toAudit(device, correlationId, sequence, eventType, cause, reasonCode, occurredAt, null, null);
+    }
+
+    public static TrustedDeviceAuditEntity toAudit(TrustedDevice device, String correlationId, int sequence,
+                                                   String eventType, String cause, String reasonCode, Instant occurredAt,
+                                                   UUID enrollmentId, String metadataJson) {
         return TrustedDeviceAuditEntity.builder()
+                .enrollmentId(enrollmentId)
+                .metadata(metadataJson)
                 .id(UUID.randomUUID())
                 .customerId(device.customerId().value())
                 .correlationId(correlationId)

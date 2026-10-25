@@ -1,8 +1,8 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.customer.mapper;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.out.customer.dto.CustomerProfileDto;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.customer.dto.CustomerProfileDto;
 
 /** Customer wire body → the profile the registration flow reads. */
 public final class CustomerProfileMapper {

@@ -1,9 +1,9 @@
 package com.vpbank.dcp.auth.infrastructure.config;
 
+import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.RegistrationPersistenceAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.RegistrationJpaRepository;
-import com.vpbank.dcp.auth.application.port.out.repository.RegistrationRepository;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,8 +20,9 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 public class JpaConfiguration {
 
     @Bean
-    RegistrationRepository registrationRepository(RegistrationJpaRepository registrations,
-                                                  CustomerAuthenticationJpaRepository identities) {
-        return new RegistrationPersistenceAdapter(registrations, identities);
+    RegistrationRepository registrationRepository(
+            RegistrationJpaRepository registrationJpaRepository,
+            CustomerAuthenticationJpaRepository customerAuthenticationJpaRepository) {
+        return new RegistrationPersistenceAdapter(registrationJpaRepository, customerAuthenticationJpaRepository);
     }
 }

@@ -1,11 +1,9 @@
 package com.vpbank.dcp.auth.application.port.out.repository;
 
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
-
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
 import com.vpbank.dcp.auth.domain.model.UserName;
-
 import java.util.Optional;
 
 /** The identity rows registration wrote (CUSTOMER_AUTHENTICATION). Throws {@link RepositoryUnavailableException}. */

@@ -13,9 +13,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort.CreateUserResult;
 import com.vpbank.dcp.auth.application.port.out.model.NewIdentityUser;
-import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.domain.model.Email;
 import com.vpbank.dcp.auth.domain.model.UserName;
 import java.net.SocketTimeoutException;

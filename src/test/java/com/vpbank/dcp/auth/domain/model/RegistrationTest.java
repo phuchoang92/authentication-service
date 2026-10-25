@@ -3,6 +3,7 @@ package com.vpbank.dcp.auth.domain.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vpbank.dcp.auth.domain.enums.RegistrationState;
 import com.vpbank.dcp.auth.domain.exception.RegistrationStateException;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;

@@ -4,14 +4,13 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Instant;
+import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-
-import java.time.Instant;
-import java.util.UUID;
 
 /** Row of TRUSTED_DEVICE_AUDIT: append-only; one business operation writes events 0..n under one correlation ID. */
 @Entity
@@ -73,4 +72,7 @@ public class TrustedDeviceAuditEntity {
 
     @Column(name = "METADATA", columnDefinition = "JSON")
     private String metadata;
+
+    @Column(name = "ENROLLMENT_ID", columnDefinition = "BINARY(16)")
+    private UUID enrollmentId;
 }

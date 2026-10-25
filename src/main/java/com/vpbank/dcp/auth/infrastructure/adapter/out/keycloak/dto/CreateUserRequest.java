@@ -1,9 +1,8 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.keycloak.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import lombok.Builder;
-
 import java.util.List;
+import lombok.Builder;
 
 /** Keycloak Admin {@code POST /users} body. Null fields (no e-mail) are left out of the JSON. */
 @Builder

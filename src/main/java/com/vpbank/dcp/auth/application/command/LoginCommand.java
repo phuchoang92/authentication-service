@@ -1,13 +1,12 @@
 package com.vpbank.dcp.auth.application.command;
 
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.Password;
 import com.vpbank.dcp.auth.domain.model.UserName;
-import lombok.Builder;
-
 import java.util.Objects;
+import lombok.Builder;
 
 /**
  * One login attempt. On the MOBILE channel {@code deviceId} and {@code platform} identify the app

@@ -1,19 +1,21 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.application.command.CaptchaSolution;
 import com.vpbank.dcp.auth.application.command.LoginCommand;
-import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
-import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
-import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
-import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
-import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
-import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
-import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
-import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
+import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
+import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
+import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
+import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
+import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DeviceRouting;
+import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
@@ -21,13 +23,12 @@ import com.vpbank.dcp.auth.domain.model.PasswordLockout;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
-
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.function.Supplier;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
 /**
  * Password login: identity row → lockout check → Keycloak password check → same issuer/subject →
@@ -44,23 +45,112 @@ import java.util.function.Supplier;
  */
 @RequiredArgsConstructor
 public final class LoginService implements LoginUseCase {
-    @NonNull private final CustomerAuthenticationRepository identities;
-    @NonNull private final CredentialVerifierPort credentials;
-    @NonNull private final CaptchaStore captchas;
-    @NonNull private final SessionStore sessions;
-    @NonNull private final TokenEnvelopeSealer sealer;
-    @NonNull private final OpaqueTokenGenerator tokens;
-    @NonNull private final Supplier<SessionId> sessionIds;
-    @NonNull private final TrustedDeviceService trustedDevices;
-    @NonNull private final SessionPolicy policy;
+    @NonNull private final CustomerAuthenticationRepository customerAuthenticationRepository;
+    @NonNull private final CredentialVerifierPort credentialVerifierPort;
+    @NonNull private final CaptchaStore captchaStore;
+    @NonNull private final SessionStore sessionStore;
+    @NonNull private final TokenEnvelopeSealer tokenEnvelopeSealer;
+    @NonNull private final OpaqueTokenGenerator opaqueTokenGenerator;
+    @NonNull private final Supplier<SessionId> sessionIdGenerator;
+    @NonNull private final TrustedDeviceService trustedDeviceService;
+    @NonNull private final SessionPolicy sessionPolicy;
     @NonNull private final LockoutPolicy lockoutPolicy;
     @NonNull private final DevicePolicy devicePolicy;
     @NonNull private final Clock clock;
 
+    @Override
+    public LoginResult login(LoginCommand command) {
+        try {
+            Optional<CustomerAuthentication> foundIdentity =
+                    customerAuthenticationRepository.findByUserName(command.userName());
+
+            if (foundIdentity.isPresent()) {
+                CustomerAuthentication identity = foundIdentity.get();
+                if (identity.lockout().isLocked(clock.instant())) {
+                    return new LoginResult.AccountLocked();
+                }
+                boolean captchaRequired = identity.lockout().captchaRequired(lockoutPolicy);
+                if (captchaRequired && !captchaSolved(command, identity.customerId())) {
+                    return new LoginResult.CaptchaRequired();
+                }
+            }
+
+            // Keycloak is asked even for an unknown user, so both answers take similar time.
+            VerificationResult verificationResult =
+                    credentialVerifierPort.verify(command.userName(), command.password());
+            if (foundIdentity.isEmpty()) {
+                return new LoginResult.InvalidCredentials();
+            }
+            CustomerAuthentication identity = foundIdentity.get();
+
+            boolean passwordAccepted =
+                    verificationResult instanceof VerificationResult.Verified(var issuer, var subject)
+                            && identity.isSameIdentity(issuer, subject);
+            if (!passwordAccepted) {
+                return recordFailure(identity);
+            }
+
+            if (!identity.isActive()) {
+                return new LoginResult.AccountNotReady();
+            }
+
+            if (identity.lockout().failedCount() > 0) {
+                PasswordLockout resetLockout = identity.lockout().reset();
+                customerAuthenticationRepository.saveLockoutIfCurrent(identity, resetLockout);
+            }
+
+            SessionId sessionId = sessionIdGenerator.get();
+            String correlationId = sessionId.toString();
+            DeviceRouting deviceRouting = trustedDeviceService.routeAfterPassword(
+                    identity.customerId(),
+                    command.channel(),
+                    command.deviceId(),
+                    command.platform(),
+                    command.devicePublicKey(),
+                    correlationId);
+
+            Instant now = clock.instant();
+            Session session = switch (deviceRouting) {
+                case DeviceRouting.FullSession() -> Session.start(
+                        sessionId,
+                        identity.customerId(),
+                        command.deviceId(),
+                        command.channel(),
+                        now,
+                        sessionPolicy);
+                case DeviceRouting.NeedTrust() -> Session.startRestricted(
+                        sessionId,
+                        identity.customerId(),
+                        command.deviceId(),
+                        command.channel(),
+                        now,
+                        devicePolicy);
+            };
+
+            OpaqueToken token = opaqueTokenGenerator.next();
+            String tokenEnvelope = tokenEnvelopeSealer.seal(command.tokenEncryptionKey(), token, session);
+            sessionStore.create(session, token);
+
+            return new LoginResult.Authenticated(
+                    tokenEnvelope,
+                    session.customerId(),
+                    session.status(),
+                    session.idleExpiresAt(),
+                    session.absoluteExpiresAt());
+        } catch (RepositoryUnavailableException | PartnerUnavailableException failure) {
+            return new LoginResult.Unavailable();
+        } finally {
+            command.password().clear();
+        }
+    }
+
     /** A challenge is consumed on first use whether right or wrong, so a guess costs a new CAPTCHA. */
-    private boolean captchaSolved(LoginCommand command, com.vpbank.dcp.auth.domain.model.CustomerId customerId) {
-        return command.captcha() != null
-                && captchas.consume(command.captcha().captchaId(), customerId, command.captcha().answer());
+    private boolean captchaSolved(LoginCommand command, CustomerId customerId) {
+        CaptchaSolution captchaSolution = command.captcha();
+        if (captchaSolution == null) {
+            return false;
+        }
+        return captchaStore.consume(captchaSolution.captchaId(), customerId, captchaSolution.answer());
     }
 
     /**
@@ -70,56 +160,26 @@ public final class LoginService implements LoginUseCase {
      */
     private LoginResult recordFailure(CustomerAuthentication identity) {
         Instant now = clock.instant();
-        Optional<CustomerAuthentication> saved = identities.saveLockoutIfCurrent(identity,
-                identity.lockout().afterFailure(now, lockoutPolicy));
-        if (saved.isEmpty()) {
-            saved = identities.findByUserName(identity.userName())
-                    .flatMap(latest -> identities.saveLockoutIfCurrent(latest, latest.lockout().afterFailure(now, lockoutPolicy)));
-        }
-        PasswordLockout lockout = saved.map(CustomerAuthentication::lockout).orElse(identity.lockout());
-        return lockout.isLocked(now) ? new LoginResult.AccountLocked() : new LoginResult.InvalidCredentials();
-    }
 
-    @Override
-    public LoginResult login(LoginCommand command) {
-        try {
-            Optional<CustomerAuthentication> identity = identities.findByUserName(command.userName());
-            if (identity.isPresent() && identity.get().lockout().isLocked(clock.instant())) {
-                return new LoginResult.AccountLocked();
-            }
-            if (identity.isPresent() && identity.get().lockout().captchaRequired(lockoutPolicy)
-                    && !captchaSolved(command, identity.get().customerId())) {
-                return new LoginResult.CaptchaRequired();
-            }
-            VerificationResult verified = credentials.verify(command.userName(), command.password());
-            if (identity.isEmpty() || !(verified instanceof VerificationResult.Verified(var issuer, var subject))
-                    || !identity.get().isSameIdentity(issuer, subject)) {
-                return identity.map(this::recordFailure).orElseGet(LoginResult.InvalidCredentials::new);
-            }
-            if (!identity.get().isActive()) {
-                return new LoginResult.AccountNotReady();
-            }
-            if (identity.get().lockout().failedCount() > 0) {
-                identities.saveLockoutIfCurrent(identity.get(), identity.get().lockout().reset());
-            }
-            SessionId sessionId = sessionIds.get();
-            DeviceRouting routing = trustedDevices.routeAfterPassword(identity.get().customerId(), command.channel(),
-                    command.deviceId(), command.platform(), command.devicePublicKey(), sessionId.toString());
-            Session session = switch (routing) {
-                case DeviceRouting.FullSession() -> Session.start(sessionId, identity.get().customerId(),
-                        command.deviceId(), command.channel(), clock.instant(), policy);
-                case DeviceRouting.NeedTrust() -> Session.startRestricted(sessionId, identity.get().customerId(),
-                        command.deviceId(), command.channel(), clock.instant(), devicePolicy);
-            };
-            OpaqueToken token = tokens.next();
-            String envelope = sealer.seal(command.tokenEncryptionKey(), token, session);
-            sessions.create(session, token);
-            return new LoginResult.Authenticated(envelope, session.customerId(), session.status(),
-                    session.idleExpiresAt(), session.absoluteExpiresAt());
-        } catch (RepositoryUnavailableException | PartnerUnavailableException failure) {
-            return new LoginResult.Unavailable();
-        } finally {
-            command.password().clear();
+        PasswordLockout escalatedLockout = identity.lockout().afterFailure(now, lockoutPolicy);
+        Optional<CustomerAuthentication> savedIdentity =
+                customerAuthenticationRepository.saveLockoutIfCurrent(identity, escalatedLockout);
+
+        if (savedIdentity.isEmpty()) {
+            Optional<CustomerAuthentication> latestIdentity =
+                    customerAuthenticationRepository.findByUserName(identity.userName());
+            savedIdentity = latestIdentity.flatMap(latest -> {
+                PasswordLockout latestEscalatedLockout = latest.lockout().afterFailure(now, lockoutPolicy);
+                return customerAuthenticationRepository.saveLockoutIfCurrent(latest, latestEscalatedLockout);
+            });
         }
+
+        PasswordLockout effectiveLockout = savedIdentity
+                .map(CustomerAuthentication::lockout)
+                .orElse(identity.lockout());
+        if (effectiveLockout.isLocked(now)) {
+            return new LoginResult.AccountLocked();
+        }
+        return new LoginResult.InvalidCredentials();
     }
 }

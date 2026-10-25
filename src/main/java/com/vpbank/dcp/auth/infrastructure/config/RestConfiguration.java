@@ -2,17 +2,16 @@ package com.vpbank.dcp.auth.infrastructure.config;
 
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ResponseHeadersFilter;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.util.List;
+import java.util.Locale;
 import org.springframework.context.MessageSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.support.ResourceBundleMessageSource;
 import org.springframework.web.servlet.LocaleResolver;
 import org.springframework.web.servlet.i18n.AcceptHeaderLocaleResolver;
-
-import java.nio.charset.StandardCharsets;
-import java.time.Clock;
-import java.util.List;
-import java.util.Locale;
 
 /** Web-wide pieces: response headers, the request locale and the localized error catalogue. */
 @Configuration(proxyBeanMethods = false)

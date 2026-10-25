@@ -1,7 +1,6 @@
 package com.vpbank.dcp.auth.application.port.in;
 
 import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
-
 import com.vpbank.dcp.auth.domain.model.UserName;
 
 /**

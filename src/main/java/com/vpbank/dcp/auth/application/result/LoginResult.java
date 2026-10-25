@@ -1,8 +1,7 @@
 package com.vpbank.dcp.auth.application.result;
 
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
-import com.vpbank.dcp.auth.domain.model.SessionStatus;
-
 import java.time.Instant;
 import java.util.Objects;
 

@@ -9,6 +9,9 @@ import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.ArchCondition;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.Architectures;
 import com.tngtech.archunit.library.dependencies.SliceAssignment;
 import com.tngtech.archunit.library.dependencies.SliceIdentifier;
@@ -47,6 +50,7 @@ class ArchitectureTest {
                 .adapter("valkey", OUT + ".valkey..")
                 .adapter("jose", OUT + ".jose..")
                 .adapter("captcha", OUT + ".captcha..")
+                .adapter("mfa", OUT + ".mfa..")
                 .withOptionalLayers(true)
                 // config wires every ring; it is the only package allowed to see all of them
                 .ignoreDependency(JavaClass.Predicates.resideInAPackage(CONFIG + ".."), DescribedPredicate.alwaysTrue())
@@ -75,12 +79,12 @@ class ArchitectureTest {
 
     @Test
     void ringsHoldOnlyRolePackages() {
-        onlyPackages(DOMAIN, ROOT + ".domain.model", ROOT + ".domain.exception");
+        onlyPackages(DOMAIN, ROOT + ".domain.model", ROOT + ".domain.enums", ROOT + ".domain.exception");
         onlyPackages(APPLICATION, COMMAND, RESULT, PORT_IN, ROOT + ".application.port.out.repository",
                 ROOT + ".application.port.out.gateway", ROOT + ".application.port.out.model",
                 ROOT + ".application.port.out.exception", SERVICE);
-        onlyPackages(REST + "..", REST + ".common", REST + ".controller", REST + ".dto.request", REST + ".dto.response",
-                REST + ".mapper");
+        onlyPackages(REST + "..", REST + ".common", REST + ".constant", REST + ".controller", REST + ".dto.request",
+                REST + ".dto.response", REST + ".mapper");
         onlyPackages(OUT + ".persistence..", OUT + ".persistence.common", OUT + ".persistence.adapter",
                 OUT + ".persistence.entity", OUT + ".persistence.repository", OUT + ".persistence.mapper");
         // everything outside the core rings sits under infrastructure (plus the Boot entry point)
@@ -88,6 +92,38 @@ class ArchitectureTest {
                 .should().haveSimpleName("AuthenticationApplication")
                 .because("adapters and config live under infrastructure")
                 .check(production);
+    }
+
+    @Test
+    void businessEnumsLiveInDomainEnums() {
+        classes().that().areEnums().and().resideInAPackage(DOMAIN)
+                .should().resideInAPackage(ROOT + ".domain.enums")
+                .because("business enums are the domain's vocabulary and have one home (§11.1)")
+                .check(production);
+        classes().that().resideInAPackage(ROOT + ".domain.enums").and().areTopLevelClasses()
+                .should().beEnums()
+                .because("domain.enums holds enums only")
+                .check(production);
+    }
+
+    @Test
+    void constantHoldersAreFinalWithStaticFinalFieldsOnly() {
+        classes().that().resideInAPackage("..constant..")
+                .should().haveModifier(JavaModifier.FINAL)
+                .andShould().haveOnlyFinalFields()
+                .andShould().haveOnlyPrivateConstructors()
+                .andShould(new ArchCondition<>("have only static fields") {
+                    @Override
+                    public void check(JavaClass holder, ConditionEvents events) {
+                        holder.getFields().stream()
+                                .filter(field -> !field.getModifiers().contains(JavaModifier.STATIC))
+                                .forEach(field -> events.add(SimpleConditionEvent.violated(field,
+                                        field.getFullName() + " is an instance field in a constant holder")));
+                    }
+                })
+                .because("a constant package holds shared literals, never behaviour or state (§11.1)")
+                .check(production);
+        classes().that().haveSimpleName("ErrorCodes").should().resideInAPackage(REST + ".constant").check(production);
     }
 
     @Test
@@ -159,6 +195,10 @@ class ArchitectureTest {
                 .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "jakarta.validation..", "lombok..",
                         "org.springframework..", PORT_IN, COMMAND, RESULT, REST + "..")
                 .because("a controller maps in, calls the use case and maps out; it decides nothing")
+                .check(production);
+        noClasses().that().resideInAPackage(REST + ".controller")
+                .should().dependOnClassesThat().resideInAPackage(DOMAIN)
+                .because("value objects are built by the REST mapper, never by the controller")
                 .check(production);
         noClasses().that().resideInAnyPackage(REST + ".controller", REST + ".mapper")
                 .should().dependOnClassesThat().resideInAnyPackage(SERVICE, PORT_OUT)

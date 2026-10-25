@@ -8,11 +8,11 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
-import com.vpbank.dcp.auth.application.port.out.model.InitialPasswordSms;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
-import com.vpbank.dcp.auth.domain.model.RegistrationId;
+import com.vpbank.dcp.auth.application.port.out.model.InitialPasswordSms;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.PhoneNumber;
+import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.UserName;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;

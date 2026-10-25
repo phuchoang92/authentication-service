@@ -1,12 +1,12 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.controller;
 
+import com.vpbank.dcp.auth.application.command.ExtendSessionCommand;
+import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
+import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.ExtendSessionRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.response.ExtendSessionResponse;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.SessionRestMapper;
-import com.vpbank.dcp.auth.application.command.ExtendSessionCommand;
-import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
-import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
 import jakarta.validation.Valid;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
@@ -22,14 +22,14 @@ import org.springframework.web.bind.annotation.RestController;
 @ConditionalOnProperty(prefix = "auth.login", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class SessionExtensionController {
-    @NonNull private final ExtendSessionUseCase extend;
-    @NonNull private final SessionRestMapper mapper;
+    @NonNull private final ExtendSessionUseCase extendSessionUseCase;
+    @NonNull private final SessionRestMapper sessionRestMapper;
 
     @PostMapping(path = "/internal/v1/sessions/extend", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<ExtendSessionResponse>> extend(@Valid @RequestBody ExtendSessionRequest body) {
-        ExtendSessionCommand command = mapper.toCommand(body);
-        ExtendSessionResult result = extend.extend(command);
-        return mapper.toResponse(result);
+        ExtendSessionCommand command = sessionRestMapper.toCommand(body);
+        ExtendSessionResult result = extendSessionUseCase.extend(command);
+        return sessionRestMapper.toResponse(result);
     }
 }

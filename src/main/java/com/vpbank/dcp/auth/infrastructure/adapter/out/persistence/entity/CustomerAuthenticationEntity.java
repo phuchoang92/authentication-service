@@ -1,7 +1,7 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity;
 
+import com.vpbank.dcp.auth.domain.enums.PasswordStatus;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.AuditedEntity;
-import com.vpbank.dcp.auth.domain.model.PasswordStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -9,13 +9,12 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import java.time.Instant;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-
-import java.time.Instant;
 
 /** Row of CUSTOMER_AUTHENTICATION: the identity a customer logs in with (phase 1) and its password lockout (phase 2). */
 @Entity

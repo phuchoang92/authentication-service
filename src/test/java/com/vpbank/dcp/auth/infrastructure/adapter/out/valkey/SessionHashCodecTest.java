@@ -2,9 +2,13 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.valkey;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.EnrollmentContext;
+import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
@@ -31,6 +35,23 @@ class SessionHashCodecTest {
         assertThat(SessionHashCodec.decode(fields)).contains(session);
         assertThat(SessionHashCodec.decode(SessionHashCodec.encode(session.toBuilder().deviceId(null).build())))
                 .hasValueSatisfying(s -> assertThat(s.deviceId()).isNull());
+    }
+
+    @Test
+    void aRestrictedSessionCarriesItsEnrollmentContextAllOrNothing() {
+        Session restricted = Session.startRestricted(SessionId.random(), new CustomerId("90359"), new DeviceId("tablet-2"),
+                Channel.MOBILE, Instant.parse("2026-10-25T10:00:00Z"), DevicePolicy.standard())
+                .withEnrollment(EnrollmentContext.builder().enrollmentId(EnrollmentId.random()).devicePublicJwk("{dev}")
+                        .platform(DevicePlatform.IOS).serverPublicJwk("{pub}").serverPrivateJwk("{priv}")
+                        .challengeDigest("digest").keyProven(true).build());
+        Map<String, String> fields = SessionHashCodec.encode(restricted);
+        assertThat(fields).containsEntry("status", "NEED_TRUSTED_DEVICE").containsEntry("keyProven", "1")
+                .containsEntry("serverPrivateJwk", "{priv}");
+        assertThat(SessionHashCodec.decode(fields)).contains(restricted);
+        assertThat(SessionHashCodec.decode(without(fields, "serverPrivateJwk"))).isEmpty(); // partial context = no session
+        assertThat(SessionHashCodec.decode(with(fields, "keyProven", "yes"))).isEmpty();
+        assertThat(SessionHashCodec.decode(SessionHashCodec.encode(session))).hasValueSatisfying(s ->
+                assertThat(s.enrollment()).isNull());
     }
 
     @Test

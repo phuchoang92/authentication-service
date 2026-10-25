@@ -1,8 +1,7 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.notification.dto;
 
-import lombok.Builder;
-
 import java.util.Map;
+import lombok.Builder;
 
 /** Notification {@code POST …/sms} body. Parameters carry the password: never printed. */
 @Builder

@@ -1,21 +1,21 @@
 package com.vpbank.dcp.auth.infrastructure.config;
 
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.time.Duration;
+import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
-
-import java.time.Duration;
-import java.util.Map;
 
 /** Login settings; read only when {@code auth.login.enabled=true}. */
 @Validated
 @ConfigurationProperties(prefix = "auth.login")
 public record LoginProperties(boolean enabled, @Valid @NotNull Keycloak keycloak,
-                              @Valid @NotNull @DefaultValue Lockout lockout) {
+                              @Valid @NotNull @DefaultValue Lockout lockout,
+                              @Min(1) @DefaultValue("3") int enrollmentMaxVerifyAttempts) {
 
     /**
      * Escalating lockout (slice 3): CAPTCHA after N failures, temporary locks at given failure

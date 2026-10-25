@@ -1,8 +1,7 @@
 package com.vpbank.dcp.auth.application.port.out.repository;
 
-import com.vpbank.dcp.auth.domain.model.Registration;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
-
+import com.vpbank.dcp.auth.domain.model.Registration;
 import java.util.Optional;
 
 /**

@@ -1,15 +1,15 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.CustomerAuthenticationEntity;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.RegistrationEntity;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
+import com.vpbank.dcp.auth.domain.enums.PasswordStatus;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
-import com.vpbank.dcp.auth.domain.model.PasswordStatus;
 import com.vpbank.dcp.auth.domain.model.Registration;
 import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.RequestDigest;
 import com.vpbank.dcp.auth.domain.model.UserName;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.CustomerAuthenticationEntity;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.RegistrationEntity;
 
 /** Registration aggregate ↔ phase-1 rows. Value objects are built on the way out of the database. */
 public final class RegistrationPersistenceMapper {

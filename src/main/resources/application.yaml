@@ -62,3 +62,7 @@ auth:
     trust-duration: P180D
     max-live-devices: 5
     restricted-session-ttl: PT10M
+  mfa:
+    origin: ${AUTH_MFA_ORIGIN:}
+    receipt-issuer: ${AUTH_MFA_RECEIPT_ISSUER:mfa-service}
+    receipt-public-jwk: ${AUTH_MFA_RECEIPT_PUBLIC_JWK:}

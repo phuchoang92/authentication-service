@@ -12,12 +12,11 @@ import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.KeyType;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.jose.dto.TokenEnvelopePayload;
 import com.vpbank.dcp.auth.application.port.out.exception.InvalidEncryptionKeyException;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Session;
-
+import com.vpbank.dcp.auth.infrastructure.adapter.out.jose.dto.TokenEnvelopePayload;
 import java.text.ParseException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -34,15 +33,21 @@ public final class NimbusTokenEnvelopeSealer implements TokenEnvelopeSealer {
 
     @Override
     public String seal(String recipientPublicJwk, OpaqueToken token, Session session) {
-        ECKey recipient = recipientKey(recipientPublicJwk);
-        TokenEnvelopePayload payload = new TokenEnvelopePayload(token.value(), session.status().name(),
-                session.customerId().value(), session.idleExpiresAt(), session.absoluteExpiresAt());
+        ECKey recipientKey = recipientKey(recipientPublicJwk);
+        TokenEnvelopePayload payload = new TokenEnvelopePayload(
+                token.value(),
+                session.status().name(),
+                session.customerId().value(),
+                session.idleExpiresAt(),
+                session.absoluteExpiresAt());
         try {
             JWEHeader header = new JWEHeader.Builder(JWEAlgorithm.ECDH_ES, EncryptionMethod.A256GCM)
-                    .type(TYPE).keyID(recipient.computeThumbprint().toString())
-                    .customParam(VERSION_HEADER, 1).build();
+                    .type(TYPE)
+                    .keyID(recipientKey.computeThumbprint().toString())
+                    .customParam(VERSION_HEADER, 1)
+                    .build();
             JWEObject jwe = new JWEObject(header, new Payload(json(payload)));
-            jwe.encrypt(new ECDHEncrypter(recipient));
+            jwe.encrypt(new ECDHEncrypter(recipientKey));
             return jwe.serialize();
         } catch (JOSEException failure) {
             throw new IllegalStateException("Token envelope could not be sealed", failure);
@@ -60,23 +65,23 @@ public final class NimbusTokenEnvelopeSealer implements TokenEnvelopeSealer {
         return json;
     }
 
-    private static ECKey recipientKey(String json) {
+    private static ECKey recipientKey(String recipientPublicJwk) {
         JWK jwk;
         try {
-            jwk = JWK.parse(json);
+            jwk = JWK.parse(recipientPublicJwk);
         } catch (ParseException malformed) {
             throw new InvalidEncryptionKeyException("tokenEncryptionKey is not a JWK");
         }
         if (!KeyType.EC.equals(jwk.getKeyType())) {
             throw new InvalidEncryptionKeyException("tokenEncryptionKey must be an EC key");
         }
-        ECKey key = (ECKey) jwk;
-        if (!Curve.P_256.equals(key.getCurve())) {
+        ECKey ecKey = (ECKey) jwk;
+        if (!Curve.P_256.equals(ecKey.getCurve())) {
             throw new InvalidEncryptionKeyException("tokenEncryptionKey must use P-256");
         }
-        if (key.isPrivate()) {
+        if (ecKey.isPrivate()) {
             throw new InvalidEncryptionKeyException("tokenEncryptionKey must be a public key");
         }
-        return key;
+        return ecKey;
     }
 }

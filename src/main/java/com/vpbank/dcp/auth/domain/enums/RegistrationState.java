@@ -1,4 +1,4 @@
-package com.vpbank.dcp.auth.domain.model;
+package com.vpbank.dcp.auth.domain.enums;
 
 /**
  * Steps of one registration, in order. READY and FAILED are finished: they free the

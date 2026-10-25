@@ -3,6 +3,7 @@ package com.vpbank.dcp.auth.domain.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vpbank.dcp.auth.domain.enums.PasswordStatus;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.TreeMap;

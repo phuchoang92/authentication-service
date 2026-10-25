@@ -5,7 +5,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
-
 import java.time.Instant;
 
 /** {@code POST /internal/v1/sessions/extend} (flow 16): the BFF names the session by its lookup, never by token. */

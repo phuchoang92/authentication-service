@@ -15,18 +15,18 @@ import com.nimbusds.jose.crypto.ECDHDecrypter;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator;
-import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.CustomerDirectoryPort;
-import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
-import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort.CreateUserResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.SmsSenderPort;
+import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.UserName;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import java.util.Base64;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -69,7 +69,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "auth.login.keycloak.base-url=https://kc.test",
         "auth.login.keycloak.realm=test",
         "auth.login.keycloak.client-id=authentication-service",
-        "auth.login.keycloak.client-secret=secret"})
+        "auth.login.keycloak.client-secret=secret",
+        "auth.mfa.origin=https://mfa.test",
+        "auth.mfa.receipt-issuer=mfa-service",
+        "auth.mfa.receipt-public-jwk={\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU\","
+                + "\"y\":\"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0\",\"kid\":\"mfa-receipt-1\"}"})
 @AutoConfigureMockMvc
 class ApplicationBootIT {
     @Container

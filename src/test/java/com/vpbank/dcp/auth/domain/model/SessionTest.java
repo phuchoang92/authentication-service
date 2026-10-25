@@ -3,6 +3,8 @@ package com.vpbank.dcp.auth.domain.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.exception.SessionStateException;
 import java.time.Duration;
 import java.time.Instant;

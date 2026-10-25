@@ -1,24 +1,24 @@
 package com.vpbank.dcp.auth.infrastructure.config;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.CaptchaKeys;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.RandomOpaqueTokenGenerator;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyCaptchaStore;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.SessionKeys;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeySessionAdapter;
-import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
+import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.CaptchaKeys;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.RandomOpaqueTokenGenerator;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.SessionKeys;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyCaptchaStore;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeySessionAdapter;
+import java.security.SecureRandom;
+import java.time.Clock;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
-
-import java.security.SecureRandom;
-import java.util.Base64;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Session authority on Valkey, active only with login ({@code auth.login.enabled=true}); the
@@ -32,29 +32,31 @@ public class ValkeyConfiguration {
 
     @Bean
     SessionKeys sessionKeys(SessionProperties properties) {
-        Map<String, byte[]> keys = new LinkedHashMap<>();
-        properties.lookupHmacKeysBase64().forEach((version, base64) -> keys.put(version, decodeKey(version, base64)));
-        if (!keys.containsKey(properties.lookupKeyVersion())) {
+        Map<String, byte[]> hmacKeysByVersion = new LinkedHashMap<>();
+        properties.lookupHmacKeysBase64().forEach((version, base64) ->
+                hmacKeysByVersion.put(version, decodeKey(version, base64)));
+        if (!hmacKeysByVersion.containsKey(properties.lookupKeyVersion())) {
             throw new IllegalStateException("auth.session.lookup-key-version " + properties.lookupKeyVersion()
                     + " has no entry in auth.session.lookup-hmac-keys-base64");
         }
-        return new SessionKeys(keys);
+        return new SessionKeys(hmacKeysByVersion);
     }
 
     @Bean
-    SessionStore sessionStore(StringRedisTemplate redis, SessionKeys keys) {
-        return new ValkeySessionAdapter(redis, keys);
+    SessionStore sessionStore(StringRedisTemplate stringRedisTemplate, SessionKeys sessionKeys) {
+        return new ValkeySessionAdapter(stringRedisTemplate, sessionKeys);
     }
 
     /** CAPTCHA answers are HMAC-ed with the current session lookup key: one secret to manage. */
     @Bean
-    CaptchaStore captchaStore(StringRedisTemplate redis, SessionProperties properties, java.time.Clock clock) {
-        String base64 = properties.lookupHmacKeysBase64().get(properties.lookupKeyVersion());
-        if (base64 == null) {
+    CaptchaStore captchaStore(StringRedisTemplate stringRedisTemplate, SessionProperties properties, Clock clock) {
+        String currentKeyBase64 = properties.lookupHmacKeysBase64().get(properties.lookupKeyVersion());
+        if (currentKeyBase64 == null) {
             throw new IllegalStateException("auth.session.lookup-key-version " + properties.lookupKeyVersion()
                     + " has no entry in auth.session.lookup-hmac-keys-base64");
         }
-        return new ValkeyCaptchaStore(redis, new CaptchaKeys(decodeKey(properties.lookupKeyVersion(), base64)), clock);
+        CaptchaKeys captchaKeys = new CaptchaKeys(decodeKey(properties.lookupKeyVersion(), currentKeyBase64));
+        return new ValkeyCaptchaStore(stringRedisTemplate, captchaKeys, clock);
     }
 
     @Bean

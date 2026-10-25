@@ -3,8 +3,13 @@
 New authentication service, built bottom-up from the DB design phases in
 `../authentication-service-src/docs/db-phases/`. No code from the earlier trees is used.
 
-**Status (2026-10-25): slices 1–4 done** on [ARCHITECTURE.md](ARCHITECTURE.md) (layer-first
-hexagonal under `domain` / `application` / `infrastructure`, Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
+Development rules: [architecture and package boundaries](ARCHITECTURE.md),
+[code conventions and readability examples](CODE_CONVENTIONS.md).
+
+**Status (2026-10-25): slices 1–4 done, slice 5 (enrollment) turns 1–2 done, code aligned with
+[CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)** on [ARCHITECTURE.md](ARCHITECTURE.md) (layer-first
+hexagonal under `domain` / `application` / `infrastructure`, business enums in `domain.enums`,
+Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
 `V1__identity.sql`, `V2__password_lockout.sql`, `V3__trusted_device.sql`), the registration API
 `POST /internal/v1/callback/authentication-creation` (contract §1 of
 `new-customer-onboarding-api-plan.md`), password login / session / logout / extend
@@ -68,16 +73,18 @@ Java 25, Maven 3.9, Docker for the MySQL integration tests:
 mvn -o verify
 ```
 
-Last run (2026-10-25): 209 tests, 0 failures — 188 unit (domain state machines and value
-objects, services with mocked ports, web/persistence/partner mappers, Valkey key vector and codec,
-error catalogue, Keycloak admin + Direct Grant with a test-signed ID token, JWE sealer round trip,
-lockout escalation, CAPTCHA generator/service, `@WebMvcTest` slices incl. the session filter,
-configuration, 10 ArchUnit rules) and 21 on Testcontainers (`RegistrationPersistenceAdapterIT`, `TrustedDevicePersistenceAdapterIT` and
-`CustomerAuthenticationPersistenceAdapterIT` on MySQL 8.4, `ValkeySessionAdapterIT` and
-`ValkeyCaptchaStoreIT` on `valkey/valkey:9.1`, `ApplicationBootIT` booting everything against
-MySQL + Valkey: register → 2 failures → CAPTCHA → login → decrypt envelope → extend → logout →
-lock → unlock → second device NEED_TRUSTED_DEVICE → device list). No real Customer, Keycloak or Notification service was
-called.
+Last run (2026-10-25, after the CODE_CONVENTIONS alignment): 237 tests, 0 failures — 213 unit
+(domain state machines and value objects, frozen enum codes, services with in-memory doubles,
+web/persistence/partner mappers, Valkey key vector and codec, error catalogue, Keycloak admin +
+Direct Grant with a test-signed ID token, JWE sealer and challenge sealer round trips, MFA HTTP
+adapter with a test-signed receipt, lockout escalation, CAPTCHA generator/service, `@WebMvcTest`
+slices incl. the session filter, configuration, 12 ArchUnit rules) and 24 on Testcontainers
+(`RegistrationPersistenceAdapterIT`, `CustomerAuthenticationPersistenceAdapterIT`,
+`TrustedDevicePersistenceAdapterIT` and `DeviceEnrollmentPersistenceAdapterIT` on MySQL 8.4,
+`ValkeySessionAdapterIT` and `ValkeyCaptchaStoreIT` on `valkey/valkey:9.1`, `ApplicationBootIT`
+booting everything against MySQL + Valkey: register → 2 failures → CAPTCHA → login → decrypt
+envelope → extend → logout → lock → unlock → second device NEED_TRUSTED_DEVICE → device list).
+No real Customer, Keycloak, Notification or MFA service was called.
 
 ## Configuration
 

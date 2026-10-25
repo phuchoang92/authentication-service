@@ -3,13 +3,12 @@ package com.vpbank.dcp.auth.infrastructure.config;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import java.time.Duration;
+import java.util.Map;
 import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
-
-import java.time.Duration;
-import java.util.Map;
 
 /**
  * Session store settings. {@code lookupHmacKeysBase64} maps token key versions ({@code k1}, …)

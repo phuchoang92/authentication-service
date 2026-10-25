@@ -1,12 +1,11 @@
 package com.vpbank.dcp.auth.application.result;
 
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
+import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
+import com.vpbank.dcp.auth.domain.enums.TrustLevel;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DevicePlatform;
-import com.vpbank.dcp.auth.domain.model.DeviceStatus;
-import com.vpbank.dcp.auth.domain.model.TrustLevel;
-import lombok.Builder;
-
 import java.time.Instant;
+import lombok.Builder;
 
 /** One device as the customer sees it. The web layer masks the device ID. */
 @Builder

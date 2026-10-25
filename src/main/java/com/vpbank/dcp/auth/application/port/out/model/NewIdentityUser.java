@@ -2,9 +2,8 @@ package com.vpbank.dcp.auth.application.port.out.model;
 
 import com.vpbank.dcp.auth.domain.model.Email;
 import com.vpbank.dcp.auth.domain.model.UserName;
-import lombok.Builder;
-
 import java.util.Objects;
+import lombok.Builder;
 
 /** The user to create in the identity provider. {@code email} may be null. */
 @Builder

@@ -1,9 +1,8 @@
 package com.vpbank.dcp.auth.application.port.out.model;
 
 import com.vpbank.dcp.auth.domain.model.CustomerId;
-import lombok.Builder;
-
 import java.util.Objects;
+import lombok.Builder;
 
 /**
  * The Customer service's current view of a customer, as needed for registration. Phone and

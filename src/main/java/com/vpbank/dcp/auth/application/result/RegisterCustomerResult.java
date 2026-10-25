@@ -1,9 +1,8 @@
 package com.vpbank.dcp.auth.application.result;
 
-import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.UserName;
-
 import java.util.Objects;
 
 /** Business outcomes of {@link RegisterCustomerUseCase}; infrastructure failures are exceptions. */

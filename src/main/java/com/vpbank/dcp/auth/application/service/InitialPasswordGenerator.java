@@ -13,11 +13,11 @@ public final class InitialPasswordGenerator {
     private static final String DIGITS = "23456789";
     private static final String ALL = UPPER + LOWER + DIGITS;
 
-    private final SecureRandom random;
+    private final SecureRandom secureRandom;
     private final int length;
 
-    public InitialPasswordGenerator(SecureRandom random, int length) {
-        this.random = Objects.requireNonNull(random);
+    public InitialPasswordGenerator(SecureRandom secureRandom, int length) {
+        this.secureRandom = Objects.requireNonNull(secureRandom);
         if (length < 8 || length > 64) {
             throw new IllegalArgumentException("Initial password length must be 8 to 64");
         }
@@ -33,7 +33,7 @@ public final class InitialPasswordGenerator {
             password[i] = pick(ALL);
         }
         for (int i = length - 1; i > 0; i--) {
-            int j = random.nextInt(i + 1);
+            int j = secureRandom.nextInt(i + 1);
             char swap = password[i];
             password[i] = password[j];
             password[j] = swap;
@@ -42,6 +42,6 @@ public final class InitialPasswordGenerator {
     }
 
     private char pick(String alphabet) {
-        return alphabet.charAt(random.nextInt(alphabet.length()));
+        return alphabet.charAt(secureRandom.nextInt(alphabet.length()));
     }
 }

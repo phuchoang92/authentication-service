@@ -1,10 +1,10 @@
 package com.vpbank.dcp.auth.domain.model;
 
+import com.vpbank.dcp.auth.domain.enums.RegistrationState;
 import com.vpbank.dcp.auth.domain.exception.RegistrationStateException;
-import lombok.Builder;
-
 import java.time.Instant;
 import java.util.Objects;
+import lombok.Builder;
 
 /**
  * One registration request and its place in the flow
@@ -37,16 +37,26 @@ public record Registration(RegistrationId id, CustomerId customerId, UserName us
     /** A new request, not yet stored. */
     public static Registration reserve(RegistrationId id, CustomerId customerId, UserName userName,
                                        RequestDigest requestDigest, Instant expiresAt) {
-        return Registration.builder().id(id).customerId(customerId).userName(userName)
-                .requestDigest(requestDigest).state(RegistrationState.RESERVED).expiresAt(expiresAt)
-                .version(0).build();
+        return Registration.builder()
+                .id(id)
+                .customerId(customerId)
+                .userName(userName)
+                .requestDigest(requestDigest)
+                .state(RegistrationState.RESERVED)
+                .expiresAt(expiresAt)
+                .version(0)
+                .build();
     }
 
     public Registration markUserCreated(String identityIssuer, String identitySubject) {
         requireState(RegistrationState.RESERVED);
-        return toBuilder().state(RegistrationState.USER_CREATED)
-                .identityIssuer(Objects.requireNonNull(identityIssuer, "identityIssuer"))
-                .identitySubject(Objects.requireNonNull(identitySubject, "identitySubject")).build();
+        Objects.requireNonNull(identityIssuer, "identityIssuer");
+        Objects.requireNonNull(identitySubject, "identitySubject");
+        return toBuilder()
+                .state(RegistrationState.USER_CREATED)
+                .identityIssuer(identityIssuer)
+                .identitySubject(identitySubject)
+                .build();
     }
 
     public Registration markSmsAccepted() {

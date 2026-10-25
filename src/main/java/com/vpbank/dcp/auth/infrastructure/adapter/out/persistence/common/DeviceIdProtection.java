@@ -1,9 +1,8 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common;
 
-import com.vpbank.dcp.auth.domain.model.Channel;
+import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
-
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -35,15 +34,15 @@ public final class DeviceIdProtection {
     private final String lookupKeyId;
     private final Map<String, byte[]> encryptionKeys;
     private final String encryptionKeyId;
-    private final SecureRandom random;
+    private final SecureRandom secureRandom;
 
     public DeviceIdProtection(Map<String, byte[]> lookupKeys, String lookupKeyId,
-                              Map<String, byte[]> encryptionKeys, String encryptionKeyId, SecureRandom random) {
+                              Map<String, byte[]> encryptionKeys, String encryptionKeyId, SecureRandom secureRandom) {
         this.lookupKeys = checked(lookupKeys, lookupKeyId, 32, "lookup");
         this.lookupKeyId = lookupKeyId;
         this.encryptionKeys = checked(encryptionKeys, encryptionKeyId, 32, "encryption");
         this.encryptionKeyId = encryptionKeyId;
-        this.random = Objects.requireNonNull(random, "random");
+        this.secureRandom = Objects.requireNonNull(secureRandom, "secureRandom");
     }
 
     public String lookupKeyId() {
@@ -72,7 +71,7 @@ public final class DeviceIdProtection {
     /** {@code version ‖ nonce ‖ ciphertext ‖ tag} under the current encryption key, AAD = customerId ‖ channel. */
     public byte[] encrypt(CustomerId customerId, Channel channel, DeviceId deviceId) {
         byte[] nonce = new byte[NONCE_BYTES];
-        random.nextBytes(nonce);
+        secureRandom.nextBytes(nonce);
         try {
             Cipher cipher = Cipher.getInstance(AEAD);
             cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key(encryptionKeys, encryptionKeyId, "encryption"), "AES"),

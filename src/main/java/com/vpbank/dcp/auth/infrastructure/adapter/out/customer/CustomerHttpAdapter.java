@@ -1,19 +1,18 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.customer;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.out.customer.dto.CustomerProfileDto;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.customer.mapper.CustomerProfileMapper;
+import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.gateway.CustomerDirectoryPort;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
-import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.customer.dto.CustomerProfileDto;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.customer.mapper.CustomerProfileMapper;
+import java.util.Objects;
+import java.util.Optional;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-
-import java.util.Objects;
-import java.util.Optional;
 
 /**
  * Customer service profile lookup: {@code GET <profilePath>} with the customer ID. 200 is a
@@ -23,8 +22,10 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public final class CustomerHttpAdapter implements CustomerDirectoryPort {
     private static final String PARTNER = "Customer service";
+    private static final int OK = 200;
+    private static final int NOT_FOUND = 404;
 
-    @NonNull private final RestClient client;
+    @NonNull private final RestClient restClient;
     /** Has one {@code {customerId}} variable. */
     @NonNull private final String profilePath;
     /** May be null: no bearer header is sent. */
@@ -34,7 +35,8 @@ public final class CustomerHttpAdapter implements CustomerDirectoryPort {
     public Optional<CustomerProfile> profile(CustomerId customerId) {
         Objects.requireNonNull(customerId, "customerId");
         try {
-            return client.get().uri(profilePath, customerId.value())
+            return restClient.get()
+                    .uri(profilePath, customerId.value())
                     .accept(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
                         if (serviceToken != null) {
@@ -43,17 +45,22 @@ public final class CustomerHttpAdapter implements CustomerDirectoryPort {
                     })
                     .exchange((request, response) -> {
                         int status = response.getStatusCode().value();
-                        if (status == 404) {
+                        if (status == NOT_FOUND) {
                             return Optional.<CustomerProfile>empty();
                         }
-                        if (status != 200) {
+                        if (status != OK) {
                             throw new PartnerUnavailableException(PARTNER);
                         }
-                        CustomerProfileDto body = response.bodyTo(CustomerProfileDto.class);
-                        if (body == null || !customerId.value().equals(body.customerId())) {
+
+                        CustomerProfileDto profileDto = response.bodyTo(CustomerProfileDto.class);
+                        boolean isRequestedCustomer = profileDto != null
+                                && customerId.value().equals(profileDto.customerId());
+                        if (!isRequestedCustomer) {
                             throw new PartnerUnavailableException(PARTNER);
                         }
-                        return Optional.of(CustomerProfileMapper.toProfile(customerId, body));
+
+                        CustomerProfile profile = CustomerProfileMapper.toProfile(customerId, profileDto);
+                        return Optional.of(profile);
                     });
         } catch (RestClientException failure) {
             throw new PartnerUnavailableException(PARTNER, failure);

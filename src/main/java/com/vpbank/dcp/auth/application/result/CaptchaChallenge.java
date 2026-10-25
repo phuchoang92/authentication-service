@@ -1,7 +1,6 @@
 package com.vpbank.dcp.auth.application.result;
 
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
-
 import java.time.Instant;
 import java.util.Objects;
 
