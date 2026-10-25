@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: authentication-service-v2
+  datasource:
+    url: ${AUTH_DB_URL}
+    username: ${AUTH_DB_USER}
+    password: ${AUTH_DB_PASSWORD}
+  flyway:
+    enabled: true
+
+auth:
+  registration:
+    # Off by default: the caller is not authenticated yet; enable only on internal integration.
+    enabled: ${AUTH_REGISTRATION_ENABLED:false}
+    request-digest-key-base64: ${AUTH_REGISTRATION_DIGEST_KEY_BASE64:}
+    customer:
+      origin: ${AUTH_CUSTOMER_ORIGIN:}
+      service-token: ${AUTH_CUSTOMER_SERVICE_TOKEN:}
+    keycloak:
+      base-url: ${AUTH_KC_BASE_URL:}
+      realm: ${AUTH_KC_REALM:}
+      admin-client-id: ${AUTH_KC_ADMIN_CLIENT_ID:}
+      admin-client-secret: ${AUTH_KC_ADMIN_CLIENT_SECRET:}
+    notification:
+      origin: ${AUTH_NOTIFICATION_ORIGIN:}
+      service-token: ${AUTH_NOTIFICATION_SERVICE_TOKEN:}
