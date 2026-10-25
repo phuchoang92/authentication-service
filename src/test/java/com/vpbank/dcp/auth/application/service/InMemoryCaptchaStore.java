@@ -1,6 +1,6 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.out.CaptchaStore;
+import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;

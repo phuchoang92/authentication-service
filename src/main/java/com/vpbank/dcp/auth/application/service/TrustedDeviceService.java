@@ -1,9 +1,9 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.in.DeviceSummary;
+import com.vpbank.dcp.auth.application.result.DeviceSummary;
 import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
-import com.vpbank.dcp.auth.application.port.out.TrustedDeviceRepository;
-import com.vpbank.dcp.auth.application.port.out.TrustedDeviceRepository.TrustFirstResult;
+import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.TrustFirstResult;
 import com.vpbank.dcp.auth.domain.model.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;

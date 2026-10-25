@@ -1,5 +1,7 @@
 package com.vpbank.dcp.auth.application.port.in;
 
+import com.vpbank.dcp.auth.application.result.DeviceSummary;
+
 import com.vpbank.dcp.auth.domain.model.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 

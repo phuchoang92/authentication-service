@@ -4,7 +4,7 @@ New authentication service, built bottom-up from the DB design phases in
 `../authentication-service-src/docs/db-phases/`. No code from the earlier trees is used.
 
 **Status (2026-10-25): slices 1–4 done** on [ARCHITECTURE.md](ARCHITECTURE.md) (layer-first
-hexagonal, Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
+hexagonal under `domain` / `application` / `infrastructure`, Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
 `V1__identity.sql`, `V2__password_lockout.sql`, `V3__trusted_device.sql`), the registration API
 `POST /internal/v1/callback/authentication-creation` (contract §1 of
 `new-customer-onboarding-api-plan.md`), password login / session / logout / extend
@@ -68,11 +68,11 @@ Java 25, Maven 3.9, Docker for the MySQL integration tests:
 mvn -o verify
 ```
 
-Last run (2026-10-25): 207 tests, 0 failures — 186 unit (domain state machines and value
+Last run (2026-10-25): 209 tests, 0 failures — 188 unit (domain state machines and value
 objects, services with mocked ports, web/persistence/partner mappers, Valkey key vector and codec,
 error catalogue, Keycloak admin + Direct Grant with a test-signed ID token, JWE sealer round trip,
 lockout escalation, CAPTCHA generator/service, `@WebMvcTest` slices incl. the session filter,
-configuration, 8 ArchUnit rules) and 21 on Testcontainers (`RegistrationPersistenceAdapterIT`, `TrustedDevicePersistenceAdapterIT` and
+configuration, 10 ArchUnit rules) and 21 on Testcontainers (`RegistrationPersistenceAdapterIT`, `TrustedDevicePersistenceAdapterIT` and
 `CustomerAuthenticationPersistenceAdapterIT` on MySQL 8.4, `ValkeySessionAdapterIT` and
 `ValkeyCaptchaStoreIT` on `valkey/valkey:9.1`, `ApplicationBootIT` booting everything against
 MySQL + Valkey: register → 2 failures → CAPTCHA → login → decrypt envelope → extend → logout →

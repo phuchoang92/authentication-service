@@ -6,8 +6,9 @@ for `ArchitectureTest`; it is not proof that a rule is already enforced. Direct 
 calls between services and role-based domain/application/rest/persistence packages are
 documentation targets in this update; no source or architecture tests are changed.
 The separate `application.command` / `application.result` packages, role-based subpackages
-under `application.port.out`, and the `rest` naming below are approved targets too; the
-current source still uses the previous names (§3).
+under `application.port.out`, the `rest` naming, and the common `infrastructure` parent for
+adapters/config below are approved targets too; the current source still uses the previous
+names (§3).
 
 This phase builds the business flow bottom-up. It adds no CAS, concurrency or performance
 design; the existing registration, persistence and security contracts remain unchanged.
@@ -30,11 +31,13 @@ design; the existing registration, persistence and security contracts remain unc
 
 ## 2. Style: Hexagonal (Ports & Adapters), layer-first
 
-The code is split into four **rings**. Dependencies between rings point inward; config
-assembles them. Services within the application ring may call each other as described in §6.1.
+The code is split into four **rings**. Dependencies between rings point inward;
+`infrastructure.config` assembles them. Services within the application ring may call each
+other as described in §6.1. `infrastructure` groups adapters and configuration; it is not
+an extra ring or an extra runtime step. Domain and application must never import it.
 
 ```text
-            ┌──────────────────────────── adapter.in ───────────────────────────┐
+            ┌────────────────── infrastructure.adapter.in ───────────────────────┐
             │  HTTP in: controllers, request/response DTOs, REST mappers          │
             │   ┌────────────────────────── application ──────────────────────┐  │
             │   │  port.in, command/result, port.out, services                │  │
@@ -43,10 +46,10 @@ assembles them. Services within the application ring may call each other as desc
             │   │   └───────────────────────────────────────────────────────┘  │  │
             │   └─────────────────────────────────────────────────────────────┘  │
             └───────────────────────────────────────────────────────────────────┘
-            ┌──────────────────────────── adapter.out ──────────────────────────┐
+            ┌────────────────── infrastructure.adapter.out ──────────────────────┐
             │  JPA entities + repositories, HTTP partner clients, their DTOs     │
             └───────────────────────────────────────────────────────────────────┘
-            ┌──────────────────────────── config ───────────────────────────────┐
+            ┌──────────────────── infrastructure.config ────────────────────────┐
             │  Spring wiring; sees everything, contains no logic                 │
             └───────────────────────────────────────────────────────────────────┘
 ```
@@ -54,12 +57,12 @@ assembles them. Services within the application ring may call each other as desc
 Direction of dependencies:
 
 ```text
-adapter.in  ──► application.port.in  ──► domain
+infrastructure.adapter.in  ──► application.port.in  ──► domain
             + application.command / application.result
 application.service.LoginService ──► application.service.TrustedDeviceService
                                   + published application.command/application.result values
-adapter.out ──► application.port.out ──► domain
-config      ──► all rings (creates beans)
+infrastructure.adapter.out ──► application.port.out ──► domain
+infrastructure.config      ──► all rings (creates beans)
 ```
 
 **Layer-first throughout** means domain, application, REST and persistence are grouped by
@@ -103,42 +106,43 @@ com.vpbank.dcp.auth
 │                                             RequestDigester, InitialPasswordGenerator
 │                                             Other flows: LoginService, TrustedDeviceService
 │
-├── adapter
-│   ├── in
-│   │   └── rest                              ring 3 — Spring MVC REST API
-│   │       ├── common                        ApiEnvelope<T>, ApiError, FieldDetail, InvalidRequestException,
-│   │       │                                 GlobalExceptionHandler, ResponseHeadersFilter,
-│   │       │                                 ErrorCodes (every code), ErrorMessages (localized text by code)
-│   │       ├── controller                    RegistrationController
-│   │       ├── dto
-│   │       │   ├── request                   RegistrationRequest
-│   │       │   └── response                  RegistrationResponse
-│   │       └── mapper                        RegistrationRestMapper
-│   └── out                                   ring 3 — technology clients
-│       ├── persistence
-│       │   ├── common                        AuditedEntity (@MappedSuperclass)
-│       │   ├── adapter                       RegistrationPersistenceAdapter (implements RegistrationRepository)
-│       │   ├── entity                        RegistrationEntity, CustomerAuthenticationEntity
-│       │   ├── repository                    RegistrationJpaRepository,
-│       │   │                                 CustomerAuthenticationJpaRepository
-│       │   └── mapper                        RegistrationPersistenceMapper
-│       ├── customer
-│       │   ├── CustomerHttpAdapter           implements CustomerDirectoryPort
-│       │   ├── dto                           CustomerProfileDto
-│       │   └── mapper                        CustomerProfileMapper
-│       ├── keycloak
-│       │   ├── KeycloakAdminAdapter          implements IdentityProviderPort
-│       │   ├── dto                           TokenResponse, CreateUserRequest, CredentialRequest,
-│       │   │                                 EnableUserRequest
-│       │   └── mapper                        KeycloakUserMapper
-│       └── notification
-│           ├── NotificationHttpAdapter       implements SmsSenderPort
-│           ├── dto                           SmsRequest, SmsResponse
-│           └── mapper                        SmsMapper
-│
-└── config                                    ring 4 — Spring only
-      RestConfiguration (LocaleResolver, MessageSource, filters),
-      JpaConfiguration, RegistrationConfiguration, RegistrationProperties
+└── infrastructure                           technical implementation + composition root
+    ├── adapter
+    │   ├── in
+    │   │   └── rest                              ring 3 — Spring MVC REST API
+    │   │       ├── common                        ApiEnvelope<T>, ApiError, FieldDetail, InvalidRequestException,
+    │   │       │                                 GlobalExceptionHandler, ResponseHeadersFilter,
+    │   │       │                                 ErrorCodes (every code), ErrorMessages (localized text by code)
+    │   │       ├── controller                    RegistrationController
+    │   │       ├── dto
+    │   │       │   ├── request                   RegistrationRequest
+    │   │       │   └── response                  RegistrationResponse
+    │   │       └── mapper                        RegistrationRestMapper
+    │   └── out                                   ring 3 — technology clients
+    │       ├── persistence
+    │       │   ├── common                        AuditedEntity (@MappedSuperclass)
+    │       │   ├── adapter                       RegistrationPersistenceAdapter (implements RegistrationRepository)
+    │       │   ├── entity                        RegistrationEntity, CustomerAuthenticationEntity
+    │       │   ├── repository                    RegistrationJpaRepository,
+    │       │   │                                 CustomerAuthenticationJpaRepository
+    │       │   └── mapper                        RegistrationPersistenceMapper
+    │       ├── customer
+    │       │   ├── CustomerHttpAdapter           implements CustomerDirectoryPort
+    │       │   ├── dto                           CustomerProfileDto
+    │       │   └── mapper                        CustomerProfileMapper
+    │       ├── keycloak
+    │       │   ├── KeycloakAdminAdapter          implements IdentityProviderPort
+    │       │   ├── dto                           TokenResponse, CreateUserRequest, CredentialRequest,
+    │       │   │                                 EnableUserRequest
+    │       │   └── mapper                        KeycloakUserMapper
+    │       └── notification
+    │           ├── NotificationHttpAdapter       implements SmsSenderPort
+    │           ├── dto                           SmsRequest, SmsResponse
+    │           └── mapper                        SmsMapper
+    │
+    └── config                                    ring 4 — Spring only
+          RestConfiguration (LocaleResolver, MessageSource, filters),
+          JpaConfiguration, RegistrationConfiguration, RegistrationProperties
 
 src/main/resources
 ├── messages/errors_vi.properties             error code → Vietnamese text (default language)
@@ -146,16 +150,17 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-25, slices 1–4 implemented):** the tree above plus, in the same role packages,
-login/session (slice 2), password lockout with CAPTCHA (slice 3) and trusted devices (slice 4:
-`TrustedDevice`, `DevicePolicy`, `DevicePlatform`/`DeviceStatus`/`TrustLevel`, restricted
-`SessionStatus.NEED_TRUSTED_DEVICE`, `TrustedDeviceService` called by `LoginService` — the §6.1
-composition is now real — `ListDevicesUseCase`, `TrustedDevicePersistenceAdapter` with
-`DeviceIdProtection` (HMAC lookup + AES-GCM, key IDs), `DeviceController`, the restricted rule in
-`SessionFilter`, Flyway `V3__trusted_device.sql`, `DeviceConfiguration`/`DeviceProperties`).
-`ArchitectureTest` enforces the **[arch]** rules of §4 and §10, including the Login → TrustedDevice
-direction. Slice decisions: `docs/plans/slice-2-login-session.md`, `slice-3-password-lockout.md`,
-`slice-4-trusted-device.md`.
+**Current (2026-10-25, slices 1–4 implemented on this layout):** the source matches the tree
+above — `infrastructure.adapter.in.rest` (`*RestMapper`, `RestConfiguration`),
+`infrastructure.adapter.out.*`, `infrastructure.config`, `application.command` /
+`application.result`, `application.port.in` with use-case interfaces only, and
+`application.port.out.{repository,gateway,model,exception}` with no top-level types at the root.
+`ArchitectureTest` enforces these splits, the ban on `infrastructure` imports from domain and
+application, the controller/mapper contract rule, the outbound-contract independence rule, the
+onion rings, service cycles and the Lombok allow-list. Implemented flows: registration (slice 1),
+login/session (slice 2), password lockout with CAPTCHA (slice 3), trusted devices (slice 4:
+`TrustedDeviceService` called by `LoginService` — the §6.1 composition is real). Slice decisions:
+`docs/plans/slice-2-login-session.md`, `slice-3-password-lockout.md`, `slice-4-trusted-device.md`.
 
 ---
 
@@ -163,11 +168,11 @@ direction. Slice decisions: `docs/plans/slice-2-login-session.md`, `slice-3-pass
 
 | Ring | Package | Contains | May import | Must not import **[arch]** |
 |---|---|---|---|---|
-| Domain | `domain..` | `model` (aggregates, value objects, enums), `exception` | `java..`, `lombok.Builder`, domain types | Spring, Jakarta, `application`, `adapter`, `config` |
-| Application | `application..` | `command`, `result`, `port.in` (HTTP UseCase interfaces only), `port.out.repository`, `port.out.gateway`, `port.out.model`, `port.out.exception`, `service` (including optional plain-Java settings) | domain types for its own business rules, shared domain values, its own outbound ports and helpers, other services and published `command` / `result` contracts (§6.1), `java..`, `javax.crypto..`, `lombok.Builder`; `lombok.RequiredArgsConstructor` and `lombok.NonNull` for constructor injection (§10) | Spring, Jakarta, `adapter`, `config` (including framework properties); bypassing another service's ownership through its repository or internal aggregate |
-| Adapter in | `adapter.in..` | controllers, request/response DTOs, REST mappers, envelope, error handler, filters | `application.port.in`, `application.command`, `application.result`, domain values for REST mapping only, Spring MVC, Jakarta Validation | `adapter.out..`, JPA entities, `application..service`; controllers also follow the narrower rule below |
-| Adapter out | `adapter.out..` | JPA entities + Spring Data repositories + persistence adapter; HTTP clients + wire DTOs + adapter | `application..port.out`, `domain..`, Spring Data / JPA / RestClient | `adapter.in..`, another `adapter.out.<x>` package, `application..service` |
-| Config | `config` | `@Configuration`, `@ConfigurationProperties` | everything | business logic (no `if` on business data) |
+| Domain | `domain..` | `model` (aggregates, value objects, enums), `exception` | `java..`, `lombok.Builder`, domain types | Spring, Jakarta, `application`, `infrastructure..` |
+| Application | `application..` | `command`, `result`, `port.in` (HTTP UseCase interfaces only), `port.out.repository`, `port.out.gateway`, `port.out.model`, `port.out.exception`, `service` (including optional plain-Java settings) | domain types for its own business rules, shared domain values, its own outbound ports and helpers, other services and published `command` / `result` contracts (§6.1), `java..`, `javax.crypto..`, `lombok.Builder`; `lombok.RequiredArgsConstructor` and `lombok.NonNull` for constructor injection (§10) | Spring, Jakarta, `infrastructure..` (including framework properties); bypassing another service's ownership through its repository or internal aggregate |
+| Adapter in | `infrastructure.adapter.in..` | controllers, request/response DTOs, REST mappers, envelope, error handler, filters | `application.port.in`, `application.command`, `application.result`, domain values for REST mapping only, Spring MVC, Jakarta Validation | `infrastructure.adapter.out..`, JPA entities, `application..service`; controllers also follow the narrower rule below |
+| Adapter out | `infrastructure.adapter.out..` | JPA entities + Spring Data repositories + persistence adapter; HTTP clients + wire DTOs + adapter | `application..port.out`, `domain..`, Spring Data / JPA / RestClient | `infrastructure.adapter.in..`, another `infrastructure.adapter.out.<x>` package, `application..service` |
+| Config | `infrastructure.config` | `@Configuration`, `@ConfigurationProperties` | everything | business logic (no `if` on business data) |
 
 Additional **[arch]** rules:
 
@@ -179,12 +184,12 @@ Additional **[arch]** rules:
   becomes a bean only when it needs a dependency.
 - **[arch]** A controller depends only on `application.port.in`, `application.command`,
   `application.result`, REST `dto`/`mapper`,
-  `adapter.in.rest.common` and Spring MVC — never on `domain..model`, `port.out`, `service`
+  `infrastructure.adapter.in.rest.common` and Spring MVC — never on `domain..model`, `port.out`, `service`
   or entities.
 - A class whose name ends in `Request` or `Response` lives in a `dto` package (REST or partner).
 - A class whose name ends in `Mapper` lives in a `mapper` package and is `final`; static methods
   unless it needs a dependency such as `ErrorMessages`, then an instance created in config.
-- A class whose name ends in `Entity` lives in `adapter.out.persistence..entity`.
+- A class whose name ends in `Entity` lives in `infrastructure.adapter.out.persistence..entity`.
 - A class whose name ends in `UseCase` lives in `application.port.in`. Storage interfaces
   (`...Repository`, `...Store`) live in `application.port.out.repository`; other adapter
   capability interfaces (`...Port`, generators, crypto capabilities) live in
@@ -202,6 +207,9 @@ Additional **[arch]** rules:
 - Domain, application, REST and persistence use role packages only. A capability denotes
   logical business ownership, not a package. Service ownership rules are reviewed at class
   and method level; shared role packages do not enforce those rules by themselves.
+- All adapters live under `infrastructure.adapter`; framework wiring/properties live under
+  `infrastructure.config`. Core-owned ports stay under `application.port`. No domain or
+  application dependency on any `infrastructure` type is allowed.
 - Lombok allow-list, see §10.
 
 ---
@@ -223,17 +231,17 @@ Additional **[arch]** rules:
 | Non-storage capability supplied by an adapter | `application.port.out.gateway` | interface such as `IdentityProviderPort`, `TokenEnvelopeSealer` or `CaptchaGenerator`; a gateway need not make an HTTP call |
 | Outbound-only input/output data | `application.port.out.model` | immutable application-owned contract such as `NewIdentityUser`, `CustomerProfile` or `StoredSession`; no provider wire DTOs or entities; group parameters only when cohesive |
 | Dependency failure to distinguish | `application.port.out.exception` | `RepositoryUnavailableException`, `PartnerUnavailableException`, `InvalidEncryptionKeyException`; no vendor exception types leaked into application |
-| HTTP entry point | `adapter.in.rest.controller` | controller invokes an inbound UseCase, never a concrete service |
-| HTTP body in | `adapter.in.rest.dto.request` | `record` with Jakarta Validation; strings only; `toString` redacted |
-| HTTP body out | `adapter.in.rest.dto.response` | `record`; strings and primitives only |
-| Request → command, result → `ResponseEntity` | `adapter.in.rest.mapper` | `final class XxxRestMapper` with `toCommand`, `toResponse`; static unless it needs a dependency (`ErrorMessages`), then created in config |
-| Table row | `adapter.out.persistence.entity` | JPA class, see §8 |
-| Query | `adapter.out.persistence.repository` | `interface extends JpaRepository`, derived queries, `@Lock` where needed |
-| Entity ↔ domain | `adapter.out.persistence.mapper` | `final class XxxPersistenceMapper` static `toEntity`, `toDomain`, `apply(entity, domain)` |
-| Port implementation over JPA | `adapter.out.persistence.adapter` | `@Transactional` class; translates Spring exceptions into port exceptions/results |
-| Partner JSON | `adapter.out.<partner>.dto` | `record`s named after the partner's payloads; Lombok `@Builder` allowed |
-| Partner JSON ↔ port value types | `adapter.out.<partner>.mapper` | `final class` static methods |
-| Bean wiring and framework properties | `config` | one `XxxConfiguration` per capability; `XxxProperties` as validated records; maps to plain-Java settings or a scalar before injection into application (§12) |
+| HTTP entry point | `infrastructure.adapter.in.rest.controller` | controller invokes an inbound UseCase, never a concrete service |
+| HTTP body in | `infrastructure.adapter.in.rest.dto.request` | `record` with Jakarta Validation; strings only; `toString` redacted |
+| HTTP body out | `infrastructure.adapter.in.rest.dto.response` | `record`; strings and primitives only |
+| Request → command, result → `ResponseEntity` | `infrastructure.adapter.in.rest.mapper` | `final class XxxRestMapper` with `toCommand`, `toResponse`; static unless it needs a dependency (`ErrorMessages`), then created in config |
+| Table row | `infrastructure.adapter.out.persistence.entity` | JPA class, see §8 |
+| Query | `infrastructure.adapter.out.persistence.repository` | `interface extends JpaRepository`, derived queries, `@Lock` where needed |
+| Entity ↔ domain | `infrastructure.adapter.out.persistence.mapper` | `final class XxxPersistenceMapper` static `toEntity`, `toDomain`, `apply(entity, domain)` |
+| Port implementation over JPA | `infrastructure.adapter.out.persistence.adapter` | `@Transactional` class; translates Spring exceptions into port exceptions/results |
+| Partner JSON | `infrastructure.adapter.out.<partner>.dto` | `record`s named after the partner's payloads; Lombok `@Builder` allowed |
+| Partner JSON ↔ port value types | `infrastructure.adapter.out.<partner>.mapper` | `final class` static methods |
+| Bean wiring and framework properties | `infrastructure.config` | one `XxxConfiguration` per capability; `XxxProperties` as validated records; maps to plain-Java settings or a scalar before injection into application (§12) |
 
 ### 5.1 Service commands versus outbound contract models
 
@@ -244,7 +252,7 @@ RegisterCustomerCommand                 application.command: perform the registr
   → RegisterCustomerService             application.service: validate and coordinate its steps
       → NewIdentityUser                 application.port.out.model: data for one identity-provider step
       → IdentityProviderPort            application.port.out.gateway: request that dependency capability
-      → CreateUserRequest               adapter.out.keycloak.dto: provider HTTP representation
+      → CreateUserRequest               infrastructure.adapter.out.keycloak.dto: provider HTTP representation
 ```
 
 - Use `...Command` for inputs to application business operations, whether invoked through
@@ -270,7 +278,7 @@ RegisterCustomerCommand                 application.command: perform the registr
 ```text
 POST /internal/v1/callback/authentication-creation
   │
-  ▼ adapter.in.rest.controller.RegistrationController
+  ▼ infrastructure.adapter.in.rest.controller.RegistrationController
   │   @Valid RegistrationRequest (dto.request)          ← 400 REQUEST_REJECTED if invalid
   │   RegistrationRestMapper.toCommand(request)          ← builds CustomerId, UserName, PhoneNumber, Email
   ▼ application.port.in.RegisterCustomerUseCase.register(command)
@@ -289,7 +297,7 @@ POST /internal/v1/callback/authentication-creation
   │   registrations.complete(reg.complete())             one DB transaction: identity row + READY
   │   → RegisterCustomerResult.Ready / IdentityConflict / ProfileIncomplete / Unavailable
   ▼
-  adapter.in.rest.mapper.RegistrationRestMapper.toResponse(result)
+  infrastructure.adapter.in.rest.mapper.RegistrationRestMapper.toResponse(result)
       Ready(created=true)  → 201 {success:true, data:{requestId, customerId, userName, state:"READY"}}
       Ready(created=false) → 200 same body
       IdentityConflict     → 409 IDENTITY_CONFLICT
@@ -298,7 +306,7 @@ POST /internal/v1/callback/authentication-creation
 ```
 
 Reading rule: a reviewer reads **controller → mapper → service → domain → adapter** and never
-needs to open `config` to understand behaviour.
+needs to open `infrastructure.config` to understand behaviour.
 
 ### 6.1 Calls between services in the same application
 
@@ -309,12 +317,12 @@ capability's service when it needs that capability's business operations.
 Login → Trusted Device as implemented in slice 4 (`LoginService` → `TrustedDeviceService.routeAfterPassword`):
 
 ```text
-LoginController                         adapter.in.rest.controller
+LoginController                         infrastructure.adapter.in.rest.controller
   → LoginUseCase                        application.port.in
   → LoginService                        application.service
       → TrustedDeviceService            application.service
           → TrustedDeviceRepository     application.port.out.repository
-          → TrustedDevicePersistenceAdapter  adapter.out.persistence.adapter
+          → TrustedDevicePersistenceAdapter  infrastructure.adapter.out.persistence.adapter
           → DB
 ```
 
@@ -349,7 +357,7 @@ class/method contract even though the classes share role packages.
 
 | # | Pattern | Why | Where |
 |---|---|---|---|
-| 1 | Ports & Adapters | technology swap and isolated tests | `port.out` interfaces, `adapter.out` implementations |
+| 1 | Ports & Adapters | technology swap and isolated tests | `port.out` interfaces, `infrastructure.adapter.out` implementations |
 | 2 | Inbound UseCase for HTTP entry | the controller depends on an entry contract; internal service calls use classes without an interface per method | `port.in`, `service` |
 | 3 | Command / Result objects | no long parameter lists; outcomes are explicit and exhaustive (`switch` on sealed type) | `application.command`, `application.result` |
 | 4 | Sealed results, not business exceptions | a conflict is a normal answer, not a stack trace; the compiler checks every case is handled | `application.result`, REST mapper |
@@ -357,8 +365,8 @@ class/method contract even though the classes share role packages.
 | 6 | Compare-and-set versioning | two concurrent calls never both advance a row; `@Version` in JPA, the domain carries the expected version | aggregate + persistence adapter |
 | 7 | Mapper per adapter | wire/table shapes never leak into domain; each mapping is a table a reviewer can read; static unless it needs a dependency (e.g. `ErrorMessages`) | `mapper` packages |
 | 8 | Transaction at the adapter | no SQL transaction spans an HTTP call to a partner; services stay plain classes | `@Transactional` on persistence adapters only |
-| 9 | Configuration per capability | the whole object graph of one feature is one file; feature flag in one place | `config.XxxConfiguration` |
-| 10 | Envelope + global error handler | one response shape; infrastructure errors mapped once | `adapter.in.rest.common` |
+| 9 | Configuration per capability | the whole object graph of one feature is one file; feature flag in one place | `infrastructure.config.XxxConfiguration` |
+| 10 | Envelope + global error handler | one response shape; infrastructure errors mapped once | `infrastructure.adapter.in.rest.common` |
 | 11 | Value objects | validate once, carry meaning in signatures (`UserName`, not `String`) | `domain.model` |
 | 12 | ArchUnit guard | executable checks guard implemented rules; new targets need explicit test updates before enforcement can be claimed | `ArchitectureTest` |
 | 13 | Direct service composition | reuse the owning capability's business operations without a forwarding interface or HTTP call | `application.service` (§6.1) |
@@ -410,7 +418,7 @@ public class RegistrationEntity extends AuditedEntity {
   a rolled-back exception. A lost race on the UNIQUE key is `RepositoryUnavailableException`
   → 503, and the row stays for reconciliation — the same policy as any unknown outcome.
 - `@EnableJpaRepositories` and `@EntityScan` explicitly select
-  `adapter.out.persistence.repository` and `adapter.out.persistence.entity`, respectively.
+  `infrastructure.adapter.out.persistence.repository` and `infrastructure.adapter.out.persistence.entity`, respectively.
   New capability types go into these shared role packages; no capability scan package is added.
 - Time columns are `DATETIME(6)` mapped to `Instant`; UUIDs are `BINARY(16)`.
 
@@ -421,7 +429,7 @@ public class RegistrationEntity extends AuditedEntity {
 | Source | Java type | Handled in | HTTP |
 |---|---|---|---|
 | Invalid request body / field | `MethodArgumentNotValidException`, `HttpMessageNotReadableException` | `GlobalExceptionHandler` | 400 `REQUEST_REJECTED` with sorted field details (never values) |
-| Value object refused in a REST mapper | `InvalidRequestException` (`adapter.in.rest.common`) | `GlobalExceptionHandler` | 400 `REQUEST_REJECTED` |
+| Value object refused in a REST mapper | `InvalidRequestException` (`infrastructure.adapter.in.rest.common`) | `GlobalExceptionHandler` | 400 `REQUEST_REJECTED` |
 | Business outcome | sealed `XxxResult` | REST mapper (`switch`) | 200 / 201 / 409 … per contract |
 | Database down or race lost | `RepositoryUnavailableException` | service → `Unavailable` result, or handler if thrown outside a use case | 503 |
 | Partner down / timeout / unexpected status | `PartnerUnavailableException` | service → `Unavailable` result | 503 (capability-specific code, e.g. `ACCOUNT_CREATION_UNAVAILABLE`) |
@@ -445,7 +453,7 @@ The server is the only source of user-facing error text. The app shows `error.me
   (same key set in all files; every code used in code exists in the catalogue).
 - **Parameters**: `{0}`-style `MessageFormat` arguments for texts that carry numbers
   (e.g. remaining attempts); never a value the customer typed.
-- **Where**: `adapter.in.rest.common.ErrorMessages` wraps Spring `MessageSource` and resolves
+- **Where**: `infrastructure.adapter.in.rest.common.ErrorMessages` wraps Spring `MessageSource` and resolves
   `code` → text for `LocaleContextHolder.getLocale()`. REST mappers call
   `errors.failure(status, code, args...)` and no longer hold English text. A mapper therefore
   has a dependency and is an **instance created in config**, injected into its controller
@@ -525,7 +533,7 @@ architecture-test updates; this documentation update does not enable them in sou
 | Outbound port | `<Noun>Port` or capability name in `port.out.gateway`; `<Noun>Repository` / `<Noun>Store` in `port.out.repository` | `IdentityProviderPort`, `TokenEnvelopeSealer`, `RegistrationRepository`, `SessionStore` |
 | Outbound model / exception | meaningful contract noun in `port.out.model`; distinguished dependency failure in `port.out.exception` | `NewIdentityUser`, `CustomerProfile`, `PartnerUnavailableException` |
 | Adapter | `<Tech><Noun>Adapter` | `KeycloakAdminAdapter`, `RegistrationPersistenceAdapter`, `ValkeySessionAdapter` |
-| Servlet filter | `<Noun>Filter`, in `adapter.in.rest.common`; resolves its own locale and writes the envelope itself | `SessionFilter` |
+| Servlet filter | `<Noun>Filter`, in `infrastructure.adapter.in.rest.common`; resolves its own locale and writes the envelope itself | `SessionFilter` |
 | JPA entity / repository | `<Noun>Entity`, `<Noun>JpaRepository` | `RegistrationEntity` |
 | REST DTO | `<Noun>Request`, `<Noun>Response` | `RegistrationRequest` |
 | Mapper | `<Noun><Layer>Mapper` | `RegistrationRestMapper`, `RegistrationPersistenceMapper` |
@@ -544,7 +552,7 @@ and updates; `Commands`/`Queries` interfaces and an interface per method are not
 
 ## 12. Configuration and wiring
 
-- Business classes carry **no** Spring annotations. `config.<Capability>Configuration`
+- Business classes carry **no** Spring annotations. `infrastructure.config.<Capability>Configuration`
   creates them with `@Bean`, so the object graph of a feature is readable in one file.
 - For cross-capability calls, inject the owning service class through the caller's
   constructor, e.g. `LoginService(TrustedDeviceService trustedDevices, ...)`. Expose the
@@ -555,7 +563,7 @@ and updates; `Commands`/`Queries` interfaces and an interface per method are not
 - Each capability has a feature flag (`auth.<capability>.enabled`, default `false`) on its
   configuration class via `@ConditionalOnProperty`; off means no beans, no endpoint.
 - Framework properties are validated records (`@ConfigurationProperties` + `@Validated`)
-  under `config`; their `toString` hides secrets. Config owns property existence, bounds
+  under `infrastructure.config`; their `toString` hides secrets. Config owns property existence, bounds
   and cross-setting startup checks. A bad setting stops startup and names the property,
   never its value. This includes `requestLifetime > 0`; a service does not repeat that check.
 - Application services do not import `RegistrationProperties` or other framework config
@@ -566,7 +574,7 @@ and updates; `Commands`/`Queries` interfaces and an interface per method are not
   maps them into an immutable plain-Java `RegistrationSettings` in `application.service`.
   The service reads `settings.requestLifetime()`. Do not create a one-field settings wrapper
   merely to shorten a constructor, or include collaborators, partner URLs or transport
-  credentials in application settings. Configuration mechanics remain in `config`.
+  credentials in application settings. Configuration mechanics remain in `infrastructure.config`.
 - `RestConfiguration` owns the `LocaleResolver` (Accept-Language, supported `vi`/`en`, default
   `vi`), the `MessageSource` for `messages/errors` and validation, and the response filters.
 - Partner HTTP clients: one `RestClient` per partner, built in config with connect/read
@@ -581,12 +589,12 @@ and updates; `Commands`/`Queries` interfaces and an interface per method are not
 | `domain` | unit | JUnit, AssertJ | every legal and illegal transition, value validation, redaction |
 | `application.service` | unit | Mockito ports and called capability services + in-memory repository double | flow order, published cross-capability outcomes, each failure leaves the right state, retries never call partners blindly |
 | `mapper` | unit | JUnit | round trips, status/code table |
-| `adapter.in.rest` | slice | `@WebMvcTest` with a `@MockitoBean` use case, `RestConfiguration` imported | envelope, headers, validation 400 details, status table, Accept-Language |
-| `adapter.out.persistence` | integration | `@DataJpaTest` + Testcontainers MySQL 8.4 + Flyway | schema validation, unique keys, CAS, transactions |
-| `adapter.out.<partner>` | unit | `MockRestServiceServer` | request shape, status mapping, timeout → unavailable |
-| `config` | slice | `ApplicationContextRunner` | flag off = no beans; invalid values or missing required settings fail startup naming the key; validated properties map to the correct scalar/plain-Java settings |
+| `infrastructure.adapter.in.rest` | slice | `@WebMvcTest` with a `@MockitoBean` use case, `RestConfiguration` imported | envelope, headers, validation 400 details, status table, Accept-Language |
+| `infrastructure.adapter.out.persistence` | integration | `@DataJpaTest` + Testcontainers MySQL 8.4 + Flyway | schema validation, unique keys, CAS, transactions |
+| `infrastructure.adapter.out.<partner>` | unit | `MockRestServiceServer` | request shape, status mapping, timeout → unavailable |
+| `infrastructure.config` | slice | `ApplicationContextRunner` | flag off = no beans; invalid values or missing required settings fail startup naming the key; validated properties map to the correct scalar/plain-Java settings |
 | whole app | integration | `@SpringBootTest` + `@AutoConfigureMockMvc` + Testcontainers MySQL, the three partner **ports** replaced by `@MockitoBean` (partner HTTP is already proven by the adapter tests) | boot with Flyway + JPA validation, REST → use case → JPA → database, retry answered from the database |
-| rules | static | ArchUnit | implemented §4, §10 and naming rules; REST names, command/result separation, outbound role packages, layer boundaries and service cycles require future test updates |
+| rules | static | ArchUnit | implemented §4, §10 and naming rules; infrastructure paths, REST names, command/result separation, outbound role packages, layer boundaries and service cycles require future test updates |
 
 Conventions: a test class sits in the same package as the class under test; names read as
 sentences (`aRetryAfterReadyReturnsTheSameRequestWithoutCallingAnyone`); tests needing Docker
@@ -602,6 +610,9 @@ contracts without importing services or outbound ports. Check outbound top-level
 in `repository`, `gateway`, `model` or `exception`; outbound contracts must not depend on
 service commands/results or implementations. REST package/mapper/config renames
 also need explicit architecture-test updates; Spring's `@WebMvcTest` annotation keeps its name.
+For infrastructure grouping, verify adapters/config use the new parent and domain/application
+have no imports from `infrastructure`. Existing port ownership and runtime call order stay
+unchanged; the parent package is not an additional workflow component.
 Constructor-policy implementation checks must preserve required-dependency null checks,
 allow the annotations in §10, and keep framework properties out of application. Tests for
 configuration bounds (such as a zero/negative request lifetime) belong at startup binding/
@@ -637,15 +648,16 @@ requirements, not executed test results here.
    their published entry points (§6.1), without cycles. Test with mocked ports/called services
    and an in-memory repository double. Use §10 for constructors; preserve required null checks.
 6. Flyway `V<n>__<phase>.sql` copied from the design phase file, unchanged.
-7. `adapter.out.persistence`: add types to `entity`, `repository`, `mapper`, `adapter` by role;
+7. `infrastructure.adapter.out.persistence`: add types to `entity`, `repository`, `mapper`, `adapter` by role;
    no capability subpackage. Verify with `@DataJpaTest` IT.
-8. `adapter.out.<partner>` if a new partner: client, dto, mapper, `MockRestServiceServer` test.
-9. `adapter.in.rest`: add types to `controller`, `dto.request`, `dto.response`, `mapper` by role;
+8. `infrastructure.adapter.out.<partner>` if a new partner: client, dto, mapper, `MockRestServiceServer` test.
+9. `infrastructure.adapter.in.rest`: add types to `controller`, `dto.request`, `dto.response`, `mapper` by role;
    controller calls an inbound UseCase. Verify with `@WebMvcTest`.
-10. `config.<Cap>Configuration` + `<Cap>Properties` with flag off by default; validate settings
+10. `infrastructure.config.<Cap>Configuration` + `<Cap>Properties` with flag off by default; validate settings
     before injection, map a scalar or optional plain-Java settings group (§12); context-runner test.
 11. Update `ArchitectureTest` for role-only packages, layer boundaries and service dependency
-    cycles in the implementation slice. Review business ownership at class/method level.
+    cycles in the implementation slice, including the `infrastructure` parent and the ban
+    on its imports in domain/application. Review business ownership at class/method level.
     Verify entities/repositories are covered by the existing explicit role-package scans.
 12. README: status, settings table, open gaps. ADR if a new technology decision was made.
 
@@ -694,7 +706,7 @@ public interface RegistrationRepository {
     CompleteResult complete(Registration completed);        // identity row + READY, one transaction
 }
 
-// adapter.out.persistence.adapter — translates Spring exceptions; owns the one two-table transaction
+// infrastructure.adapter.out.persistence.adapter — translates Spring exceptions; owns the one two-table transaction
 @RequiredArgsConstructor
 public class RegistrationPersistenceAdapter implements RegistrationRepository {
     @NonNull private final RegistrationJpaRepository registrations;
@@ -721,7 +733,7 @@ public class RegistrationPersistenceAdapter implements RegistrationRepository {
     public CompleteResult complete(Registration completed) { … }
 }
 
-// adapter.in.rest.controller — a controller is glue: map in, call the use case, map out
+// infrastructure.adapter.in.rest.controller — a controller is glue: map in, call the use case, map out
 @RestController
 @RequiredArgsConstructor
 public class RegistrationController {
@@ -737,7 +749,7 @@ public class RegistrationController {
     }
 }
 
-// adapter.in.rest.mapper — an instance because the text comes from ErrorMessages (§9.1)
+// infrastructure.adapter.in.rest.mapper — an instance because the text comes from ErrorMessages (§9.1)
 @RequiredArgsConstructor
 public final class RegistrationRestMapper {
     @NonNull private final ErrorMessages errors;
@@ -783,7 +795,8 @@ public final class RegistrationRestMapper {
 | 2026-10-25 | Inbound use-case interfaces for controllers | HTTP entry contracts remain separate; internal calls use service classes | controller calls the service class; interface per internal method |
 | 2026-10-25 | Separate application operation contracts | `application.port.in` holds UseCase interfaces only; commands/input values go to `application.command`, results/output values to `application.result`; outbound-specific contracts stay with `port.out` | commands/results mixed with inbound interfaces; application HTTP DTOs |
 | 2026-10-25 | Outbound contracts grouped by role | `port.out.repository` and `gateway` hold interfaces, `model` holds standalone dependency input/output values, `exception` holds distinguished dependency failures; service commands remain separate | flat outbound package; business subpackages; duplicate commands or forwarding payload wrappers |
-| 2026-10-25 | REST naming for the HTTP inbound adapter | `adapter.in.rest`, `*RestMapper` and `RestConfiguration` describe the supported API surface | `adapter.in.web`, `*WebMapper` and `WebConfiguration` as target names |
+| 2026-10-25 | REST naming for the HTTP inbound adapter | `infrastructure.adapter.in.rest`, `*RestMapper` and `RestConfiguration` describe the supported API surface | `infrastructure.adapter.in.web`, `*WebMapper` and `WebConfiguration` as target names |
+| 2026-10-25 | Common infrastructure parent | `infrastructure.adapter` holds technical adapters and `infrastructure.config` assembles them; domain/application never import infrastructure; ports remain application-owned | root adapter/config packages; moving core ports into infrastructure; an extra runtime layer |
 | 2026-10-25 | Direct service calls between capabilities | the owning service exposes cohesive business operations through constructor injection and published commands/results; no cycles | calls through another capability's repository; forwarding interfaces; internal HTTP hops |
 | 2026-10-25 | Role-only layer-first packages throughout | domain/application/rest/persistence group by role; class names and contracts express business ownership; supersedes the earlier mixed capability/role layout | business subpackages in domain/application/rest/persistence; a separate domain.shared package |
 | 2026-10-25 | Cohesive service operations without required CQRS | an operation may read, validate, update and return data; the owning capability keeps its rules | mandatory Commands/Queries interfaces or a UseCase for every method |

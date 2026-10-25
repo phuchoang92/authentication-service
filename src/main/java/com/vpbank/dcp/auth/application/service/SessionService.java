@@ -1,17 +1,17 @@
 package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
-import com.vpbank.dcp.auth.application.port.in.ExtendSessionCommand;
-import com.vpbank.dcp.auth.application.port.in.ExtendSessionResult;
+import com.vpbank.dcp.auth.application.command.ExtendSessionCommand;
+import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
 import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
-import com.vpbank.dcp.auth.application.port.in.LogoutCommand;
-import com.vpbank.dcp.auth.application.port.in.LogoutResult;
+import com.vpbank.dcp.auth.application.command.LogoutCommand;
+import com.vpbank.dcp.auth.application.result.LogoutResult;
 import com.vpbank.dcp.auth.application.port.in.LogoutUseCase;
-import com.vpbank.dcp.auth.application.port.in.SessionSummary;
-import com.vpbank.dcp.auth.application.port.out.RepositoryUnavailableException;
-import com.vpbank.dcp.auth.application.port.out.SessionLookup;
-import com.vpbank.dcp.auth.application.port.out.SessionStore;
-import com.vpbank.dcp.auth.application.port.out.StoredSession;
+import com.vpbank.dcp.auth.application.result.SessionSummary;
+import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
+import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
+import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;

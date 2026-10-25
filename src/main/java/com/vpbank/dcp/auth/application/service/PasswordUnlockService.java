@@ -1,9 +1,9 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.in.UnlockPasswordResult;
+import com.vpbank.dcp.auth.application.result.UnlockPasswordResult;
 import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
-import com.vpbank.dcp.auth.application.port.out.CustomerAuthenticationRepository;
-import com.vpbank.dcp.auth.application.port.out.RepositoryUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
+import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;

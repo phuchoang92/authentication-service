@@ -1,8 +1,8 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.out.CustomerAuthentication;
-import com.vpbank.dcp.auth.application.port.out.CustomerAuthenticationRepository;
-import com.vpbank.dcp.auth.application.port.out.RepositoryUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
+import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
+import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
 import com.vpbank.dcp.auth.domain.model.UserName;

@@ -1,7 +1,7 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.out.RepositoryUnavailableException;
-import com.vpbank.dcp.auth.application.port.out.TrustedDeviceRepository;
+import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.domain.model.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;

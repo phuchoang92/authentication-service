@@ -1,12 +1,12 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.in.CaptchaChallenge;
+import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
 import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
-import com.vpbank.dcp.auth.application.port.out.CaptchaGenerator;
-import com.vpbank.dcp.auth.application.port.out.CaptchaGenerator.GeneratedCaptcha;
-import com.vpbank.dcp.auth.application.port.out.CaptchaStore;
-import com.vpbank.dcp.auth.application.port.out.CustomerAuthentication;
-import com.vpbank.dcp.auth.application.port.out.CustomerAuthenticationRepository;
+import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator;
+import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator.GeneratedCaptcha;
+import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
+import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
+import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.UserName;

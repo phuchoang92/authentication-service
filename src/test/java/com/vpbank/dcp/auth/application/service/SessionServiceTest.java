@@ -2,10 +2,10 @@ package com.vpbank.dcp.auth.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.auth.application.port.in.ExtendSessionCommand;
-import com.vpbank.dcp.auth.application.port.in.ExtendSessionResult;
-import com.vpbank.dcp.auth.application.port.in.LogoutCommand;
-import com.vpbank.dcp.auth.application.port.in.LogoutResult;
+import com.vpbank.dcp.auth.application.command.ExtendSessionCommand;
+import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
+import com.vpbank.dcp.auth.application.command.LogoutCommand;
+import com.vpbank.dcp.auth.application.result.LogoutResult;
 import com.vpbank.dcp.auth.domain.model.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;

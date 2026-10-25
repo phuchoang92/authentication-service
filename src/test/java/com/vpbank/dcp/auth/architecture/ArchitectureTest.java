@@ -18,6 +18,17 @@ import org.junit.jupiter.api.Test;
 /** The [arch] rules of ARCHITECTURE.md, checked on the production classes. */
 class ArchitectureTest {
     private static final String ROOT = "com.vpbank.dcp.auth";
+    private static final String DOMAIN = ROOT + ".domain..";
+    private static final String APPLICATION = ROOT + ".application..";
+    private static final String COMMAND = ROOT + ".application.command";
+    private static final String RESULT = ROOT + ".application.result";
+    private static final String PORT_IN = ROOT + ".application.port.in";
+    private static final String PORT_OUT = ROOT + ".application.port.out..";
+    private static final String SERVICE = ROOT + ".application.service";
+    private static final String INFRA = ROOT + ".infrastructure..";
+    private static final String REST = ROOT + ".infrastructure.adapter.in.rest";
+    private static final String OUT = ROOT + ".infrastructure.adapter.out";
+    private static final String CONFIG = ROOT + ".infrastructure.config";
 
     private final JavaClasses production = new ClassFileImporter()
             .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
@@ -26,50 +37,101 @@ class ArchitectureTest {
     @Test
     void ringsDependInwardOnly() {
         Architectures.onionArchitecture()
-                .domainModels(ROOT + ".domain..")
-                .applicationServices(ROOT + ".application..")
-                .adapter("web", ROOT + ".adapter.in.web..")
-                .adapter("persistence", ROOT + ".adapter.out.persistence..")
-                .adapter("customer", ROOT + ".adapter.out.customer..")
-                .adapter("keycloak", ROOT + ".adapter.out.keycloak..")
-                .adapter("notification", ROOT + ".adapter.out.notification..")
-                .adapter("valkey", ROOT + ".adapter.out.valkey..")
-                .adapter("jose", ROOT + ".adapter.out.jose..")
-                .adapter("captcha", ROOT + ".adapter.out.captcha..")
+                .domainModels(DOMAIN)
+                .applicationServices(APPLICATION)
+                .adapter("rest", REST + "..")
+                .adapter("persistence", OUT + ".persistence..")
+                .adapter("customer", OUT + ".customer..")
+                .adapter("keycloak", OUT + ".keycloak..")
+                .adapter("notification", OUT + ".notification..")
+                .adapter("valkey", OUT + ".valkey..")
+                .adapter("jose", OUT + ".jose..")
+                .adapter("captcha", OUT + ".captcha..")
                 .withOptionalLayers(true)
                 // config wires every ring; it is the only package allowed to see all of them
-                .ignoreDependency(JavaClass.Predicates.resideInAPackage(ROOT + ".config.."),
-                        DescribedPredicate.alwaysTrue())
+                .ignoreDependency(JavaClass.Predicates.resideInAPackage(CONFIG + ".."), DescribedPredicate.alwaysTrue())
                 .check(production);
     }
 
     @Test
     void domainKnowsOnlyTheJdkLombokAndItself() {
-        classes().that().resideInAPackage(ROOT + ".domain..")
-                .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "lombok..", ROOT + ".domain..")
+        classes().that().resideInAPackage(DOMAIN)
+                .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "lombok..", DOMAIN)
                 .because("domain holds the rules and knows no technology")
                 .check(production);
     }
 
     @Test
-    void applicationKnowsOnlyDomainAndItself() {
-        classes().that().resideInAPackage(ROOT + ".application..")
-                .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "javax.crypto..", "lombok..",
-                        ROOT + ".domain..", ROOT + ".application..")
+    void applicationKnowsOnlyDomainAndItselfNeverInfrastructure() {
+        classes().that().resideInAPackage(APPLICATION)
+                .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "javax.crypto..", "lombok..", DOMAIN, APPLICATION)
                 .because("use cases drive ports; adapters, Spring and framework properties stay outside")
+                .check(production);
+        noClasses().that().resideInAnyPackage(DOMAIN, APPLICATION)
+                .should().dependOnClassesThat().resideInAPackage(INFRA)
+                .because("infrastructure groups adapters and config; core never imports it")
                 .check(production);
     }
 
     @Test
     void ringsHoldOnlyRolePackages() {
-        onlyPackages(ROOT + ".domain..", ROOT + ".domain.model", ROOT + ".domain.exception");
-        onlyPackages(ROOT + ".application..", ROOT + ".application.port.in", ROOT + ".application.port.out",
-                ROOT + ".application.service");
-        onlyPackages(ROOT + ".adapter.in.web..", ROOT + ".adapter.in.web.common", ROOT + ".adapter.in.web.controller",
-                ROOT + ".adapter.in.web.dto.request", ROOT + ".adapter.in.web.dto.response", ROOT + ".adapter.in.web.mapper");
-        onlyPackages(ROOT + ".adapter.out.persistence..", ROOT + ".adapter.out.persistence.common",
-                ROOT + ".adapter.out.persistence.adapter", ROOT + ".adapter.out.persistence.entity",
-                ROOT + ".adapter.out.persistence.repository", ROOT + ".adapter.out.persistence.mapper");
+        onlyPackages(DOMAIN, ROOT + ".domain.model", ROOT + ".domain.exception");
+        onlyPackages(APPLICATION, COMMAND, RESULT, PORT_IN, ROOT + ".application.port.out.repository",
+                ROOT + ".application.port.out.gateway", ROOT + ".application.port.out.model",
+                ROOT + ".application.port.out.exception", SERVICE);
+        onlyPackages(REST + "..", REST + ".common", REST + ".controller", REST + ".dto.request", REST + ".dto.response",
+                REST + ".mapper");
+        onlyPackages(OUT + ".persistence..", OUT + ".persistence.common", OUT + ".persistence.adapter",
+                OUT + ".persistence.entity", OUT + ".persistence.repository", OUT + ".persistence.mapper");
+        // everything outside the core rings sits under infrastructure (plus the Boot entry point)
+        classes().that().resideOutsideOfPackages(DOMAIN, APPLICATION, INFRA)
+                .should().haveSimpleName("AuthenticationApplication")
+                .because("adapters and config live under infrastructure")
+                .check(production);
+    }
+
+    @Test
+    void inboundContractsAreSplitIntoUseCasesCommandsAndResults() {
+        classes().that().resideInAPackage(PORT_IN).should().beInterfaces()
+                .andShould().haveSimpleNameEndingWith("UseCase")
+                .because("application.port.in holds inbound interfaces only")
+                .check(production);
+        classes().that().resideInAPackage(COMMAND).and().areTopLevelClasses().should().haveSimpleNameEndingWith("Command")
+                .orShould().haveSimpleNameEndingWith("Solution")
+                .because("commands and their input values live in application.command")
+                .check(production);
+        classes().that().resideInAPackage(RESULT).and().areTopLevelClasses().should().haveSimpleNameEndingWith("Result")
+                .orShould().haveSimpleNameEndingWith("Challenge").orShould().haveSimpleNameEndingWith("Summary")
+                .because("results and their output values live in application.result")
+                .check(production);
+        noClasses().that().resideInAnyPackage(COMMAND, RESULT, PORT_IN)
+                .should().dependOnClassesThat().resideInAnyPackage(SERVICE, PORT_OUT)
+                .because("published contracts do not expose services or outbound ports")
+                .check(production);
+    }
+
+    @Test
+    void outboundPortsAreGroupedByRoleAndIndependentOfInboundContracts() {
+        classes().that().resideInAPackage(ROOT + ".application.port.out.repository")
+                .should().beInterfaces().orShould().beNestedClasses()
+                .andShould().haveSimpleNameEndingWith("Repository").orShould().haveSimpleNameEndingWith("Store")
+                .orShould().beNestedClasses()
+                .check(production);
+        classes().that().resideInAPackage(ROOT + ".application.port.out.gateway").and().areTopLevelClasses()
+                .should().beInterfaces()
+                .because("gateways are capability interfaces an adapter implements")
+                .check(production);
+        classes().that().resideInAPackage(ROOT + ".application.port.out.exception")
+                .should().beAssignableTo(RuntimeException.class).andShould().haveSimpleNameEndingWith("Exception")
+                .check(production);
+        classes().that().resideInAPackage(ROOT + ".application.port.out.model").and().areTopLevelClasses()
+                .should().beRecords()
+                .because("outbound models are immutable application-owned contracts")
+                .check(production);
+        noClasses().that().resideInAPackage(PORT_OUT)
+                .should().dependOnClassesThat().resideInAnyPackage(COMMAND, RESULT, PORT_IN, SERVICE)
+                .because("outbound contracts describe a dependency step, never the application operation")
+                .check(production);
     }
 
     @Test
@@ -77,7 +139,7 @@ class ArchitectureTest {
         SlicesRuleDefinition.slices().assignedFrom(new SliceAssignment() {
                     @Override
                     public SliceIdentifier getIdentifierOf(JavaClass javaClass) {
-                        return javaClass.getPackageName().equals(ROOT + ".application.service")
+                        return javaClass.getPackageName().equals(SERVICE)
                                 ? SliceIdentifier.of(javaClass.getSimpleName()) : SliceIdentifier.ignore();
                     }
 
@@ -92,36 +154,40 @@ class ArchitectureTest {
     }
 
     @Test
-    void controllersAreGlue() {
-        classes().that().resideInAPackage(ROOT + ".adapter.in.web.controller")
+    void controllersAndRestMappersAreGlue() {
+        classes().that().resideInAPackage(REST + ".controller")
                 .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "jakarta.validation..", "lombok..",
-                        "org.springframework..", ROOT + ".application.port.in", ROOT + ".adapter.in.web..")
+                        "org.springframework..", PORT_IN, COMMAND, RESULT, REST + "..")
                 .because("a controller maps in, calls the use case and maps out; it decides nothing")
+                .check(production);
+        noClasses().that().resideInAnyPackage(REST + ".controller", REST + ".mapper")
+                .should().dependOnClassesThat().resideInAnyPackage(SERVICE, PORT_OUT)
+                .because("REST never reaches services or outbound ports")
                 .check(production);
     }
 
     @Test
     void namesSayWhereAClassLives() {
         classes().that().haveSimpleNameEndingWith("Request").or().haveSimpleNameEndingWith("Response")
-                .and().resideInAPackage(ROOT + ".adapter.in..")
+                .and().resideInAPackage(REST + "..")
                 .should().resideInAPackage("..dto..").check(production);
         classes().that().haveSimpleNameEndingWith("Mapper")
                 .should().resideInAPackage("..mapper..").andShould().haveModifier(JavaModifier.FINAL)
                 .check(production);
+        classes().that().haveSimpleNameEndingWith("RestMapper").should().resideInAPackage(REST + ".mapper").check(production);
+        noClasses().should().haveSimpleNameEndingWith("WebMapper").check(production);
         classes().that().areAnnotatedWith("jakarta.persistence.Entity")
-                .should().resideInAPackage(ROOT + ".adapter.out.persistence.entity")
+                .should().resideInAPackage(OUT + ".persistence.entity")
                 .andShould().haveSimpleNameEndingWith("Entity")
                 .check(production);
-        classes().that().haveSimpleNameEndingWith("UseCase")
-                .should().resideInAPackage(ROOT + ".application.port.in").check(production);
-        classes().that().haveSimpleNameEndingWith("Port")
-                .should().resideInAPackage(ROOT + ".application.port.out").check(production);
-        classes().that().haveSimpleNameEndingWith("Controller")
-                .should().resideInAPackage(ROOT + ".adapter.in.web.controller").check(production);
-        classes().that().haveSimpleNameEndingWith("Service")
-                .should().resideInAPackage(ROOT + ".application.service").check(production);
-        classes().that().haveSimpleNameEndingWith("Filter")
-                .should().resideInAPackage(ROOT + ".adapter.in.web.common").check(production);
+        classes().that().haveSimpleNameEndingWith("UseCase").should().resideInAPackage(PORT_IN).check(production);
+        classes().that().haveSimpleNameEndingWith("Port").should().resideInAPackage(ROOT + ".application.port.out.gateway")
+                .check(production);
+        classes().that().haveSimpleNameEndingWith("Controller").should().resideInAPackage(REST + ".controller").check(production);
+        classes().that().haveSimpleNameEndingWith("Service").should().resideInAPackage(SERVICE).check(production);
+        classes().that().haveSimpleNameEndingWith("Filter").should().resideInAPackage(REST + ".common").check(production);
+        classes().that().haveSimpleNameEndingWith("Configuration").or().haveSimpleNameEndingWith("Properties")
+                .should().resideInAPackage(CONFIG).check(production);
     }
 
     @Test
@@ -134,7 +200,7 @@ class ArchitectureTest {
                 .because("entities keep named state changes and explicit identity; records already print and compare")
                 .check(production);
         classes().that().areAnnotatedWith("lombok.AllArgsConstructor").or().areAnnotatedWith("lombok.Getter")
-                .should().resideInAnyPackage(ROOT + ".adapter.out.persistence.entity", ROOT + ".adapter.out..dto")
+                .should().resideInAnyPackage(OUT + ".persistence.entity", OUT + ".persistence.common", OUT + "..dto")
                 .allowEmptyShould(true)
                 .because("all-args constructors and getters are for JPA entities and partner DTOs only")
                 .check(production);

@@ -3,7 +3,7 @@ package com.vpbank.dcp.auth.application.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.vpbank.dcp.auth.application.port.in.RegisterCustomerCommand;
+import com.vpbank.dcp.auth.application.command.RegisterCustomerCommand;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.Email;
 import com.vpbank.dcp.auth.domain.model.PhoneNumber;

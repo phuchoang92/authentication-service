@@ -1,6 +1,6 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.in.RegisterCustomerCommand;
+import com.vpbank.dcp.auth.application.command.RegisterCustomerCommand;
 import com.vpbank.dcp.auth.domain.model.RequestDigest;
 
 import java.nio.charset.StandardCharsets;
