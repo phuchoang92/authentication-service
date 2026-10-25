@@ -1,12 +1,12 @@
 # Authentication Service v2 — Code conventions
 
-Status: **approved readability rules, 2026-10-25**. Applies to new and changed v2 Java
+Status: **approved coding conventions, 2026-10-25**. Applies to new and changed v2 Java
 code. This document adds conventions and examples, not a source refactor or evidence of
 formatter, architecture-test or runtime-test enforcement.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) owns packages, dependency direction, constructors,
-Lombok, enums, constants and configuration boundaries. This file owns variable naming
-and the presentation of executable business steps. Shared
+Lombok, enums, constants and configuration boundaries. This file owns variable naming,
+the presentation of executable business steps, and identifier representation at API boundaries. Shared
 [Auth conventions](../docs/authentication-documentation/docs/design-v1/code-conventions.md)
 still apply subject to the user-approved v2 architecture overrides; older package and
 interface examples do not override v2 decisions. API/security/data contracts are unchanged.
@@ -149,7 +149,67 @@ clear. Prefer a loop or named predicate when nested lambdas, ternaries or chaine
 make a business decision difficult to follow. Avoid persistence/partner effects inside
 stream mapping or predicates.
 
-## 5. Keep review and behavior separate
+## 5. Identifiers at API boundaries
+
+Application-facing REST IDs are opaque strings. Clients store them and echo them unchanged;
+they do not generate server-issued IDs or interpret their internal representation.
+
+| Boundary | Representation | Example |
+|---|---|---|
+| REST request/response and ID path/query parameters | `String`, unless an explicit protocol contract requires another format | `requestId`, `enrollmentId`, `captchaId` |
+| Application/domain | validated, meaningful ID types | `RegistrationId`, `EnrollmentId`, `CaptchaId` |
+| Persistence | the approved internal key representation | UUID / MySQL `BINARY(16)` where already selected |
+
+- REST DTOs use `String` for these fields, not `java.util.UUID`. API schemas describe them
+  as strings without `format: uuid` unless UUID formatting is an explicit contract. Typed
+  IDs remain in application/domain signatures; this is not a move to strings everywhere.
+- REST mappers or focused codecs convert between the public string and the typed ID.
+  Decode and validate according to the existing identifier contract, keeping malformed-input
+  handling at the REST boundary. `String` does not mean arbitrary unchecked input. Do not
+  trim, lowercase, reformat or otherwise normalize an opaque ID without a defined contract.
+- Internal decoding may still use UUID parsing for an ID issued in that representation.
+  UUID is an implementation detail of that ID codec, not something clients must parse.
+  Provider-specific request/response formats remain owned by their adapter contracts.
+- UUID already serializes as a JSON string. Changing a DTO field from UUID to `String`
+  alone need not change its wire value or remove its UUID appearance. Preserve currently
+  issued strings; a different encoding, generator or public ID scheme is a separate contract
+  decision, not an incidental naming/formatting edit.
+- Internal UUID keys and `BINARY(16)` storage remain valid. This rule does not authorize
+  schema migrations or exposing IDs that are currently private, such as internal session IDs.
+- Explicitly UUID-based protocol fields, including a selected signed `Idempotency-Key`
+  contract, retain their exact validation and signing rules. They are exceptions to the
+  default opaque server-issued-ID convention, not a reason to type every REST ID as UUID.
+
+For example, the REST response declares a string:
+
+```java
+public record RegistrationResponse(
+        String requestId,
+        String customerId,
+        String userName,
+        String state) {
+}
+```
+
+For a `RegistrationId` currently backed by UUID, its REST mapper can preserve the current
+UUID text while returning a string-typed field:
+
+```java
+String publicRequestId = ready.requestId().value().toString();
+
+RegistrationResponse registrationResponse = new RegistrationResponse(
+        publicRequestId,
+        ready.customerId().value(),
+        ready.userName().value(),
+        "READY");
+```
+
+Here `.value().toString()` explicitly encodes the internal UUID. Do not use an arbitrary
+domain object's `toString()` as an ID codec. Before accepting source changes, verify JSON
+round trips, malformed-input mapping, unchanged existing values and the generated API schema;
+no such implementation changes or runtime checks are performed by this document update.
+
+## 6. Keep review and behavior separate
 
 - Readability edits preserve evaluation order, exception propagation, optional values,
   transaction boundaries, affected-row checks, audit ordering and external code literals.
@@ -170,3 +230,4 @@ Before accepting new or changed code, a reviewer should be able to answer:
 4. Are I/O, mapping, and counter changes visible rather than nested in arguments?
 5. Do locals/abstractions clarify meaning without just moving complexity elsewhere?
 6. Are existing behavior and the actual verification results reported separately?
+7. Are public IDs opaque strings, core IDs typed, and any UUID-specific protocol exceptions explicit?

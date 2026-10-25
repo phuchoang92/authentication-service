@@ -38,10 +38,14 @@ import org.springframework.web.bind.annotation.RestController;
 @ConditionalOnProperty(prefix = "auth.login", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class TrustedDeviceController {
-    @NonNull private final InitEnrollmentUseCase initEnrollmentUseCase;
-    @NonNull private final VerifyEnrollmentUseCase verifyEnrollmentUseCase;
-    @NonNull private final ConfirmEnrollmentUseCase confirmEnrollmentUseCase;
-    @NonNull private final TrustedDeviceRestMapper trustedDeviceRestMapper;
+    @NonNull
+    private final InitEnrollmentUseCase initEnrollmentUseCase;
+    @NonNull
+    private final VerifyEnrollmentUseCase verifyEnrollmentUseCase;
+    @NonNull
+    private final ConfirmEnrollmentUseCase confirmEnrollmentUseCase;
+    @NonNull
+    private final TrustedDeviceRestMapper trustedDeviceRestMapper;
 
     @PostMapping(path = "/api/v1/trusted-device/init", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)

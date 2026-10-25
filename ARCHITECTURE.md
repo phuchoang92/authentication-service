@@ -265,8 +265,8 @@ Additional **[arch]** rules:
 | Outbound-only input/output data | `application.port.out.model` | immutable application-owned contract such as `NewIdentityUser`, `CustomerProfile` or `StoredSession`; no provider wire DTOs or entities; group parameters only when cohesive |
 | Dependency failure to distinguish | `application.port.out.exception` | `RepositoryUnavailableException`, `PartnerUnavailableException`, `InvalidEncryptionKeyException`; no vendor exception types leaked into application |
 | HTTP entry point | `infrastructure.adapter.in.rest.controller` | controller invokes an inbound UseCase, never a concrete service |
-| HTTP body in | `infrastructure.adapter.in.rest.dto.request` | `record` with Jakarta Validation; strings only; `toString` redacted |
-| HTTP body out | `infrastructure.adapter.in.rest.dto.response` | `record`; strings and primitives only |
+| HTTP body in | `infrastructure.adapter.in.rest.dto.request` | `record` with Jakarta Validation; application-facing IDs are opaque strings, not UUID fields; `toString` redacted; see code conventions §5 |
+| HTTP body out | `infrastructure.adapter.in.rest.dto.response` | `record`; strings and primitives only; application-facing IDs are opaque strings, not UUID fields; see code conventions §5 |
 | Request → command, result → `ResponseEntity` | `infrastructure.adapter.in.rest.mapper` | `final class XxxRestMapper` with `toCommand`, `toResponse`; static unless it needs a dependency (`ErrorMessages`), then created in config |
 | Table row | `infrastructure.adapter.out.persistence.entity` | JPA class, see §8 |
 | Query | `infrastructure.adapter.out.persistence.repository` | `interface extends JpaRepository`, derived queries, `@Lock` where needed |
@@ -631,6 +631,11 @@ Follow [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md) for the detailed rules and the
 - These are review conventions, not claimed formatter/ArchUnit enforcement. Formatting
   alone does not establish business, transaction or concurrency correctness.
 
+For ID fields, follow [the API identifier convention](CODE_CONVENTIONS.md#5-identifiers-at-api-boundaries):
+REST uses opaque strings, application/domain keep typed IDs, and persistence may retain
+UUID keys. Existing UUID text values and explicit UUID protocol contracts remain unchanged.
+This is a documentation rule; DTO/schema implementation still needs its own verification.
+
 ---
 
 ## 12. Configuration and wiring
@@ -874,8 +879,9 @@ public final class RegistrationRestMapper {
         return switch (result) {
             case Ready ready -> {
                 HttpStatus responseStatus = ready.created() ? HttpStatus.CREATED : HttpStatus.OK;
+                String publicRequestId = ready.requestId().value().toString();
                 RegistrationResponse registrationResponse = new RegistrationResponse(
-                        ready.requestId().value(),
+                        publicRequestId,
                         ready.customerId().value(),
                         ready.userName().value(),
                         "READY");
