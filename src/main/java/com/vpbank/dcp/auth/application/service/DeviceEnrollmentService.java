@@ -12,6 +12,7 @@ import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableE
 import com.vpbank.dcp.auth.application.port.out.gateway.*;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CreateResult;
+import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.OpenedChallenge;
 import com.vpbank.dcp.auth.application.port.out.model.ServerKeyPair;
@@ -24,19 +25,16 @@ import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
 import com.vpbank.dcp.auth.application.result.VerifyEnrollmentResult;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
+import com.vpbank.dcp.auth.domain.enums.MfaFactor;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.*;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
 /**
  * Device trust from a restricted session (DD 20 §4): init hands the app Ksrv and a challenge sealed
@@ -52,6 +50,8 @@ public final class DeviceEnrollmentService
      * The last wrong answer leaves no attempt; the enrollment is already failed when it is reported.
      */
     private static final int NO_ATTEMPTS_LEFT = 0;
+    /** The primary enrollment asks the customer for FACE alone (DD 20 §4). */
+    private static final List<MfaFactor> FACE_ONLY = List.of(MfaFactor.FACE);
 
     @NonNull
     private final SessionStore sessionStore;
@@ -147,7 +147,7 @@ public final class DeviceEnrollmentService
                     .platform(platform)
                     .serverPublicJwk(serverKeyPair.publicJwk())
                     .serverPrivateJwk(serverKeyPair.privateJwk())
-                    .challengeDigest(digest(challenge))
+                    .challengeDigest(EnrollmentDigests.digest(challenge))
                     .build();
 
             Session sessionWithEnrollment = session.withEnrollment(enrollmentContext);
@@ -210,8 +210,10 @@ public final class DeviceEnrollmentService
                     .customerId(session.customerId())
                     .channel(session.channel())
                     .authOperationId(enrollment.id())
+                    .purpose(enrollment.purpose())
+                    .factors(FACE_ONLY)
                     .notAfter(enrollment.expiresAt())
-                    .contextDigest(contextDigest(enrollment))
+                    .contextDigest(EnrollmentDigests.contextDigest(enrollment))
                     .build();
             CreateResult createResult = mfaTransactionPort.create(mfaTransactionRequest);
 
@@ -286,10 +288,14 @@ public final class DeviceEnrollmentService
             }
             DeviceEnrollment enrollment = openEnrollment.get();
 
-            CheckResult checkResult = mfaTransactionPort.check(
-                    enrollment.mfaTransactionId(),
-                    enrollment.id(),
-                    contextDigest(enrollment));
+            MfaCheckRequest mfaCheckRequest = MfaCheckRequest.builder()
+                    .mfaTransactionId(enrollment.mfaTransactionId())
+                    .authOperationId(enrollment.id())
+                    .purpose(enrollment.purpose())
+                    .factors(FACE_ONLY)
+                    .contextDigest(EnrollmentDigests.contextDigest(enrollment))
+                    .build();
+            CheckResult checkResult = mfaTransactionPort.check(mfaCheckRequest);
 
             return switch (checkResult) {
                 case CheckResult.Pending() -> new ConfirmEnrollmentResult.MfaPending();
@@ -381,28 +387,7 @@ public final class DeviceEnrollmentService
         if (!openedResponse.enrollmentId().equals(enrollment.id())) {
             return false;
         }
-        byte[] answeredDigest = digest(openedResponse.challenge()).getBytes(StandardCharsets.US_ASCII);
-        byte[] expectedDigest = enrollmentContext.challengeDigest().getBytes(StandardCharsets.US_ASCII);
-        return MessageDigest.isEqual(answeredDigest, expectedDigest);
-    }
-
-    /**
-     * What MFA binds the transaction to (DD 20 §5): purpose, customer, channel, operation; recomputed, never stored.
-     */
-    static String contextDigest(DeviceEnrollment enrollment) {
-        String context = MfaTransactionRequest.PURPOSE
-                + ";" + enrollment.customerId().value()
-                + ";" + enrollment.channel().name()
-                + ";" + enrollment.id();
-        return digest(context.getBytes(StandardCharsets.UTF_8));
-    }
-
-    static String digest(byte[] bytes) {
-        try {
-            byte[] sha256 = MessageDigest.getInstance("SHA-256").digest(bytes);
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(sha256);
-        } catch (NoSuchAlgorithmException failure) {
-            throw new IllegalStateException("SHA-256 is not available", failure);
-        }
+        String answeredDigest = EnrollmentDigests.digest(openedResponse.challenge());
+        return EnrollmentDigests.sameDigest(enrollmentContext.challengeDigest(), answeredDigest);
     }
 }

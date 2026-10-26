@@ -29,9 +29,12 @@ class DomainEnumCodesTest {
         assertThat(names(TrustLevel.values()))
                 .containsExactly("NONE", "TRUSTED");
         assertThat(names(EnrollmentPurpose.values()))
-                .containsExactly("TRUST_DEVICE");
+                .containsExactly("TRUST_DEVICE", "TRUST_DEVICE_APPROVAL");
         assertThat(names(EnrollmentState.values()))
-                .containsExactly("KEY_EXCHANGE", "MFA_REQUIRED", "COMPLETED", "FAILED", "EXPIRED");
+                .containsExactly("KEY_EXCHANGE", "MFA_REQUIRED", "WAITING_APPROVAL", "WAITING_AUTHORIZATION",
+                        "COMPLETED", "FAILED", "EXPIRED");
+        assertThat(names(MfaFactor.values()))
+                .containsExactly("FACE", "OTP");
         assertThat(names(PrimaryMode.values()))
                 .containsExactly("DIRECT_PRIMARY", "FACE_CONFIRMED", "OLD_DEVICE_APPROVAL");
     }
@@ -41,7 +44,8 @@ class DomainEnumCodesTest {
         assertThat(Arrays.stream(DeviceStatus.values()).filter(DeviceStatus::live))
                 .containsExactly(DeviceStatus.PENDING, DeviceStatus.ACTIVE, DeviceStatus.SUSPENDED);
         assertThat(Arrays.stream(EnrollmentState.values()).filter(EnrollmentState::open))
-                .containsExactly(EnrollmentState.KEY_EXCHANGE, EnrollmentState.MFA_REQUIRED);
+                .containsExactly(EnrollmentState.KEY_EXCHANGE, EnrollmentState.MFA_REQUIRED,
+                        EnrollmentState.WAITING_APPROVAL, EnrollmentState.WAITING_AUTHORIZATION);
         assertThat(Arrays.stream(SessionStatus.values()).filter(SessionStatus::live))
                 .containsExactly(SessionStatus.ACTIVE, SessionStatus.NEED_TRUSTED_DEVICE);
         assertThat(Arrays.stream(RegistrationState.values()).filter(RegistrationState::finished))

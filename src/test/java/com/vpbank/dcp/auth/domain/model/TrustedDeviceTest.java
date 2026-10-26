@@ -29,6 +29,28 @@ class TrustedDeviceTest {
     }
 
     @Test
+    void aPendingRowIsLiveButNotTrustedUntilTheApprovalIsClaimed() {
+        Instant now = Instant.parse("2026-10-25T10:00:00Z");
+        TrustedDevice pending = TrustedDevice.pending(TrustedDeviceId.random(), new CustomerId("90359"), Channel.MOBILE,
+                new DeviceId("watch-3"), DevicePlatform.IOS, "{watch-key}", now, Duration.ofMinutes(10));
+        assertThat(pending.isPending()).isTrue();
+        assertThat(pending.status().live()).isTrue();
+        assertThat(pending.isTrusted(now)).isFalse();
+        assertThat(pending.trustLevel()).isEqualTo(TrustLevel.NONE);
+        assertThat(pending.trustedAt()).isNull();
+        assertThat(pending.expiresAt()).isEqualTo(now.plus(Duration.ofMinutes(10)));
+
+        TrustedDevice approved = pending.trustByApproval(now.plusSeconds(90), DevicePolicy.standard());
+        assertThat(approved.id()).isEqualTo(pending.id());
+        assertThat(approved.isTrusted(now.plusSeconds(90))).isTrue();
+        assertThat(approved.trustedAt()).isEqualTo(now.plusSeconds(90));
+        assertThat(approved.expiresAt()).isEqualTo(now.plusSeconds(90).plus(Duration.ofDays(180)));
+        assertThat(approved.publicKey()).isEqualTo("{watch-key}");
+        assertThatThrownBy(() -> approved.expire().trustByApproval(now, DevicePolicy.standard()))
+                .isInstanceOf(DeviceStateException.class);
+    }
+
+    @Test
     void loginUpdatesDisplayDataOnlyAndExpiryMakesTheRowHistory() {
         TrustedDevice later = device.recordLogin(T0.plusSeconds(60));
         assertThat(later.lastLoginAt()).isEqualTo(T0.plusSeconds(60));

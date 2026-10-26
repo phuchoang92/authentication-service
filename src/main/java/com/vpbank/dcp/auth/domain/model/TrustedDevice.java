@@ -5,6 +5,7 @@ import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.domain.enums.TrustLevel;
 import com.vpbank.dcp.auth.domain.exception.DeviceStateException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import lombok.Builder;
@@ -63,6 +64,54 @@ public record TrustedDevice(TrustedDeviceId id, CustomerId customerId, Channel c
                                                     Instant now, DevicePolicy policy) {
         Objects.requireNonNull(publicKey, "publicKey");
         return trustedNow(id, customerId, channel, deviceId, platform, publicKey, now, policy);
+    }
+
+    /**
+     * A new installation waiting for the primary device's approval (slice 6): a live row that is not
+     * trusted. It holds the key the device sent so the approval can trust exactly that key; it expires
+     * with the approval window unless the claim succeeds.
+     */
+    public static TrustedDevice pending(TrustedDeviceId id, CustomerId customerId, Channel channel, DeviceId deviceId,
+                                        DevicePlatform platform, String publicKey, Instant now, Duration pendingWindow) {
+        Objects.requireNonNull(publicKey, "publicKey");
+        Instant pendingExpiresAt = now.plus(pendingWindow);
+        return TrustedDevice.builder()
+                .id(id)
+                .customerId(customerId)
+                .channel(channel)
+                .deviceId(deviceId)
+                .platform(platform)
+                .status(DeviceStatus.PENDING)
+                .trustLevel(TrustLevel.NONE)
+                .trustedAt(null)
+                .expiresAt(pendingExpiresAt)
+                .lastLoginAt(null)
+                .publicKey(publicKey)
+                .version(0)
+                .build();
+    }
+
+    /**
+     * The primary device approved this installation and the QR token was claimed: a live row (PENDING, or an
+     * already trusted but not primary row) becomes trusted from now with the key it holds.
+     */
+    public TrustedDevice trustByApproval(Instant now, DevicePolicy policy) {
+        if (!status.live()) {
+            throw new DeviceStateException("Device is " + status);
+        }
+        Objects.requireNonNull(publicKey, "publicKey");
+        Instant trustExpiresAt = now.plus(policy.trustDuration());
+        return toBuilder()
+                .status(DeviceStatus.ACTIVE)
+                .trustLevel(TrustLevel.TRUSTED)
+                .trustedAt(now)
+                .expiresAt(trustExpiresAt)
+                .lastLoginAt(now)
+                .build();
+    }
+
+    public boolean isPending() {
+        return status == DeviceStatus.PENDING;
     }
 
     public boolean isTrusted(Instant now) {

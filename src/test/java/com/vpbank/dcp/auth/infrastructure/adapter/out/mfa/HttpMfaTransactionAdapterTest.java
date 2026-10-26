@@ -20,8 +20,11 @@ import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CreateResult;
+import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose;
+import com.vpbank.dcp.auth.domain.enums.MfaFactor;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import java.net.SocketTimeoutException;
@@ -29,6 +32,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
@@ -52,7 +56,13 @@ class HttpMfaTransactionAdapterTest {
     private final HttpMfaTransactionAdapter mfa = new HttpMfaTransactionAdapter(builder.build(),
             new MfaReceiptVerifier(KEY.toPublicJWK(), "mfa-service", Clock.fixed(NOW, ZoneOffset.UTC)), id -> ALICE);
     private final MfaTransactionRequest request = MfaTransactionRequest.builder().customerId(ALICE).channel(Channel.MOBILE)
-            .authOperationId(OP).notAfter(NOW.plusSeconds(600)).contextDigest(DIGEST).build();
+            .authOperationId(OP).purpose(EnrollmentPurpose.TRUST_DEVICE).factors(List.of(MfaFactor.FACE))
+            .notAfter(NOW.plusSeconds(600)).contextDigest(DIGEST).build();
+    private final MfaCheckRequest faceCheck = MfaCheckRequest.builder().mfaTransactionId("mfa-1").authOperationId(OP)
+            .purpose(EnrollmentPurpose.TRUST_DEVICE).factors(List.of(MfaFactor.FACE)).contextDigest(DIGEST).build();
+    private final MfaCheckRequest faceAndOtpCheck = MfaCheckRequest.builder().mfaTransactionId("mfa-1").authOperationId(OP)
+            .purpose(EnrollmentPurpose.TRUST_DEVICE_APPROVAL).factors(List.of(MfaFactor.FACE, MfaFactor.OTP))
+            .contextDigest(DIGEST).build();
 
     @Test
     void createsAFaceTransactionBoundToTheEnrollmentAndAcceptsTheIdempotentReplay() {
@@ -93,22 +103,22 @@ class HttpMfaTransactionAdapterTest {
     @Test
     void checkVerifiesTheSignedReceiptAndMapsEveryStatus() throws Exception {
         expectCheck(receipt(KEY, "PASSED", Map.of("factor", "FACE", "verifiedAt", "2026-10-25T09:59:50Z")));
-        CheckResult passed = mfa.check("mfa-1", OP, DIGEST);
+        CheckResult passed = mfa.check(faceCheck);
         assertThat(passed).isInstanceOf(CheckResult.Passed.class);
         assertThat(((CheckResult.Passed) passed).receiptDigest()).hasSize(43);
 
         server.reset();
         expectCheck(receipt(KEY, "PENDING", Map.of()));
-        assertThat(mfa.check("mfa-1", OP, DIGEST)).isInstanceOf(CheckResult.Pending.class);
+        assertThat(mfa.check(faceCheck)).isInstanceOf(CheckResult.Pending.class);
         server.reset();
         expectCheck(receipt(KEY, "FAILED", Map.of()));
-        assertThat(mfa.check("mfa-1", OP, DIGEST)).isInstanceOf(CheckResult.Failed.class);
+        assertThat(mfa.check(faceCheck)).isInstanceOf(CheckResult.Failed.class);
         server.reset();
         expectCheck(receipt(KEY, "EXPIRED", Map.of()));
-        assertThat(mfa.check("mfa-1", OP, DIGEST)).isInstanceOf(CheckResult.Expired.class);
+        assertThat(mfa.check(faceCheck)).isInstanceOf(CheckResult.Expired.class);
         server.reset();
         server.expect(requestTo(BASE + "/internal/v1/transactions/mfa-1/check")).andRespond(withStatus(HttpStatus.NOT_FOUND));
-        assertThat(mfa.check("mfa-1", OP, DIGEST)).isInstanceOf(CheckResult.Expired.class);
+        assertThat(mfa.check(faceCheck)).isInstanceOf(CheckResult.Expired.class);
     }
 
     @Test
@@ -124,11 +134,29 @@ class HttpMfaTransactionAdapterTest {
                 receipt(KEY, "PASSED", Map.of("factor", "SMS", "verifiedAt", "x")))) {
             server.reset();
             expectCheck(bad);
-            assertThat(mfa.check("mfa-1", OP, DIGEST)).as(bad).isInstanceOf(CheckResult.Rejected.class);
+            assertThat(mfa.check(faceCheck)).as(bad).isInstanceOf(CheckResult.Rejected.class);
         }
         server.reset();
         server.expect(requestTo(BASE + "/internal/v1/transactions/mfa-1/check")).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
-        assertThatThrownBy(() -> mfa.check("mfa-1", OP, DIGEST)).isInstanceOf(PartnerUnavailableException.class);
+        assertThatThrownBy(() -> mfa.check(faceCheck)).isInstanceOf(PartnerUnavailableException.class);
+    }
+
+    @Test
+    void anApprovalCheckNeedsTheApprovalPurposeAndBothFactorsInTheReceipt() throws Exception {
+        // The receipt names the purpose and the joined factor set the transaction was opened with.
+        expectCheck(receipt(KEY, "PASSED", Map.of("purpose", "TRUST_DEVICE_APPROVAL", "factor", "FACE+OTP",
+                "verifiedAt", "2026-10-25T09:59:50Z")));
+        assertThat(mfa.check(faceAndOtpCheck)).isInstanceOf(CheckResult.Passed.class);
+
+        // FACE alone does not satisfy a FACE + OTP transaction; a FACE-only check does not accept an approval receipt.
+        server.reset();
+        expectCheck(receipt(KEY, "PASSED", Map.of("purpose", "TRUST_DEVICE_APPROVAL", "factor", "FACE",
+                "verifiedAt", "2026-10-25T09:59:50Z")));
+        assertThat(mfa.check(faceAndOtpCheck)).isInstanceOf(CheckResult.Rejected.class);
+        server.reset();
+        expectCheck(receipt(KEY, "PASSED", Map.of("purpose", "TRUST_DEVICE_APPROVAL", "factor", "FACE+OTP",
+                "verifiedAt", "2026-10-25T09:59:50Z")));
+        assertThat(mfa.check(faceCheck)).isInstanceOf(CheckResult.Rejected.class);
     }
 
     private void expectCheck(String receipt) {

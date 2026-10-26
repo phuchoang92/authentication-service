@@ -2,12 +2,14 @@ package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
+import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -45,6 +47,31 @@ final class InMemoryEnrollmentRepository implements EnrollmentRepository {
         DeviceEnrollment saved = changed.withVersion(changed.version() + 1);
         rows.put(changed.id(), saved);
         return Optional.of(saved);
+    }
+
+    @Override
+    public Optional<DeviceEnrollment> findBySession(CustomerId customerId, DeviceId deviceId, SessionId sessionId) {
+        check();
+        EnrollmentId id = bySession.get(sessionId);
+        if (id == null) {
+            return Optional.empty();
+        }
+        return find(id, customerId, deviceId);
+    }
+
+    @Override
+    public Optional<DeviceEnrollment> findApproval(EnrollmentId id, CustomerId customerId, Channel channel) {
+        check();
+        return Optional.ofNullable(rows.get(id))
+                .filter(e -> e.customerId().equals(customerId) && e.channel() == channel && e.isApproval());
+    }
+
+    @Override
+    public List<DeviceEnrollment> findOpenApprovals(CustomerId customerId, Channel channel) {
+        check();
+        return rows.values().stream()
+                .filter(e -> e.customerId().equals(customerId) && e.channel() == channel && e.isApproval() && e.state().open())
+                .toList();
     }
 
     DeviceEnrollment only() {

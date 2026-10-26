@@ -8,6 +8,7 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
+import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import java.nio.charset.StandardCharsets;
@@ -35,8 +36,6 @@ public final class MfaReceiptVerifier {
             "status", "iat", "exp", "jti");
     static final Set<String> CLAIMS_PASSED = Set.of("factor", "verifiedAt");
     static final Duration MAX_SKEW = Duration.ofSeconds(5);
-    private static final String PURPOSE_TRUST_DEVICE = "TRUST_DEVICE";
-    private static final String FACTOR_FACE = "FACE";
     private static final String STATUS_PASSED = "PASSED";
     private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_FAILED = "FAILED";
@@ -46,8 +45,7 @@ public final class MfaReceiptVerifier {
     @NonNull private final String issuer;
     @NonNull private final Clock clock;
 
-    public CheckResult verify(String receipt, String mfaTransactionId, EnrollmentId authOperationId,
-                              CustomerId customerId, String contextDigest) {
+    public CheckResult verify(String receipt, MfaCheckRequest checkRequest, CustomerId customerId) {
         try {
             SignedJWT receiptJws = SignedJWT.parse(receipt);
 
@@ -59,14 +57,14 @@ public final class MfaReceiptVerifier {
             String status = claims.getStringClaim("status");
 
             boolean boundToThisCheck = hasExactClaimSet(claims, status)
-                    && boundToTransaction(claims, mfaTransactionId, authOperationId, customerId, contextDigest)
+                    && boundToTransaction(claims, checkRequest, customerId)
                     && withinValidity(claims);
             if (!boundToThisCheck) {
                 return new CheckResult.Rejected();
             }
 
             return switch (status) {
-                case STATUS_PASSED -> passedWithFace(claims, receipt);
+                case STATUS_PASSED -> passedWithRequestedFactors(claims, checkRequest, receipt);
                 case STATUS_PENDING -> new CheckResult.Pending();
                 case STATUS_FAILED -> new CheckResult.Failed();
                 case STATUS_EXPIRED -> new CheckResult.Expired();
@@ -99,15 +97,15 @@ public final class MfaReceiptVerifier {
         return expectedClaims.equals(claims.getClaims().keySet());
     }
 
-    private boolean boundToTransaction(JWTClaimsSet claims, String mfaTransactionId, EnrollmentId authOperationId,
-                                       CustomerId customerId, String contextDigest) throws ParseException {
+    private boolean boundToTransaction(JWTClaimsSet claims, MfaCheckRequest checkRequest, CustomerId customerId)
+            throws ParseException {
         return issuer.equals(claims.getIssuer())
                 && List.of(AUDIENCE).equals(claims.getAudience())
-                && mfaTransactionId.equals(claims.getStringClaim("txn"))
-                && authOperationId.value().toString().equals(claims.getStringClaim("op"))
-                && PURPOSE_TRUST_DEVICE.equals(claims.getStringClaim("purpose"))
+                && checkRequest.mfaTransactionId().equals(claims.getStringClaim("txn"))
+                && checkRequest.authOperationId().value().toString().equals(claims.getStringClaim("op"))
+                && checkRequest.purpose().name().equals(claims.getStringClaim("purpose"))
                 && customerId.value().equals(claims.getStringClaim("customerNumber"))
-                && contextDigest.equals(claims.getStringClaim("contextDigest"))
+                && checkRequest.contextDigest().equals(claims.getStringClaim("contextDigest"))
                 && claims.getJWTID() != null
                 && !claims.getJWTID().isBlank();
     }
@@ -122,9 +120,10 @@ public final class MfaReceiptVerifier {
         return notExpired && alreadyIssued;
     }
 
-    /** Only a FACE factor passes this flow; the digest of the exact receipt text goes to the audit trail. */
-    private static CheckResult passedWithFace(JWTClaimsSet claims, String receipt) throws ParseException {
-        if (!FACTOR_FACE.equals(claims.getStringClaim("factor"))) {
+    /** Only the factors the transaction asked for pass; the digest of the exact receipt text goes to the audit trail. */
+    private static CheckResult passedWithRequestedFactors(JWTClaimsSet claims, MfaCheckRequest checkRequest, String receipt)
+            throws ParseException {
+        if (!checkRequest.factorClaim().equals(claims.getStringClaim("factor"))) {
             return new CheckResult.Rejected();
         }
         return new CheckResult.Passed(sha256(receipt));

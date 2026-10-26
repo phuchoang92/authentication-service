@@ -5,7 +5,6 @@ import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
-import com.vpbank.dcp.auth.domain.enums.PrimaryMode;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
@@ -60,9 +59,6 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
     private static final String AUDIT_REASON_REINSTALL = "REINSTALL";
     private static final String AUDIT_REASON_DEVICE_CAP = "DEVICE_CAP";
     private static final String AUDIT_REASON_MFA_FACE = "MFA_FACE";
-
-    /** A confirmed enrollment always passed FACE; the direct first-device path writes false via the mapper. */
-    private static final boolean FACE_AUTHENTICATED = true;
 
     @NonNull private final TrustedDeviceJpaRepository trustedDeviceJpaRepository;
     @NonNull private final PrimaryTrustedDeviceJpaRepository primaryTrustedDeviceJpaRepository;
@@ -221,8 +217,8 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
                     savedDeviceEntity.getId(),
                     now,
                     enrollmentId,
-                    FACE_AUTHENTICATED,
-                    PrimaryMode.FACE_CONFIRMED);
+                    confirmation.faceAuthenticated(),
+                    confirmation.primaryMode());
             primaryTrustedDeviceJpaRepository.saveAndFlush(primaryEntity);
 
             DeviceEnrollmentEntity enrollmentEntity = deviceEnrollmentJpaRepository.findById(enrollmentId).orElseThrow();
@@ -259,6 +255,16 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
         } catch (DataAccessException failure) {
             throw new RepositoryUnavailableException(failure); // a RuntimeException: the transaction rolls back
         }
+    }
+
+    @Override
+    public TrustedDevice registerPending(TrustedDevice pendingDevice, String correlationId) {
+        throw new UnsupportedOperationException("slice 6 turn 2: PENDING rows are not persisted yet");
+    }
+
+    @Override
+    public int countPending(CustomerId customerId, Channel channel) {
+        throw new UnsupportedOperationException("slice 6 turn 2: PENDING rows are not persisted yet");
     }
 
     private void expireRow(TrustedDevice expiredDevice) {

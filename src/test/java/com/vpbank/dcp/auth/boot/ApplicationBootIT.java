@@ -243,13 +243,13 @@ class ApplicationBootIT {
                 .andExpect(jsonPath("$.data.status").value("MFA_REQUIRED"))
                 .andExpect(jsonPath("$.data.mfaTransactionId").value("mfa-txn-1"));
 
-        when(mfa.check(eq("mfa-txn-1"), any(), any())).thenReturn(new CheckResult.Pending());
+        when(mfa.check(any())).thenReturn(new CheckResult.Pending());
         ECKey tabletKenc = new ECKeyGenerator(Curve.P_256).generate();
         String confirmBody = "{\"tokenEncryptionKey\":" + tabletKenc.toPublicJWK().toJSONString() + "}";
         mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
                         .contentType(MediaType.APPLICATION_JSON).content(confirmBody))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MFA_NOT_PASSED"));
-        when(mfa.check(eq("mfa-txn-1"), any(), any())).thenReturn(new CheckResult.Passed("receipt-digest"));
+        when(mfa.check(any())).thenReturn(new CheckResult.Passed("receipt-digest"));
         MvcResult confirm = mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
                         .contentType(MediaType.APPLICATION_JSON).content(confirmBody))
                 .andExpect(status().isCreated())

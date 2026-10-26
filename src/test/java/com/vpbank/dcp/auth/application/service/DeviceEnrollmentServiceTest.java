@@ -2,7 +2,7 @@ package com.vpbank.dcp.auth.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -155,7 +155,7 @@ class DeviceEnrollmentServiceTest {
         verify(mfa).create(request.capture());
         assertThat(request.getValue().customerId()).isEqualTo(ALICE);
         assertThat(request.getValue().authOperationId()).isEqualTo(ENROLLMENT);
-        assertThat(request.getValue().contextDigest()).isEqualTo(DeviceEnrollmentService.contextDigest(enrollments.only()));
+        assertThat(request.getValue().contextDigest()).isEqualTo(EnrollmentDigests.contextDigest(enrollments.only()));
 
         assertThat(service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer")))
                 .isInstanceOf(VerifyEnrollmentResult.Conflict.class); // verify runs once
@@ -193,7 +193,7 @@ class DeviceEnrollmentServiceTest {
     void confirmPassedCommitsTrustMakesTheTabletPrimaryEndsTheRestrictedSessionAndIssuesAnActiveOne() {
         service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
         service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer"));
-        when(mfa.check(eq("mfa-1"), eq(ENROLLMENT), anyString())).thenReturn(new CheckResult.Passed("receipt-sha"));
+        when(mfa.check(argThat(check -> check.mfaTransactionId().equals("mfa-1") && check.authOperationId().equals(ENROLLMENT)))).thenReturn(new CheckResult.Passed("receipt-sha"));
 
         ConfirmEnrollmentResult result = service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"));
 
@@ -225,7 +225,7 @@ class DeviceEnrollmentServiceTest {
         devices.rows.put(oldTablet.id(), oldTablet);
         service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS)); // a new key: reinstall
         service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer"));
-        when(mfa.check(any(), any(), anyString())).thenReturn(new CheckResult.Passed("r"));
+        when(mfa.check(any())).thenReturn(new CheckResult.Passed("r"));
 
         service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"));
 
@@ -239,17 +239,17 @@ class DeviceEnrollmentServiceTest {
         service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
         service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer"));
 
-        when(mfa.check(any(), any(), anyString())).thenReturn(new CheckResult.Pending());
+        when(mfa.check(any())).thenReturn(new CheckResult.Pending());
         assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.MfaPending.class);
-        when(mfa.check(any(), any(), anyString())).thenReturn(new CheckResult.Rejected());
+        when(mfa.check(any())).thenReturn(new CheckResult.Rejected());
         assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Rejected.class);
-        doThrow(new PartnerUnavailableException("MFA")).when(mfa).check(any(), any(), anyString());
+        doThrow(new PartnerUnavailableException("MFA")).when(mfa).check(any());
         assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Unavailable.class);
         assertThat(sessions.findByToken(RESTRICTED)).isPresent();
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
         verify(tokens, never()).next();
 
-        doReturn(new CheckResult.Failed()).when(mfa).check(any(), any(), anyString());
+        doReturn(new CheckResult.Failed()).when(mfa).check(any());
         assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.MfaFailed.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.FAILED);
         assertThat(sessions.findByToken(RESTRICTED)).isEmpty();

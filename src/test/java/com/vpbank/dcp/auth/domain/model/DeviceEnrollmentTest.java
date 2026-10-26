@@ -35,6 +35,47 @@ class DeviceEnrollmentTest {
     }
 
     @Test
+    void anApprovalWaitsThenHoldsTheTokenDigestThenCompletesOnTheClaim() {
+        TrustedDeviceId target = TrustedDeviceId.random();
+        TrustedDeviceId primary = TrustedDeviceId.random();
+        DeviceEnrollment requested = DeviceEnrollment.requestApproval(EnrollmentId.random(), new CustomerId("90359"),
+                Channel.MOBILE, new DeviceId("watch-3"), target, T0.plus(Duration.ofMinutes(10)));
+        assertThat(requested.state()).isEqualTo(EnrollmentState.WAITING_APPROVAL);
+        assertThat(requested.isApproval()).isTrue();
+        assertThat(requested.isOpen(T0)).isTrue();
+        assertThat(requested.hasApprovalInProgress()).isFalse();
+        assertThatThrownBy(() -> requested.authorize("digest", T0.plusSeconds(180), "FACE+OTP"))
+                .isInstanceOf(EnrollmentStateException.class);
+
+        DeviceEnrollment approved = requested.approveBy(primary, "mfa-9");
+        assertThat(approved.state()).isEqualTo(EnrollmentState.WAITING_APPROVAL);
+        assertThat(approved.actorDeviceId()).isEqualTo(primary);
+        assertThat(approved.hasApprovalInProgress()).isTrue();
+        assertThatThrownBy(() -> approved.approveBy(primary, "mfa-10")).isInstanceOf(EnrollmentStateException.class);
+
+        DeviceEnrollment authorized = approved.authorize("digest", T0.plusSeconds(180), "FACE+OTP");
+        assertThat(authorized.state()).isEqualTo(EnrollmentState.WAITING_AUTHORIZATION);
+        assertThat(authorized.isOpen(T0)).isTrue();
+        assertThat(authorized.authorizationExpired(T0.plusSeconds(179))).isFalse();
+        assertThat(authorized.authorizationExpired(T0.plusSeconds(180))).isTrue();
+        assertThat(authorized.mfaMethod()).isEqualTo("FACE+OTP");
+
+        DeviceEnrollment counted = authorized.countClaimAttempt().countClaimAttempt();
+        assertThat(counted.authorizationAttempts()).isEqualTo(2);
+        assertThat(counted.claimAttemptsExhausted(EnrollmentPolicy.standard())).isFalse();
+        assertThat(counted.countClaimAttempt().countClaimAttempt().countClaimAttempt()
+                .claimAttemptsExhausted(EnrollmentPolicy.standard())).isTrue();
+
+        assertThatThrownBy(() -> counted.consumeAuthorization(T0.plusSeconds(180))).isInstanceOf(EnrollmentStateException.class);
+        DeviceEnrollment consumed = counted.consumeAuthorization(T0.plusSeconds(60));
+        assertThat(consumed.state()).isEqualTo(EnrollmentState.COMPLETED);
+        assertThat(consumed.authorizationConsumedAt()).isEqualTo(T0.plusSeconds(60));
+        assertThatThrownBy(consumed::fail).isInstanceOf(EnrollmentStateException.class);
+        assertThat(authorized.fail().state()).isEqualTo(EnrollmentState.FAILED);
+        assertThat(requested.expire().state()).isEqualTo(EnrollmentState.EXPIRED);
+    }
+
+    @Test
     void stepsOutOfOrderAreProgrammingErrorsAndTerminalStatesStayTerminal() {
         assertThatThrownBy(started::complete).isInstanceOf(EnrollmentStateException.class);
         assertThatThrownBy(() -> started.markMfaRequired("x").countAttempt()).isInstanceOf(EnrollmentStateException.class);

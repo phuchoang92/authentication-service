@@ -15,7 +15,15 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "auth.login")
 public record LoginProperties(boolean enabled, @Valid @NotNull Keycloak keycloak,
                               @Valid @NotNull @DefaultValue Lockout lockout,
-                              @Min(1) @DefaultValue("3") int enrollmentMaxVerifyAttempts) {
+                              @Min(1) @DefaultValue("3") int enrollmentMaxVerifyAttempts,
+                              @Valid @NotNull @DefaultValue Approval approval) {
+
+    /** Slice 6: approval of a new device by the current primary device (QR authorization token). */
+    public record Approval(@NotNull @DefaultValue("PT10M") Duration pendingWindow,
+                           @NotNull @DefaultValue("PT180S") Duration tokenLifetime,
+                           @Min(1) @DefaultValue("5") int maxClaimAttempts,
+                           @Min(1) @DefaultValue("3") int maxPendingDevices) {
+    }
 
     /**
      * Escalating lockout (slice 3): CAPTCHA after N failures, temporary locks at given failure

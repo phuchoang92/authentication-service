@@ -14,6 +14,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.DeviceE
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.DeviceEnrollmentJpaRepository;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
@@ -91,6 +92,21 @@ public class DeviceEnrollmentPersistenceAdapter implements EnrollmentRepository 
                 channel,
                 deviceId);
         return MessageDigest.isEqual(enrollmentEntity.getTargetClientDeviceIdLookup(), expectedLookup);
+    }
+
+    @Override
+    public Optional<DeviceEnrollment> findBySession(CustomerId customerId, DeviceId deviceId, SessionId sessionId) {
+        throw new UnsupportedOperationException("slice 6 turn 2: approval lookups are not persisted yet");
+    }
+
+    @Override
+    public Optional<DeviceEnrollment> findApproval(EnrollmentId enrollmentId, CustomerId customerId, Channel channel) {
+        throw new UnsupportedOperationException("slice 6 turn 2: approval lookups are not persisted yet");
+    }
+
+    @Override
+    public List<DeviceEnrollment> findOpenApprovals(CustomerId customerId, Channel channel) {
+        throw new UnsupportedOperationException("slice 6 turn 2: approval lookups are not persisted yet");
     }
 
     @Override

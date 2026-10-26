@@ -149,7 +149,7 @@ public class LoginConfiguration {
                                                     LoginProperties properties,
                                                     SessionPolicy sessionPolicy,
                                                     Clock clock) {
-        EnrollmentPolicy enrollmentPolicy = new EnrollmentPolicy(properties.enrollmentMaxVerifyAttempts());
+        EnrollmentPolicy enrollmentPolicy = enrollmentPolicy(properties);
         return new DeviceEnrollmentService(
                 sessionStore,
                 enrollmentRepository,
@@ -164,6 +164,17 @@ public class LoginConfiguration {
                 enrollmentPolicy,
                 sessionPolicy,
                 clock);
+    }
+
+    /** Policy bounds are the domain's; a bad setting stops the application with the record's message. */
+    private static EnrollmentPolicy enrollmentPolicy(LoginProperties properties) {
+        LoginProperties.Approval approval = properties.approval();
+        return new EnrollmentPolicy(
+                properties.enrollmentMaxVerifyAttempts(),
+                approval.pendingWindow(),
+                approval.tokenLifetime(),
+                approval.maxClaimAttempts(),
+                approval.maxPendingDevices());
     }
 
     @Bean

@@ -1,8 +1,8 @@
 package com.vpbank.dcp.auth.application.port.out.gateway;
 
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
-import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import java.time.Instant;
 
 /**
@@ -13,7 +13,7 @@ import java.time.Instant;
 public interface MfaTransactionPort {
     CreateResult create(MfaTransactionRequest request);
 
-    CheckResult check(String mfaTransactionId, EnrollmentId authOperationId, String contextDigest);
+    CheckResult check(MfaCheckRequest request);
 
     sealed interface CreateResult {
         record Created(String mfaTransactionId, Instant expiresAt) implements CreateResult { }

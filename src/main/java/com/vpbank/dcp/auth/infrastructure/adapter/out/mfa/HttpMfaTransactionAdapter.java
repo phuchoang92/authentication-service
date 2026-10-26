@@ -2,6 +2,7 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.mfa;
 
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
+import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
@@ -83,11 +84,11 @@ public final class HttpMfaTransactionAdapter implements MfaTransactionPort {
     }
 
     @Override
-    public CheckResult check(String mfaTransactionId, EnrollmentId authOperationId, String contextDigest) {
-        CheckTransactionRequest checkTransactionRequest = MfaTransactionMapper.toCheck(authOperationId, contextDigest);
+    public CheckResult check(MfaCheckRequest mfaCheckRequest) {
+        CheckTransactionRequest checkTransactionRequest = MfaTransactionMapper.toCheck(mfaCheckRequest);
         try {
             return restClient.post()
-                    .uri(CHECK_PATH, mfaTransactionId)
+                    .uri(CHECK_PATH, mfaCheckRequest.mfaTransactionId())
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.APPLICATION_JSON)
                     .body(checkTransactionRequest)
@@ -105,13 +106,11 @@ public final class HttpMfaTransactionAdapter implements MfaTransactionPort {
                             throw new PartnerUnavailableException(PARTNER);
                         }
 
-                        CustomerId customerId = enrollmentCustomerLookup.customerOf(authOperationId);
+                        CustomerId customerId = enrollmentCustomerLookup.customerOf(mfaCheckRequest.authOperationId());
                         return mfaReceiptVerifier.verify(
                                 checkResponse.data().receipt(),
-                                mfaTransactionId,
-                                authOperationId,
-                                customerId,
-                                contextDigest);
+                                mfaCheckRequest,
+                                customerId);
                     });
         } catch (RestClientException failure) {
             throw new PartnerUnavailableException(PARTNER, failure);

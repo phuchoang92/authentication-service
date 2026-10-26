@@ -38,6 +38,15 @@ public interface TrustedDeviceRepository {
      */
     TrustedDevice trustConfirmed(TrustConfirmation confirmation, String correlationId);
 
+    /**
+     * Slice 6: a new installation waits for approval as a PENDING live row. A lost race on the one-live-row
+     * rule returns the row that won (the caller's enrollment then targets it). Writes one audit event.
+     */
+    TrustedDevice registerPending(TrustedDevice pendingDevice, String correlationId);
+
+    /** How many installations of this customer on this channel are waiting for approval. */
+    int countPending(CustomerId customerId, Channel channel);
+
     /** Saves a change only if the stored version is still {@code changed.version()}; returns the stored row. */
     Optional<TrustedDevice> saveIfCurrent(TrustedDevice changed, String correlationId);
 

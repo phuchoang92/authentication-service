@@ -2,16 +2,19 @@ package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
 import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
-import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.TrustFirstResult;
+import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
 import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
+import com.vpbank.dcp.auth.domain.enums.PrimaryMode;
+import com.vpbank.dcp.auth.domain.exception.DeviceStateException;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.time.Clock;
@@ -155,10 +158,7 @@ public final class TrustedDeviceService implements ListDevicesUseCase {
         List<TrustedDevice> otherLiveDevices = new ArrayList<>(liveTrustedDevices);
         replacedDevice.ifPresent(otherLiveDevices::remove);
 
-        List<TrustedDevice> devicesExpiredByCap = new ArrayList<>();
-        for (TrustedDevice oldDevice : oldestBeyondCap(otherLiveDevices)) {
-            devicesExpiredByCap.add(oldDevice.expire());
-        }
+        List<TrustedDevice> devicesExpiredByCap = expireOldestBeyondCap(otherLiveDevices);
 
         TrustedDevice newTrustedDevice = TrustedDevice.trustedByEnrollment(
                 trustedDeviceIdGenerator.get(),
@@ -181,12 +181,110 @@ public final class TrustedDeviceService implements ListDevicesUseCase {
                 .replaced(expiredReplacedDevice)
                 .expiredByCap(devicesExpiredByCap)
                 .enrollment(completedEnrollment)
+                .primaryMode(PrimaryMode.FACE_CONFIRMED)
+                .faceAuthenticated(true)
                 .receiptDigest(receiptDigest)
                 .build();
 
         return trustedDeviceRepository.trustConfirmed(
                 trustConfirmation,
                 correlationId);
+    }
+
+    /**
+     * Slice 6: a new installation asks to be approved by the primary device. Its public key and platform are
+     * kept on a PENDING live row until the claim; a known live row of the same installation is reused as is.
+     * Empty when the customer already has the maximum number of installations waiting.
+     */
+    public Optional<TrustedDevice> registerPendingDevice(CustomerId customerId, Channel channel, DeviceId deviceId,
+                                                         DevicePlatform platform, String devicePublicJwk,
+                                                         EnrollmentPolicy enrollmentPolicy, String correlationId) {
+        Optional<TrustedDevice> knownLiveDevice = trustedDeviceRepository.findLive(customerId, channel, deviceId);
+        if (knownLiveDevice.isPresent()) {
+            return knownLiveDevice;
+        }
+
+        int pendingDevices = trustedDeviceRepository.countPending(customerId, channel);
+        if (pendingDevices >= enrollmentPolicy.maxPendingDevices()) {
+            return Optional.empty();
+        }
+
+        TrustedDevice pendingDevice = TrustedDevice.pending(
+                trustedDeviceIdGenerator.get(),
+                customerId,
+                channel,
+                deviceId,
+                platform,
+                devicePublicJwk,
+                clock.instant(),
+                enrollmentPolicy.pendingWindow());
+
+        TrustedDevice registeredDevice = trustedDeviceRepository.registerPending(pendingDevice, correlationId);
+        return Optional.of(registeredDevice);
+    }
+
+    /** This installation's row ID when it is the customer's trusted primary on the channel; empty otherwise. */
+    public Optional<TrustedDeviceId> primaryDeviceId(CustomerId customerId, Channel channel, DeviceId deviceId) {
+        Instant now = clock.instant();
+
+        Optional<TrustedDevice> liveDevice = trustedDeviceRepository.findLive(customerId, channel, deviceId);
+        if (liveDevice.isEmpty() || !liveDevice.get().isTrusted(now)) {
+            return Optional.empty();
+        }
+
+        Optional<TrustedDeviceId> primaryDeviceId = trustedDeviceRepository.findPrimary(customerId, channel);
+        boolean isPrimary = primaryDeviceId.isPresent() && primaryDeviceId.get().equals(liveDevice.get().id());
+        if (!isPrimary) {
+            return Optional.empty();
+        }
+        return Optional.of(liveDevice.get().id());
+    }
+
+    /**
+     * Slice 6: the primary device approved this installation and the QR token was claimed. The target row
+     * (PENDING, or a known live row) becomes trusted and the customer's primary on the channel in one
+     * transaction with the completed enrollment and the audit trail. The old primary stays trusted (§7).
+     */
+    public TrustedDevice confirmTrustByApproval(DeviceEnrollment consumedEnrollment, String correlationId) {
+        Instant now = clock.instant();
+
+        List<TrustedDevice> liveDevices =
+                trustedDeviceRepository.findLive(consumedEnrollment.customerId(), consumedEnrollment.channel());
+
+        TrustedDevice targetDevice = liveDevices.stream()
+                .filter(device -> device.id().equals(consumedEnrollment.targetDeviceId()))
+                .findFirst()
+                .orElseThrow(() -> new DeviceStateException("The approved device row is no longer live"));
+
+        List<TrustedDevice> otherLiveDevices = new ArrayList<>(liveDevices);
+        otherLiveDevices.remove(targetDevice);
+
+        List<TrustedDevice> devicesExpiredByCap = expireOldestBeyondCap(otherLiveDevices);
+
+        TrustedDevice approvedDevice = targetDevice.trustByApproval(now, devicePolicy);
+
+        TrustConfirmation trustConfirmation = TrustConfirmation.builder()
+                .device(approvedDevice)
+                .replaced(null)
+                .expiredByCap(devicesExpiredByCap)
+                .enrollment(consumedEnrollment)
+                .primaryMode(PrimaryMode.OLD_DEVICE_APPROVAL)
+                .faceAuthenticated(false)
+                .actorDeviceId(consumedEnrollment.actorDeviceId())
+                .build();
+
+        return trustedDeviceRepository.trustConfirmed(
+                trustConfirmation,
+                correlationId);
+    }
+
+    /** The expired copies of the rows that must go so that one more device fits under the cap. */
+    private List<TrustedDevice> expireOldestBeyondCap(List<TrustedDevice> otherLiveDevices) {
+        List<TrustedDevice> devicesExpiredByCap = new ArrayList<>();
+        for (TrustedDevice oldDevice : oldestBeyondCap(otherLiveDevices)) {
+            devicesExpiredByCap.add(oldDevice.expire());
+        }
+        return devicesExpiredByCap;
     }
 
     @Override
