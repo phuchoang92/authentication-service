@@ -54,12 +54,7 @@ public final class SessionService implements CurrentSessionUseCase, ExtendSessio
 
     @Override
     public ExtendSessionResult extend(ExtendSessionCommand command) {
-        SessionLookup sessionLookup;
-        try {
-            sessionLookup = new SessionLookup(command.lookupKeyVersion(), command.lookupDigest());
-        } catch (IllegalArgumentException badShape) {
-            return new ExtendSessionResult.Rejected();
-        }
+        SessionLookup sessionLookup = new SessionLookup(command.channel(), command.sessionId());
 
         try {
             for (int attempt = 0; attempt < EXTEND_ATTEMPTS; attempt++) {

@@ -83,14 +83,14 @@ import org.springframework.test.web.servlet.MockMvc;
         properties = "auth.login.enabled=true")
 @Import({RestConfiguration.class, LoginRestTest.Beans.class})
 class LoginRestTest {
-    private static final String TOKEN = "k1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    private static final String TOKEN = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     private static final Instant IDLE = Instant.parse("2026-10-25T10:15:00Z");
     private static final Instant ABSOLUTE = Instant.parse("2026-10-25T10:20:00Z");
     private static final String LOGIN_BODY = """
             {"userName":"alice","password":"Secret123","channel":"MOBILE","deviceId":"dev-1","platform":"ANDROID",
              "tokenEncryptionKey":{"kty":"EC","crv":"P-256","x":"abc","y":"def"}}""";
     private static final String EXTEND_BODY = """
-            {"sessionLookup":{"lookupKeyVersion":"k1","lookupDigest":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+            {"sessionLookup":{"channel":"MOBILE","sessionId":"00000000-0000-4000-8000-000000000001"},
              "admissionId":"adm-1","admittedAt":"2026-10-25T10:05:00Z","routeId":"accounts.read"}""";
 
     @TestConfiguration
@@ -126,7 +126,7 @@ class LoginRestTest {
 
     @Test
     void approvalRoutesPassOpaqueIdsAndMapTheirOutcomes() throws Exception {
-        String restrictedToken = "k1." + "C".repeat(43);
+        String restrictedToken = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000003:" + "C".repeat(43);
         when(current.resolve(new OpaqueToken(TOKEN))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
                 new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("dev-1"), Channel.MOBILE,
                 SessionStatus.ACTIVE, IDLE, ABSOLUTE)));
@@ -221,7 +221,7 @@ class LoginRestTest {
 
     @Test
     void trustedDeviceRoutesNeedARestrictedSessionAndMapTheirOutcomes() throws Exception {
-        String restrictedToken = "k1." + "C".repeat(43);
+        String restrictedToken = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000003:" + "C".repeat(43);
         when(current.resolve(new OpaqueToken(TOKEN))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
                 new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("dev-1"), Channel.MOBILE,
                 SessionStatus.ACTIVE, IDLE, ABSOLUTE)));
@@ -359,7 +359,7 @@ class LoginRestTest {
 
     @Test
     void anActiveSessionListsItsDevicesMaskedWhileARestrictedOneMayOnlyLogOut() throws Exception {
-        String restrictedToken = "k1." + "B".repeat(43);
+        String restrictedToken = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000002:" + "B".repeat(43);
         when(current.resolve(new OpaqueToken(TOKEN))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
                 new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("dev-1"), Channel.MOBILE,
                 SessionStatus.ACTIVE, IDLE, ABSOLUTE)));
@@ -447,8 +447,8 @@ class LoginRestTest {
         mvc.perform(post("/internal/v1/sessions/extend").contentType(MediaType.APPLICATION_JSON).content(EXTEND_BODY))
                 .andExpect(status().isBadRequest());
         mvc.perform(post("/internal/v1/sessions/extend").contentType(MediaType.APPLICATION_JSON)
-                        .content(EXTEND_BODY.replace("k1", "x1")))
+                        .content(EXTEND_BODY.replace("MOBILE", "FAX")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.details[0].field").value("sessionLookup.lookupKeyVersion"));
+                .andExpect(jsonPath("$.error.details[0].field").value("sessionLookup.channel"));
     }
 }

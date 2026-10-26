@@ -11,8 +11,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Test double with the store's contract: the "digest" is simply the token's random part,
- * compare-and-set on sessionVersion, version + 1 on every saved change.
+ * Test double with the store's contract: a session is addressed by the token's channel and session ID,
+ * compare-and-set on sessionVersion, version + 1 on every saved change. The secret is not checked here.
  */
 final class InMemorySessionStore implements SessionStore {
     final Map<SessionLookup, Session> rows = new HashMap<>();
@@ -21,7 +21,7 @@ final class InMemorySessionStore implements SessionStore {
     int concurrentBumps;
 
     static SessionLookup lookupOf(OpaqueToken token) {
-        return new SessionLookup(token.keyVersion(), token.value().substring(token.value().indexOf('.') + 1));
+        return new SessionLookup(token.channel(), token.sessionId());
     }
 
     @Override

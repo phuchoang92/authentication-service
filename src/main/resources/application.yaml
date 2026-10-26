@@ -46,12 +46,11 @@ auth:
       client-id: ${AUTH_KC_LOGIN_CLIENT_ID:authentication-service}
       client-secret: ${AUTH_KC_LOGIN_CLIENT_SECRET:}
   session:
-    lookup-key-version: ${AUTH_SESSION_LOOKUP_KEY_VERSION:k1}
-    lookup-hmac-keys-base64:
-      k1: ${AUTH_SESSION_LOOKUP_HMAC_KEY_K1_BASE64:}
     idle: PT15M
     absolute: PT20M
     max-admitted-at-skew: PT30S
+  captcha:
+    answer-hmac-key-base64: ${AUTH_CAPTCHA_ANSWER_HMAC_KEY_BASE64:}
   device:
     lookup-key-id: ${AUTH_DEVICE_LOOKUP_KEY_ID:d1}
     lookup-hmac-keys-base64:

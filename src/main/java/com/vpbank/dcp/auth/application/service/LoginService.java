@@ -127,7 +127,7 @@ public final class LoginService implements LoginUseCase {
                         devicePolicy);
             };
 
-            OpaqueToken token = opaqueTokenGenerator.next();
+            OpaqueToken token = opaqueTokenGenerator.next(session.channel(), session.id());
             String tokenEnvelope = tokenEnvelopeSealer.seal(command.tokenEncryptionKey(), token, session);
             sessionStore.create(session, token);
 

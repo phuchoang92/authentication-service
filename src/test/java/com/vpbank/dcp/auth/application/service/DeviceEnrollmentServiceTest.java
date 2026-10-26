@@ -60,8 +60,8 @@ class DeviceEnrollmentServiceTest {
     private static final CustomerId ALICE = new CustomerId("90359");
     private static final DeviceId PHONE = new DeviceId("phone-1");
     private static final DeviceId TABLET = new DeviceId("tablet-2");
-    private static final OpaqueToken RESTRICTED = new OpaqueToken("k1." + "B".repeat(43));
-    private static final OpaqueToken NEW_TOKEN = new OpaqueToken("k1." + "C".repeat(43));
+    private static final OpaqueToken RESTRICTED = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000002:" + "B".repeat(43));
+    private static final OpaqueToken NEW_TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000003:" + "C".repeat(43));
     private static final EnrollmentId ENROLLMENT = EnrollmentId.random();
     private static final byte[] CHALLENGE = "0123456789abcdef0123456789abcdef".getBytes();
     private static final String DEVICE_KEY = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"dev\"}";
@@ -94,7 +94,7 @@ class DeviceEnrollmentServiceTest {
         when(challenges.sealChallenge(eq(DEVICE_KEY), eq(ENROLLMENT), eq(CHALLENGE))).thenReturn("jwe.challenge");
         when(challenges.openResponse(eq("{srv-priv}"), eq("jwe.answer"))).thenReturn(Optional.of(new OpenedChallenge(ENROLLMENT, CHALLENGE)));
         when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-1", NOW.plus(Duration.ofMinutes(5))));
-        when(tokens.next()).thenReturn(NEW_TOKEN);
+        when(tokens.next(any(), any())).thenReturn(NEW_TOKEN);
         when(sealer.seal(eq("{app-kenc}"), eq(NEW_TOKEN), any())).thenReturn("jwe.token");
     }
 
@@ -247,7 +247,7 @@ class DeviceEnrollmentServiceTest {
         assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Unavailable.class);
         assertThat(sessions.findByToken(RESTRICTED)).isPresent();
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
-        verify(tokens, never()).next();
+        verify(tokens, never()).next(any(), any());
 
         doReturn(new CheckResult.Failed()).when(mfa).check(any());
         assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.MfaFailed.class);
@@ -262,7 +262,7 @@ class DeviceEnrollmentServiceTest {
         assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Conflict.class);
         verifyNoInteractions(mfa);
 
-        OpaqueToken active = new OpaqueToken("k1." + "D".repeat(43));
+        OpaqueToken active = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000004:" + "D".repeat(43));
         sessions.create(Session.start(SessionId.random(), ALICE, PHONE, Channel.MOBILE, NOW,
                 new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30))), active);
         assertThat(service.init(new InitEnrollmentCommand(active, DEVICE_KEY, DevicePlatform.ANDROID))).isInstanceOf(InitEnrollmentResult.SessionGone.class);

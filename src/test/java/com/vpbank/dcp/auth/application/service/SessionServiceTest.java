@@ -17,12 +17,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class SessionServiceTest {
     private static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
     private static final String DIGEST = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    private static final OpaqueToken TOKEN = new OpaqueToken("k1." + DIGEST);
+    private static final OpaqueToken TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:" + DIGEST);
 
     private final SessionPolicy policy = new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20),
             Duration.ofSeconds(30));
@@ -66,7 +67,7 @@ class SessionServiceTest {
 
     @Test
     void anUnknownExpiredOrOutOfSkewAdmissionIsGoneOrRejected() {
-        assertThat(service.extend(ExtendSessionCommand.builder().lookupKeyVersion("k1").lookupDigest("B".repeat(43))
+        assertThat(service.extend(ExtendSessionCommand.builder().channel(Channel.MOBILE).sessionId(new SessionId(UUID.fromString("00000000-0000-4000-8000-000000000002")))
                 .admittedAt(clock.now).routeId("accounts.read").build())).isInstanceOf(ExtendSessionResult.Gone.class);
         assertThat(service.extend(command(clock.now.minusSeconds(60)))).isInstanceOf(ExtendSessionResult.Rejected.class);
         clock.now = T0.plus(Duration.ofMinutes(21));
@@ -75,13 +76,13 @@ class SessionServiceTest {
 
     @Test
     void aRestrictedSessionResolvesButIsNeverExtended() {
-        OpaqueToken restrictedToken = new OpaqueToken("k1." + "B".repeat(43));
+        OpaqueToken restrictedToken = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000002:" + "B".repeat(43));
         sessions.create(Session.startRestricted(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE, T0,
                 com.vpbank.dcp.auth.domain.model.DevicePolicy.standard()), restrictedToken);
 
         assertThat(service.resolve(restrictedToken)).hasValueSatisfying(summary ->
                 assertThat(summary.status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE));
-        assertThat(service.extend(ExtendSessionCommand.builder().lookupKeyVersion("k1").lookupDigest("B".repeat(43))
+        assertThat(service.extend(ExtendSessionCommand.builder().channel(Channel.MOBILE).sessionId(new SessionId(UUID.fromString("00000000-0000-4000-8000-000000000002")))
                 .admittedAt(clock.now).routeId("accounts.read").build())).isInstanceOf(ExtendSessionResult.Gone.class);
         assertThat(service.logout(new LogoutCommand(restrictedToken))).isInstanceOf(LogoutResult.Ended.class);
     }
@@ -101,7 +102,7 @@ class SessionServiceTest {
     }
 
     private static ExtendSessionCommand command(Instant admittedAt) {
-        return ExtendSessionCommand.builder().lookupKeyVersion("k1").lookupDigest(DIGEST).admittedAt(admittedAt)
+        return ExtendSessionCommand.builder().channel(Channel.MOBILE).sessionId(TOKEN.sessionId()).admittedAt(admittedAt)
                 .routeId("accounts.read").admissionId("adm-1").build();
     }
 

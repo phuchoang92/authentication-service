@@ -48,7 +48,7 @@ class LoginServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-25T10:00:00Z");
     private static final CustomerId CUSTOMER = new CustomerId("90359");
     private static final UserName ALICE = new UserName("alice");
-    private static final OpaqueToken TOKEN = new OpaqueToken("k1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    private static final OpaqueToken TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     private static final String KENC = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"..\",\"y\":\"..\"}";
 
     private final InMemoryCustomerAuthenticationRepository identities = new InMemoryCustomerAuthenticationRepository();
@@ -68,7 +68,7 @@ class LoginServiceTest {
     void happyPath() {
         identities.rows.put(CUSTOMER, identity("ACTIVE", PasswordLockout.none()));
         when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Verified("iss", "sub-1"));
-        when(tokens.next()).thenReturn(TOKEN);
+        when(tokens.next(any(), any())).thenReturn(TOKEN);
         when(sealer.seal(eq(KENC), eq(TOKEN), any())).thenReturn("jwe.compact");
     }
 

@@ -4,12 +4,16 @@ import com.vpbank.dcp.auth.application.command.ExtendSessionCommand;
 import com.vpbank.dcp.auth.application.command.LogoutCommand;
 import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
 import com.vpbank.dcp.auth.application.result.LogoutResult;
+import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
+import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.ErrorCodes;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.ExtendSessionRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.response.ExtendSessionResponse;
+import java.util.UUID;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,9 +25,19 @@ public final class SessionRestMapper {
     @NonNull private final ErrorMessages errorMessages;
 
     public ExtendSessionCommand toCommand(ExtendSessionRequest request) {
+        try {
+            return extendCommand(request);
+        } catch (IllegalArgumentException invalid) {
+            throw new InvalidRequestException(invalid.getMessage());
+        }
+    }
+
+    private static ExtendSessionCommand extendCommand(ExtendSessionRequest request) {
+        Channel channel = Channel.valueOf(request.sessionLookup().channel());
+        SessionId sessionId = new SessionId(UUID.fromString(request.sessionLookup().sessionId()));
         return ExtendSessionCommand.builder()
-                .lookupKeyVersion(request.sessionLookup().lookupKeyVersion())
-                .lookupDigest(request.sessionLookup().lookupDigest())
+                .channel(channel)
+                .sessionId(sessionId)
                 .admittedAt(request.admittedAt())
                 .routeId(request.routeId())
                 .admissionId(request.admissionId())

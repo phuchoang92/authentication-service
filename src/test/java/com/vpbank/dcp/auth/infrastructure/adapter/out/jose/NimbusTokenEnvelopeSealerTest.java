@@ -20,7 +20,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class NimbusTokenEnvelopeSealerTest {
-    private static final OpaqueToken TOKEN = new OpaqueToken("k1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    private static final OpaqueToken TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     private final NimbusTokenEnvelopeSealer sealer = new NimbusTokenEnvelopeSealer();
     private final Session session = Session.start(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE,
             Instant.parse("2026-10-25T10:00:00Z"), new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20),

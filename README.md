@@ -6,7 +6,7 @@ New authentication service, built bottom-up from the DB design phases in
 Development rules: [architecture and package boundaries](ARCHITECTURE.md),
 [code conventions and readability examples](CODE_CONVENTIONS.md).
 
-**Status (2026-10-26): slices 1–6 done, code aligned with
+**Status (2026-10-26): slices 1–7 done, code aligned with
 [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)** on [ARCHITECTURE.md](ARCHITECTURE.md) (layer-first
 hexagonal under `domain` / `application` / `infrastructure`, business enums in `domain.enums`,
 Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
@@ -17,13 +17,14 @@ Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
 ([plan](docs/plans/slice-3-password-lockout.md)) and trusted devices
 ([plan](docs/plans/slice-4-trusted-device.md)) and device enrollment init → verify → confirm with
 FACE ([plan](docs/plans/slice-5-enrollment.md)) and approval of a new device by the current primary
-device through a QR token ([plan](docs/plans/slice-6-device-approval.md)), each off by default.
+device through a QR token ([plan](docs/plans/slice-6-device-approval.md)) and the self-describing session token
+([plan](docs/plans/slice-7-session-token.md)), each off by default.
 
 | Path | Caller | Result |
 |---|---|---|
 | `POST /api/ns/v1/login` | app via BFF, no session | `201 {tokenEnvelope, status, idleExpiresAt, absoluteExpiresAt}`; `401 INVALID_CREDENTIALS`; `403 ACCOUNT_NOT_READY`; `423 ACCOUNT_LOCKED`; `428 CAPTCHA_REQUIRED`; `503 LOGIN_UNAVAILABLE` |
 | `POST /api/ns/v1/login/captcha` | app via BFF, no session | `200 {captchaId, image (base64 PNG), expiresAt}` — same shape for unknown names |
-| `POST /api/v1/logout` | app, `Authorization: Bearer k1.<43>` (ACTIVE or restricted) | `204`; `401 SESSION_REQUIRED` |
+| `POST /api/v1/logout` | app, `Authorization: Bearer s1:auth:session:<channel>:<sessionId>:<secret>` (ACTIVE or restricted) | `204`; `401 SESSION_REQUIRED` |
 | `POST /api/v1/trusted-device/init` | app, restricted session | `200 {status:"KEY_EXCHANGE", enrollmentId, serverPublicJwk, challenge (JWE to the device key), expiresAt}`; `400 DEVICE_KEY_REQUIRED`; `409 STATE_CONFLICT` (ACTIVE session or init already done) |
 | `POST /api/v1/trusted-device/verify` | app, restricted session | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}`; `401 WRONG_CHALLENGE` + detail `attemptsLeft`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT`; `503` |
 | `POST /api/v1/trusted-device/confirm` | app, restricted session | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at confirm; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT`; `503` |
@@ -37,11 +38,14 @@ device through a QR token ([plan](docs/plans/slice-6-device-approval.md)), each 
 | `POST /internal/v1/customers/{customerId}/password-unlock` | bank tooling | `204`; `404 CUSTOMER_UNKNOWN` |
 | `POST /internal/v1/sessions/extend` | BFF after admission (flow 16) | `200 {idleExpiresAt, absoluteExpiresAt}`; `400`; `410 SESSION_GONE`; `409 SESSION_CONFLICT`; `503` |
 
-The token is `k1.<43 base64url>` and reaches the app only inside a compact JWE (`ECDH-ES`/`A256GCM`
-to the P-256 `tokenEncryptionKey` the app sent). Valkey holds `session:v1:k1:<HMAC(token)>` with
-`customerId, sessionId, deviceId?, status, channel`, deadlines and `sessionVersion`; idle 15 min
-slides on extend, absolute 20 min never moves. The password is verified by Keycloak Direct Grant
-(client secret) and the KC-signed ID token is checked against the realm JWKS.
+The token is `s1:auth:session:<channel>:<sessionId>:<secret>` (slice 7): channel and session ID in clear,
+the secret 32 random bytes as base64url. It reaches the app only inside a compact JWE (`ECDH-ES`/`A256GCM`
+to the P-256 `tokenEncryptionKey` the app sent). Valkey holds `session:v1:<channel>:<sessionId>` with
+`customerId, sessionId, deviceId?, status, channel, secret`, deadlines and `sessionVersion`; nothing is
+hashed or hidden yet, so the BFF reads the session by the token's channel and ID and compares the secret
+itself. Idle 15 min slides on extend (`sessionLookup{channel, sessionId}`), absolute 20 min never moves.
+The password is verified by Keycloak Direct Grant (client secret) and the KC-signed ID token is checked
+against the realm JWKS.
 
 **Trusted device (phase 3):** a MOBILE login carries `deviceId` + `platform` (+ optional P-256
 `devicePublicKey`). The first device of a customer on a channel is trusted and made primary directly
@@ -107,7 +111,7 @@ Java 25, Maven 3.9, Docker for the MySQL integration tests:
 mvn -o verify
 ```
 
-Last run (2026-10-26, slice 6 complete): 258 tests, 0 failures — 232 unit
+Last run (2026-10-26, slice 7 complete): 258 tests, 0 failures — 232 unit
 (domain state machines and value objects, frozen enum codes, services with in-memory doubles incl. the
 approval flow, web/persistence/partner mappers, Valkey key vector and codec, error catalogue, Keycloak
 admin + Direct Grant with a test-signed ID token, JWE sealer and challenge sealer round trips, MFA HTTP
@@ -136,7 +140,7 @@ three devices). No real Customer, Keycloak, Notification or MFA service was call
 | `AUTH_LOGIN_ENABLED` | `true` to expose login/logout/extend (default `false`) |
 | `AUTH_VALKEY_URL` | `redis://host:port` of the session store (default `redis://localhost:6379`) |
 | `AUTH_KC_LOGIN_CLIENT_ID`, `AUTH_KC_LOGIN_CLIENT_SECRET` | Direct Grant client (`authentication-service`) |
-| `AUTH_SESSION_LOOKUP_HMAC_KEY_K1_BASE64` | ≥32-byte HMAC key for the `k1` session lookup (shared with the BFF) |
+| `AUTH_CAPTCHA_ANSWER_HMAC_KEY_BASE64` | ≥32-byte HMAC key for the stored CAPTCHA answers |
 | `AUTH_DEVICE_LOOKUP_HMAC_KEY_D1_BASE64`, `AUTH_DEVICE_ENCRYPTION_KEY_E1_BASE64` | ≥32-byte keys protecting the stored device ID (`d1` lookup HMAC, `e1` AES-256-GCM) |
 
 Timeouts default to 3 s per partner; no call is retried.

@@ -34,7 +34,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 class DeviceApprovalRestMapperTest {
-    private static final String TOKEN = "k1." + "A".repeat(43);
+    private static final String TOKEN = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:" + "A".repeat(43);
     private static final Instant EXPIRES = Instant.parse("2026-10-26T10:10:00Z");
     private static final EnrollmentId ENROLLMENT = EnrollmentId.random();
     private static final Map<String, Object> JWK = Map.of("kty", "EC");

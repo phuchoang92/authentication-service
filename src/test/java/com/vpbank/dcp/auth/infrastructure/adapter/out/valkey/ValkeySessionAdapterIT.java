@@ -33,17 +33,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class ValkeySessionAdapterIT {
     @Container
     static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:9.1").withExposedPorts(6379);
-    private static final OpaqueToken TOKEN = new OpaqueToken("k1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    private static final OpaqueToken TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     private static final SessionPolicy POLICY = new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20),
             Duration.ofSeconds(30));
 
     private static LettuceConnectionFactory connections;
     private static StringRedisTemplate redis;
-    private final SessionKeys keys = new SessionKeys(Map.of("k1", new byte[32]));
+    private final SessionKeys keys = new SessionKeys();
     private final ValkeySessionAdapter store = new ValkeySessionAdapter(redis, keys);
     /** Stored as milliseconds (contract 16), so the fixture must not carry finer precision. */
     private final Instant now = Instant.now().minusSeconds(5).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
-    private final Session session = Session.start(SessionId.random(), new CustomerId("90359"), new DeviceId("dev-1"),
+    private final Session session = Session.start(TOKEN.sessionId(), new CustomerId("90359"), new DeviceId("dev-1"),
             Channel.MOBILE, now, POLICY);
 
     @BeforeAll
@@ -68,14 +68,19 @@ class ValkeySessionAdapterIT {
         store.create(session, TOKEN);
 
         SessionLookup lookup = keys.lookupOf(TOKEN);
-        String key = "session:v1:k1:" + lookup.digest();
+        String key = "session:v1:MOBILE:" + lookup.sessionId().value();
         assertThat(redis.hasKey(key)).isTrue();
-        assertThat(redis.opsForHash().entries(key)).doesNotContainKey("token").containsEntry("customerId", "90359");
+        assertThat(redis.opsForHash().entries(key)).doesNotContainKey("token").containsEntry("customerId", "90359")
+                .containsEntry("secret", TOKEN.secret());
         long ttl = redis.getExpire(key, TimeUnit.SECONDS);
         assertThat(ttl).isBetween(14 * 60L, 15 * 60L);
         assertThat(store.findByToken(TOKEN)).map(StoredSession::session).contains(session);
         assertThat(store.findByLookup(lookup)).map(StoredSession::session).contains(session);
-        assertThat(store.findByToken(new OpaqueToken("k1.BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))).isEmpty();
+        assertThat(store.findByToken(new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000002:BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))).isEmpty();
+        // The right session named with a wrong secret is "no session"; by lookup the BFF still reads it.
+        OpaqueToken wrongSecret = OpaqueToken.of(TOKEN.channel(), TOKEN.sessionId(), "B".repeat(43));
+        assertThat(store.findByToken(wrongSecret)).isEmpty();
+        assertThat(store.findByLookup(lookup)).isPresent();
     }
 
     @Test

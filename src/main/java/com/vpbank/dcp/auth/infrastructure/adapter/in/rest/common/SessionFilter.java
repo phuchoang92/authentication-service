@@ -23,7 +23,7 @@ import org.springframework.web.servlet.LocaleResolver;
 
 /**
  * The session check for {@code /api/**}: {@code /api/ns/**} (no session) and {@code /internal/**}
- * pass through; everything else needs {@code Authorization: Bearer k1.<43>} that resolves to a
+ * pass through; everything else needs {@code Authorization: Bearer s1:auth:session:<channel>:<sessionId>:<secret>} that resolves to a
  * live session, which is then available to controllers as a request attribute. A restricted
  * NEED_TRUSTED_DEVICE session may only log out or call the trusted-device routes (DD 20 §3);
  * anything else is 403 DEVICE_TRUST_REQUIRED. Resolving never touches idle time (the BFF's extend

@@ -162,7 +162,7 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-26, slices 1–6 implemented, layout and conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
+**Current (2026-10-26, slices 1–7 implemented, layout and conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
 `RestConfiguration`), `infrastructure.adapter.out.*`, `infrastructure.config`,
 `application.command` / `application.result`, `application.port.in` with use-case interfaces
 only, and `application.port.out.{repository,gateway,model,exception}` with no top-level types at
@@ -184,7 +184,8 @@ through a one-time QR token (slice 6: `DeviceApprovalService` calls `TrustedDevi
 PENDING row, the primary check and `confirmTrustByApproval`; REST IDs are opaque strings per
 CODE_CONVENTIONS §5). Slice decisions:
 `docs/plans/slice-2-login-session.md`, `slice-3-password-lockout.md`, `slice-4-trusted-device.md`,
-`slice-5-enrollment.md`, `slice-6-device-approval.md`.
+`slice-5-enrollment.md`, `slice-6-device-approval.md`, `slice-7-session-token.md` (session token
+`s1:auth:session:<channel>:<sessionId>:<secret>`, Valkey key by channel and session ID, no HMAC).
 That record does not verify the new enum/constant layout. Its implementation slice must
 update architecture checks and preserve enum wire/storage codes; no tests are run here.
 

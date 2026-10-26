@@ -29,7 +29,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 class TrustedDeviceRestMapperTest {
-    private static final String TOKEN = "k1." + "A".repeat(43);
+    private static final String TOKEN = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:" + "A".repeat(43);
     private static final Instant EXPIRES = Instant.parse("2026-10-25T10:10:00Z");
     private final TrustedDeviceRestMapper mapper =
             new TrustedDeviceRestMapper(new ErrorMessages(RestConfiguration.errorMessageSource()));

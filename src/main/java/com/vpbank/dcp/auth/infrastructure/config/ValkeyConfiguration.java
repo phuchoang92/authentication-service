@@ -12,8 +12,6 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeySessionAdapte
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.util.Base64;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -22,24 +20,18 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
  * Session authority on Valkey, active only with login ({@code auth.login.enabled=true}); the
- * connection itself comes from Spring Boot's {@code spring.data.redis.*}. The HMAC keys are
- * validated here and the plain {@link SessionPolicy} is handed to the services (§12).
+ * connection itself comes from Spring Boot's {@code spring.data.redis.*}. The session key needs no
+ * key material (slice 7); the CAPTCHA answer key is validated here and the plain
+ * {@link SessionPolicy} is handed to the services (§12).
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "auth.login", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties(SessionProperties.class)
+@EnableConfigurationProperties({SessionProperties.class, CaptchaProperties.class})
 public class ValkeyConfiguration {
 
     @Bean
-    SessionKeys sessionKeys(SessionProperties properties) {
-        Map<String, byte[]> hmacKeysByVersion = new LinkedHashMap<>();
-        properties.lookupHmacKeysBase64().forEach((version, base64) ->
-                hmacKeysByVersion.put(version, decodeKey(version, base64)));
-        if (!hmacKeysByVersion.containsKey(properties.lookupKeyVersion())) {
-            throw new IllegalStateException("auth.session.lookup-key-version " + properties.lookupKeyVersion()
-                    + " has no entry in auth.session.lookup-hmac-keys-base64");
-        }
-        return new SessionKeys(hmacKeysByVersion);
+    SessionKeys sessionKeys() {
+        return new SessionKeys();
     }
 
     @Bean
@@ -47,21 +39,16 @@ public class ValkeyConfiguration {
         return new ValkeySessionAdapter(stringRedisTemplate, sessionKeys);
     }
 
-    /** CAPTCHA answers are HMAC-ed with the current session lookup key: one secret to manage. */
     @Bean
-    CaptchaStore captchaStore(StringRedisTemplate stringRedisTemplate, SessionProperties properties, Clock clock) {
-        String currentKeyBase64 = properties.lookupHmacKeysBase64().get(properties.lookupKeyVersion());
-        if (currentKeyBase64 == null) {
-            throw new IllegalStateException("auth.session.lookup-key-version " + properties.lookupKeyVersion()
-                    + " has no entry in auth.session.lookup-hmac-keys-base64");
-        }
-        CaptchaKeys captchaKeys = new CaptchaKeys(decodeKey(properties.lookupKeyVersion(), currentKeyBase64));
+    CaptchaStore captchaStore(StringRedisTemplate stringRedisTemplate, CaptchaProperties captchaProperties, Clock clock) {
+        byte[] answerHmacKey = decodeKey(captchaProperties.answerHmacKeyBase64());
+        CaptchaKeys captchaKeys = new CaptchaKeys(answerHmacKey);
         return new ValkeyCaptchaStore(stringRedisTemplate, captchaKeys, clock);
     }
 
     @Bean
-    OpaqueTokenGenerator opaqueTokenGenerator(SessionProperties properties) {
-        return new RandomOpaqueTokenGenerator(new SecureRandom(), properties.lookupKeyVersion());
+    OpaqueTokenGenerator opaqueTokenGenerator() {
+        return new RandomOpaqueTokenGenerator(new SecureRandom());
     }
 
     @Bean
@@ -69,16 +56,15 @@ public class ValkeyConfiguration {
         return new SessionPolicy(properties.idle(), properties.absolute(), properties.maxAdmittedAtSkew());
     }
 
-    private static byte[] decodeKey(String version, String base64) {
+    private static byte[] decodeKey(String base64) {
         try {
             byte[] key = Base64.getDecoder().decode(base64);
             if (key.length < 32) {
-                throw new IllegalStateException("auth.session.lookup-hmac-keys-base64." + version
-                        + " must decode to at least 32 bytes");
+                throw new IllegalStateException("auth.captcha.answer-hmac-key-base64 must decode to at least 32 bytes");
             }
             return key;
         } catch (IllegalArgumentException invalid) {
-            throw new IllegalStateException("auth.session.lookup-hmac-keys-base64." + version + " is not Base64", invalid);
+            throw new IllegalStateException("auth.captcha.answer-hmac-key-base64 is not Base64", invalid);
         }
     }
 }

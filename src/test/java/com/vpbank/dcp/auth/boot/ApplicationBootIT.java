@@ -102,7 +102,7 @@ class ApplicationBootIT {
         registry.add("spring.datasource.password", MYSQL::getPassword);
         registry.add("spring.data.redis.url", () -> "redis://" + VALKEY.getHost() + ":" + VALKEY.getMappedPort(6379));
         registry.add("auth.registration.request-digest-key-base64", () -> Base64.getEncoder().encodeToString(new byte[32]));
-        registry.add("auth.session.lookup-hmac-keys-base64.k1", () -> Base64.getEncoder().encodeToString(new byte[32]));
+        registry.add("auth.captcha.answer-hmac-key-base64", () -> Base64.getEncoder().encodeToString(new byte[32]));
         registry.add("auth.device.lookup-hmac-keys-base64.d1", () -> Base64.getEncoder().encodeToString(new byte[32]));
         registry.add("auth.device.encryption-keys-base64.e1", () -> Base64.getEncoder().encodeToString(new byte[32]));
     }
@@ -157,14 +157,10 @@ class ApplicationBootIT {
         JWEObject jwe = JWEObject.parse(envelope);
         jwe.decrypt(new ECDHDecrypter(kenc));
         String token = field(jwe.getPayload().toString(), "token");
-        assertThat(token).matches("k1\\.[A-Za-z0-9_-]{43}");
+        assertThat(token).matches("s1:auth:session:MOBILE:[0-9a-f-]{36}:[A-Za-z0-9_-]{43}");
 
-        // The BFF extends by lookup digest = HMAC(zero key, token).
-        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
-        mac.init(new javax.crypto.spec.SecretKeySpec(new byte[32], "HmacSHA256"));
-        String digest = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(token.getBytes()));
-        String extendBody = "{\"sessionLookup\":{\"lookupKeyVersion\":\"k1\",\"lookupDigest\":\"" + digest + "\"},"
-                + "\"admittedAt\":\"" + java.time.Instant.now() + "\",\"routeId\":\"accounts.read\"}";
+        // The BFF extends by the channel and session ID it reads from the token; it never sends the secret.
+        String extendBody = extendBodyFor(token);
         mvc.perform(post("/internal/v1/sessions/extend").contentType(MediaType.APPLICATION_JSON).content(extendBody))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.idleExpiresAt").exists());
 
@@ -351,11 +347,11 @@ class ApplicationBootIT {
         return field(jwe.getPayload().toString(), "token");
     }
 
-    private static String extendBodyFor(String token) throws Exception {
-        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
-        mac.init(new javax.crypto.spec.SecretKeySpec(new byte[32], "HmacSHA256"));
-        String digest = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(token.getBytes()));
-        return "{\"sessionLookup\":{\"lookupKeyVersion\":\"k1\",\"lookupDigest\":\"" + digest + "\"},"
+    private static String extendBodyFor(String token) {
+        String[] parts = token.split(":");
+        String channel = parts[3];
+        String sessionId = parts[4];
+        return "{\"sessionLookup\":{\"channel\":\"" + channel + "\",\"sessionId\":\"" + sessionId + "\"},"
                 + "\"admittedAt\":\"" + java.time.Instant.now() + "\",\"routeId\":\"accounts.read\"}";
     }
 

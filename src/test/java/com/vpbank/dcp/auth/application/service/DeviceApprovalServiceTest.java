@@ -70,10 +70,10 @@ class DeviceApprovalServiceTest {
     private static final DeviceId PHONE = new DeviceId("phone-1");
     private static final DeviceId TABLET = new DeviceId("tablet-2");
     private static final DeviceId WATCH = new DeviceId("watch-3");
-    private static final OpaqueToken PHONE_TOKEN = new OpaqueToken("k1." + "A".repeat(43));
-    private static final OpaqueToken TABLET_TOKEN = new OpaqueToken("k1." + "T".repeat(43));
-    private static final OpaqueToken WATCH_TOKEN = new OpaqueToken("k1." + "B".repeat(43));
-    private static final OpaqueToken NEW_TOKEN = new OpaqueToken("k1." + "C".repeat(43));
+    private static final OpaqueToken PHONE_TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:" + "A".repeat(43));
+    private static final OpaqueToken TABLET_TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000020:" + "T".repeat(43));
+    private static final OpaqueToken WATCH_TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000002:" + "B".repeat(43));
+    private static final OpaqueToken NEW_TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000003:" + "C".repeat(43));
     private static final EnrollmentId ENROLLMENT = EnrollmentId.random();
     private static final String WATCH_KEY = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"watch\"}";
     private static final String QR_TOKEN = "q".repeat(43);
@@ -109,7 +109,7 @@ class DeviceApprovalServiceTest {
                 WATCH_TOKEN);
         when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-7", NOW.plus(Duration.ofMinutes(5))));
         when(qrTokens.next()).thenReturn(QR_TOKEN);
-        when(tokens.next()).thenReturn(NEW_TOKEN);
+        when(tokens.next(any(), any())).thenReturn(NEW_TOKEN);
         when(sealer.seal(eq("{watch-kenc}"), eq(NEW_TOKEN), any())).thenReturn("jwe.token");
     }
 
@@ -305,7 +305,7 @@ class DeviceApprovalServiceTest {
     void anExpiredTokenEndsTheRequestAndTheSessionAndAClaimFromAnotherSessionIsAConflict() {
         authorizeTheWatch();
         // Another restricted session of the same watch (a second login) did not make the request.
-        OpaqueToken otherWatchToken = new OpaqueToken("k1." + "D".repeat(43));
+        OpaqueToken otherWatchToken = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000004:" + "D".repeat(43));
         sessions.create(Session.startRestricted(SessionId.random(), ALICE, WATCH, Channel.MOBILE, NOW, DevicePolicy.standard()),
                 otherWatchToken);
         assertThat(service.claim(new ClaimEnrollmentCommand(otherWatchToken, QR_TOKEN, "{watch-kenc}")))

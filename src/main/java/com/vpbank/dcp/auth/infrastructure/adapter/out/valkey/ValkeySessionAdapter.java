@@ -6,6 +6,9 @@ import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Session;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -33,9 +36,15 @@ public final class ValkeySessionAdapter implements SessionStore {
 
     @Override
     public void create(Session session, OpaqueToken token) {
+        if (!token.sessionId().equals(session.id()) || token.channel() != session.channel()) {
+            throw new IllegalArgumentException("Token and session do not name the same session");
+        }
         SessionLookup sessionLookup = sessionKeys.lookupOf(token);
         String key = sessionKeys.forLookup(sessionLookup);
-        Map<String, String> fields = SessionHashCodec.encode(session);
+
+        Map<String, String> fields = new LinkedHashMap<>(SessionHashCodec.encode(session));
+        fields.put(SessionHashCodec.F_SECRET, token.secret());
+
         translate(() -> stringRedisTemplate.execute(new SessionCallback<List<Object>>() {
             @Override
             @SuppressWarnings("unchecked")
@@ -49,10 +58,20 @@ public final class ValkeySessionAdapter implements SessionStore {
         }));
     }
 
+    /** By token: the stored secret must equal the presented one, compared in constant time; otherwise "no session". */
     @Override
     public Optional<StoredSession> findByToken(OpaqueToken token) {
         SessionLookup sessionLookup = sessionKeys.lookupOf(token);
-        return findByLookup(sessionLookup);
+        String key = sessionKeys.forLookup(sessionLookup);
+
+        return translate(() -> {
+            Map<String, String> fields = readFields(stringRedisTemplate, key);
+            String storedSecret = fields.get(SessionHashCodec.F_SECRET);
+            if (storedSecret == null || !sameSecret(storedSecret, token.secret())) {
+                return Optional.empty();
+            }
+            return SessionHashCodec.decode(fields).map(session -> new StoredSession(sessionLookup, session));
+        });
     }
 
     @Override
@@ -112,15 +131,28 @@ public final class ValkeySessionAdapter implements SessionStore {
     }
 
     private static Optional<Session> read(RedisOperations<String, String> ops, String key) {
-        Map<Object, Object> rawFields = ops.opsForHash().entries(key);
-        if (rawFields == null || rawFields.isEmpty()) {
+        Map<String, String> fields = readFields(ops, key);
+        if (fields.isEmpty()) {
             return Optional.empty();
         }
-        Map<String, String> fields = rawFields.entrySet().stream()
+        return SessionHashCodec.decode(fields);
+    }
+
+    private static Map<String, String> readFields(RedisOperations<String, String> ops, String key) {
+        Map<Object, Object> rawFields = ops.opsForHash().entries(key);
+        if (rawFields == null) {
+            return Map.of();
+        }
+        return rawFields.entrySet().stream()
                 .collect(Collectors.toMap(
                         field -> String.valueOf(field.getKey()),
                         field -> String.valueOf(field.getValue())));
-        return SessionHashCodec.decode(fields);
+    }
+
+    private static boolean sameSecret(String storedSecret, String presentedSecret) {
+        byte[] stored = storedSecret.getBytes(StandardCharsets.US_ASCII);
+        byte[] presented = presentedSecret.getBytes(StandardCharsets.US_ASCII);
+        return MessageDigest.isEqual(stored, presented);
     }
 
     private static <T> T translate(Supplier<T> storeCall) {

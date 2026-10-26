@@ -29,7 +29,7 @@ class LoginConfigurationTest {
             "auth.login.keycloak.realm=test",
             "auth.login.keycloak.client-id=authentication-service",
             "auth.login.keycloak.client-secret=secret",
-            "auth.session.lookup-hmac-keys-base64.k1=" + Base64.getEncoder().encodeToString(new byte[32]),
+            "auth.captcha.answer-hmac-key-base64=" + Base64.getEncoder().encodeToString(new byte[32]),
             "auth.device.lookup-hmac-keys-base64.d1=" + Base64.getEncoder().encodeToString(new byte[32]),
             "auth.device.encryption-keys-base64.e1=" + Base64.getEncoder().encodeToString(new byte[32]),
             "auth.mfa.origin=https://mfa.test",
@@ -65,17 +65,12 @@ class LoginConfigurationTest {
     }
 
     @Test
-    void aShortHmacKeyOrAnIssueVersionWithoutAKeyStopsStartupNamingTheSetting() {
+    void aShortCaptchaKeyStopsStartupNamingTheSetting() {
         runner.withPropertyValues(ENABLED)
-                .withPropertyValues("auth.session.lookup-hmac-keys-base64.k1=" + Base64.getEncoder().encodeToString(new byte[8]))
+                .withPropertyValues("auth.captcha.answer-hmac-key-base64=" + Base64.getEncoder().encodeToString(new byte[8]))
                 .run(context -> {
                     assertThat(context).hasFailed();
-                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("lookup-hmac-keys-base64.k1");
-                });
-        runner.withPropertyValues(ENABLED).withPropertyValues("auth.session.lookup-key-version=k2")
-                .run(context -> {
-                    assertThat(context).hasFailed();
-                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("lookup-key-version");
+                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("auth.captcha.answer-hmac-key-base64");
                 });
     }
 

@@ -440,7 +440,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
                 clock.instant(),
                 sessionPolicy);
 
-        OpaqueToken token = opaqueTokenGenerator.next();
+        OpaqueToken token = opaqueTokenGenerator.next(activeSession.channel(), activeSession.id());
         String tokenEnvelope = tokenEnvelopeSealer.seal(command.tokenEncryptionKey(), token, activeSession);
         sessionStore.create(activeSession, token);
 

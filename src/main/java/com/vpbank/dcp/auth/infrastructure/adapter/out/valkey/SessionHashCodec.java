@@ -44,13 +44,15 @@ public final class SessionHashCodec {
     static final String F_SERVER_PRIVATE_JWK = "serverPrivateJwk";
     static final String F_CHALLENGE_DIGEST = "challengeDigest";
     static final String F_KEY_PROVEN = "keyProven";
+    /** The token's secret, written by the adapter at create and compared on every read by token (slice 7). */
+    static final String F_SECRET = "secret";
     private static final Set<String> REQUIRED = Set.of(F_SCHEMA, F_SESSION_ID, F_CUSTOMER_ID, F_CHANNEL, F_STATUS,
             F_CREATED_AT, F_IDLE_EXPIRES_AT, F_ABSOLUTE_EXPIRES_AT, F_SESSION_VERSION);
     private static final Set<String> ENROLLMENT = Set.of(F_ENROLLMENT_ID, F_DEVICE_JWK, F_DEVICE_PLATFORM, F_SERVER_PUBLIC_JWK,
             F_SERVER_PRIVATE_JWK, F_CHALLENGE_DIGEST, F_KEY_PROVEN);
     private static final Set<String> KNOWN = Set.of(F_SCHEMA, F_SESSION_ID, F_CUSTOMER_ID, F_DEVICE_ID, F_CHANNEL,
             F_STATUS, F_CREATED_AT, F_IDLE_EXPIRES_AT, F_ABSOLUTE_EXPIRES_AT, F_SESSION_VERSION, F_ENROLLMENT_ID, F_DEVICE_JWK,
-            F_DEVICE_PLATFORM, F_SERVER_PUBLIC_JWK, F_SERVER_PRIVATE_JWK, F_CHALLENGE_DIGEST, F_KEY_PROVEN);
+            F_DEVICE_PLATFORM, F_SERVER_PUBLIC_JWK, F_SERVER_PRIVATE_JWK, F_CHALLENGE_DIGEST, F_KEY_PROVEN, F_SECRET);
 
     private SessionHashCodec() {
     }
