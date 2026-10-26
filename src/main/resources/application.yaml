@@ -1,6 +1,6 @@
 spring:
   application:
-    name: authentication-service-v2
+    name: authentication-service
   data:
     redis:
       url: ${AUTH_VALKEY_URL:redis://localhost:6379}

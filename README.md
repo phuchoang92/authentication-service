@@ -1,4 +1,4 @@
-# authentication-service-v2
+# authentication-service
 
 New authentication service, built bottom-up from the DB design phases in
 `../authentication-service-src/docs/db-phases/`. No code from the earlier trees is used.
