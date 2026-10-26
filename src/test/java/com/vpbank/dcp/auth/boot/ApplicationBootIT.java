@@ -266,6 +266,65 @@ class ApplicationBootIT {
                 .andExpect(jsonPath("$.data[?(@.deviceId == '…ev-1')].primary").value(false))
                 .andExpect(jsonPath("$.data[?(@.deviceId == '…et-2')].primary").value(true))
                 .andExpect(jsonPath("$.data[?(@.deviceId == '…et-2')].trustLevel").value("TRUSTED"));
+
+        // Slice 6: a watch asks to be approved; the tablet (current primary) approves with FACE + OTP and shows a QR.
+        String watchBody = loginBody.replace("\"deviceId\":\"dev-1\",\"platform\":\"ANDROID\"",
+                "\"deviceId\":\"watch-3\",\"platform\":\"IOS\"");
+        MvcResult watchLogin = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(watchBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
+        String watchRestrictedToken = tokenOf(watchLogin, kenc);
+        ECKey watchKey = new ECKeyGenerator(Curve.P_256).generate();
+        MvcResult request = mvc.perform(post("/api/v1/trusted-device/request").header("Authorization", "Bearer " + watchRestrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"devicePublicJwk\":" + watchKey.toPublicJWK().toJSONString() + ",\"platform\":\"IOS\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL")).andReturn();
+        String approvalId = field(request.getResponse().getContentAsString(), "enrollmentId");
+        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", "Bearer " + watchRestrictedToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
+
+        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", "Bearer " + phoneToken))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error.code").value("NOT_PRIMARY_DEVICE"));
+        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", "Bearer " + tabletActiveToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].enrollmentId").value(approvalId))
+                .andExpect(jsonPath("$.data[0].deviceId").value("…ch-3"))
+                .andExpect(jsonPath("$.data[0].platform").value("IOS"));
+        when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-txn-2", java.time.Instant.now().plusSeconds(300)));
+        mvc.perform(post("/api/v1/trusted-device/pending/" + approvalId + "/approve").header("Authorization", "Bearer " + tabletActiveToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("MFA_REQUIRED"))
+                .andExpect(jsonPath("$.data.mfaTransactionId").value("mfa-txn-2"));
+        when(mfa.check(any())).thenReturn(new CheckResult.Passed("approval-receipt"));
+        MvcResult authorize = mvc.perform(post("/api/v1/trusted-device/pending/" + approvalId + "/authorize")
+                        .header("Authorization", "Bearer " + tabletActiveToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_AUTHORIZATION")).andReturn();
+        String qrToken = field(authorize.getResponse().getContentAsString(), "authorizationToken");
+        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", "Bearer " + watchRestrictedToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_AUTHORIZATION"));
+
+        // The watch scans the QR: a wrong token costs an attempt, the right one makes it trusted and primary.
+        ECKey watchKenc = new ECKeyGenerator(Curve.P_256).generate();
+        String claimBody = "{\"authorizationToken\":\"" + qrToken + "\",\"tokenEncryptionKey\":" + watchKenc.toPublicJWK().toJSONString() + "}";
+        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + watchRestrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(claimBody.replace(qrToken, "not-the-qr-token")))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("WRONG_AUTHORIZATION"))
+                .andExpect(jsonPath("$.error.details[0].message").value("4"));
+        MvcResult claim = mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + watchRestrictedToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(claimBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$..token").doesNotExist()).andReturn();
+        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", "Bearer " + watchRestrictedToken))
+                .andExpect(status().isUnauthorized());
+        String watchActiveToken = tokenOf(claim, watchKenc);
+        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + watchActiveToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(3))
+                .andExpect(jsonPath("$.data[?(@.deviceId == '…ch-3')].primary").value(true))
+                .andExpect(jsonPath("$.data[?(@.deviceId == '…ch-3')].trustLevel").value("TRUSTED"))
+                .andExpect(jsonPath("$.data[?(@.deviceId == '…et-2')].primary").value(false))
+                .andExpect(jsonPath("$.data[?(@.deviceId == '…et-2')].trustLevel").value("TRUSTED"));
+        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", "Bearer " + watchActiveToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
     }
 
     /** Plays the app: open the challenge with the device key and re-seal it to Ksrv (DD 20 §6a). */

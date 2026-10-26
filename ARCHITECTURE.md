@@ -162,7 +162,7 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-25, slices 1–5 implemented, layout and conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
+**Current (2026-10-26, slices 1–6 implemented, layout and conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
 `RestConfiguration`), `infrastructure.adapter.out.*`, `infrastructure.config`,
 `application.command` / `application.result`, `application.port.in` with use-case interfaces
 only, and `application.port.out.{repository,gateway,model,exception}` with no top-level types at
@@ -179,9 +179,12 @@ Lombok allow-list. Implemented flows: registration (slice 1), login/session (sli
 lockout with CAPTCHA (slice 3), trusted devices (slice 4: `TrustedDeviceService` called by
 `LoginService` — the §6.1 composition is real), device enrollment init → verify → confirm with
 FACE (slice 5: `DeviceEnrollmentService` calls `TrustedDeviceService.confirmTrust`; the MFA
-contract sits behind `MfaTransactionPort`). Slice decisions:
+contract sits behind `MfaTransactionPort`), approval of a new device by the current primary device
+through a one-time QR token (slice 6: `DeviceApprovalService` calls `TrustedDeviceService` for the
+PENDING row, the primary check and `confirmTrustByApproval`; REST IDs are opaque strings per
+CODE_CONVENTIONS §5). Slice decisions:
 `docs/plans/slice-2-login-session.md`, `slice-3-password-lockout.md`, `slice-4-trusted-device.md`,
-`slice-5-enrollment.md`.
+`slice-5-enrollment.md`, `slice-6-device-approval.md`.
 That record does not verify the new enum/constant layout. Its implementation slice must
 update architecture checks and preserve enum wire/storage codes; no tests are run here.
 

@@ -6,7 +6,7 @@ New authentication service, built bottom-up from the DB design phases in
 Development rules: [architecture and package boundaries](ARCHITECTURE.md),
 [code conventions and readability examples](CODE_CONVENTIONS.md).
 
-**Status (2026-10-25): slices 1–5 done, code aligned with
+**Status (2026-10-26): slices 1–6 done, code aligned with
 [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)** on [ARCHITECTURE.md](ARCHITECTURE.md) (layer-first
 hexagonal under `domain` / `application` / `infrastructure`, business enums in `domain.enums`,
 Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
@@ -16,7 +16,8 @@ Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
 ([plan](docs/plans/slice-2-login-session.md)), password lockout with CAPTCHA
 ([plan](docs/plans/slice-3-password-lockout.md)) and trusted devices
 ([plan](docs/plans/slice-4-trusted-device.md)) and device enrollment init → verify → confirm with
-FACE ([plan](docs/plans/slice-5-enrollment.md)), each off by default.
+FACE ([plan](docs/plans/slice-5-enrollment.md)) and approval of a new device by the current primary
+device through a QR token ([plan](docs/plans/slice-6-device-approval.md)), each off by default.
 
 | Path | Caller | Result |
 |---|---|---|
@@ -26,6 +27,12 @@ FACE ([plan](docs/plans/slice-5-enrollment.md)), each off by default.
 | `POST /api/v1/trusted-device/init` | app, restricted session | `200 {status:"KEY_EXCHANGE", enrollmentId, serverPublicJwk, challenge (JWE to the device key), expiresAt}`; `400 DEVICE_KEY_REQUIRED`; `409 STATE_CONFLICT` (ACTIVE session or init already done) |
 | `POST /api/v1/trusted-device/verify` | app, restricted session | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}`; `401 WRONG_CHALLENGE` + detail `attemptsLeft`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT`; `503` |
 | `POST /api/v1/trusted-device/confirm` | app, restricted session | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at confirm; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT`; `503` |
+| `POST /api/v1/trusted-device/request` | new device, restricted session | `200 {status:"WAITING_APPROVAL", enrollmentId, expiresAt}` (same answer on repeat); `400 DEVICE_KEY_REQUIRED`; `409 TOO_MANY_PENDING_DEVICES`; `409 STATE_CONFLICT` |
+| `GET /api/v1/trusted-device/status` | new device, restricted session | `200 {status, enrollmentId, expiresAt}` — `WAITING_APPROVAL`, `WAITING_AUTHORIZATION`, `FAILED`, `EXPIRED`; `409 STATE_CONFLICT` without a request |
+| `GET /api/v1/trusted-device/pending` | primary device, ACTIVE session | `200 [{enrollmentId, deviceId (masked), platform, status, expiresAt}]`; `403 NOT_PRIMARY_DEVICE` |
+| `POST /api/v1/trusted-device/pending/{enrollmentId}/approve` | primary device | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}` (FACE + OTP at MFA); `403 NOT_PRIMARY_DEVICE`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT` |
+| `POST /api/v1/trusted-device/pending/{enrollmentId}/authorize` | primary device | `200 {status:"WAITING_AUTHORIZATION", enrollmentId, authorizationToken, expiresAt}` — the QR; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT` |
+| `POST /api/v1/trusted-device/claim` | new device, the same restricted session | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at claim; `401 WRONG_AUTHORIZATION` + detail `attemptsLeft`; `401 AUTHORIZATION_EXPIRED`; `409 STATE_CONFLICT` |
 | `GET /api/v1/devices` | app, ACTIVE session | `200 [{deviceId (masked), platform, status, trustLevel, primary, trustedAt, expiresAt, lastLoginAt}]`; `403 DEVICE_TRUST_REQUIRED` from a restricted session |
 | `POST /internal/v1/customers/{customerId}/password-unlock` | bank tooling | `204`; `404 CUSTOMER_UNKNOWN` |
 | `POST /internal/v1/sessions/extend` | BFF after admission (flow 16) | `200 {idleExpiresAt, absoluteExpiresAt}`; `400`; `410 SESSION_GONE`; `409 SESSION_CONFLICT`; `503` |
@@ -55,6 +62,17 @@ installation, expiring the oldest beyond the cap), the primary row (`FACE_CONFIR
 enrollment `COMPLETED` and the audit trail; the restricted session is consumed and a new ACTIVE
 session is sealed to the key sent at confirm. Ksrv's private key lives only in the restricted
 session's Valkey HASH. The MFA contract is an assumption until the MFA team confirms it.
+
+**Approval by the primary device (phase 4, second path, slice 6):** a new installation on a restricted
+session calls `request` with its public key; Auth keeps a `PENDING` device row (not trusted, at most 3
+waiting per customer and channel) and an approval request bound to that session. The customer opens the
+current primary device, lists the pending requests, approves one (FACE + OTP at the MFA service) and
+receives a one-time 32-byte token, valid 180 s, which the app shows as a QR. The new device scans it and
+calls `claim` from the same session: attempts are counted before the digest check (5, then the request
+fails and the session ends), and on success one SQL transaction makes the pending row trusted and the
+customer's primary (`PRIMARY_MODE = OLD_DEVICE_APPROVAL`), expires the oldest device beyond the cap,
+completes the request and writes the audit trail with the approving device as actor. The old primary
+stays trusted. Auth stores only the token's SHA-256. Push notification to the primary is a follow-up.
 
 **Lockout (phase 2):** consecutive password failures on one identity escalate — after 2 the next
 login must carry a solved CAPTCHA (`captcha{captchaId, answer}` from `/login/captcha`, bound to the
@@ -89,21 +107,20 @@ Java 25, Maven 3.9, Docker for the MySQL integration tests:
 mvn -o verify
 ```
 
-Last run (2026-10-25, slice 5 complete): 241 tests, 0 failures — 217 unit
-(domain state machines and value objects, frozen enum codes, services with in-memory doubles,
-web/persistence/partner mappers, Valkey key vector and codec, error catalogue, Keycloak admin +
-Direct Grant with a test-signed ID token, JWE sealer and challenge sealer round trips, MFA HTTP
-adapter with a test-signed receipt, lockout escalation, CAPTCHA generator/service, `@WebMvcTest`
-slices incl. the session filter and the trusted-device routes, the enrollment REST mapper status
-table, configuration, 12 ArchUnit rules) and 24 on Testcontainers
-(`RegistrationPersistenceAdapterIT`, `CustomerAuthenticationPersistenceAdapterIT`,
-`TrustedDevicePersistenceAdapterIT` and `DeviceEnrollmentPersistenceAdapterIT` on MySQL 8.4,
-`ValkeySessionAdapterIT` and `ValkeyCaptchaStoreIT` on `valkey/valkey:9.1`, `ApplicationBootIT`
-booting everything against MySQL + Valkey: register → 2 failures → CAPTCHA → login → decrypt
-envelope → extend → logout → lock → unlock → second device NEED_TRUSTED_DEVICE → device list → tablet enrollment init (challenge
-opened with the test's device key and re-sealed to Ksrv) → verify (MFA port mocked) → confirm PENDING
-then PASSED → ACTIVE envelope decrypted with the confirm key → two devices, tablet primary).
-No real Customer, Keycloak, Notification or MFA service was called.
+Last run (2026-10-26, slice 6 complete): 258 tests, 0 failures — 232 unit
+(domain state machines and value objects, frozen enum codes, services with in-memory doubles incl. the
+approval flow, web/persistence/partner mappers, Valkey key vector and codec, error catalogue, Keycloak
+admin + Direct Grant with a test-signed ID token, JWE sealer and challenge sealer round trips, MFA HTTP
+adapter with test-signed FACE and FACE+OTP receipts, lockout escalation, CAPTCHA generator/service,
+`@WebMvcTest` slices incl. the session filter, the trusted-device and approval routes, configuration,
+12 ArchUnit rules) and 26 on Testcontainers (`RegistrationPersistenceAdapterIT`,
+`CustomerAuthenticationPersistenceAdapterIT`, `TrustedDevicePersistenceAdapterIT` incl. pending rows and
+`DeviceEnrollmentPersistenceAdapterIT` incl. the approval round trip on MySQL 8.4, `ValkeySessionAdapterIT`
+and `ValkeyCaptchaStoreIT` on `valkey/valkey:9.1`, `ApplicationBootIT` booting everything against MySQL +
+Valkey: register → 2 failures → CAPTCHA → login → decrypt envelope → extend → logout → lock → unlock →
+second device NEED_TRUSTED_DEVICE → device list → tablet enrollment init → verify → confirm → ACTIVE →
+watch request → tablet pending/approve/authorize (MFA mocked) → wrong QR token → claim → watch primary,
+three devices). No real Customer, Keycloak, Notification or MFA service was called.
 
 ## Configuration
 

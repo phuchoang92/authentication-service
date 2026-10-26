@@ -179,7 +179,8 @@ class DeviceEnrollmentPersistenceAdapterIT {
         DeviceId watchId = new DeviceId("watch-3");
         TrustedDevice watch = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE, watchId,
                 DevicePlatform.IOS, "{watch-key}", now, Duration.ofMinutes(10));
-        devices.registerPending(watch, "corr-r");
+        // The request and the claim share the restricted session as correlation ID, like the service does.
+        devices.registerPending(watch, "corr-c");
         SessionId watchSession = SessionId.random();
         DeviceEnrollment requested = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
                 Channel.MOBILE, watchId, watch.id(), now.plusSeconds(600)), watchSession);
@@ -244,10 +245,12 @@ class DeviceEnrollmentPersistenceAdapterIT {
         assertThat(completedRow.getAuthorizedSessionRefDigest()).isEqualTo(completedRow.getCreationIdempotencyDigest());
         assertThat(enrollments.findOpenApprovals(ALICE, Channel.MOBILE)).isEmpty();
         List<TrustedDeviceAuditEntity> events = audit.findByCorrelationIdOrderByEventSequenceAsc("corr-c");
-        assertThat(events).extracting(TrustedDeviceAuditEntity::getEventType).containsExactly("DEVICE_TRUSTED", "PRIMARY_CHANGED");
-        assertThat(events).extracting(TrustedDeviceAuditEntity::getReasonCode).containsOnly("OLD_DEVICE_APPROVAL");
-        assertThat(events).extracting(TrustedDeviceAuditEntity::getActorDeviceId).containsOnly(phone.id().value());
-        assertThat(events.getFirst().getMetadata()).contains(phone.id().value().toString());
+        assertThat(events).extracting(TrustedDeviceAuditEntity::getEventType)
+                .containsExactly("DEVICE_REGISTERED", "DEVICE_TRUSTED", "PRIMARY_CHANGED");
+        assertThat(events).extracting(TrustedDeviceAuditEntity::getEventSequence).containsExactly(0, 1, 2);
+        assertThat(events.subList(1, 3)).extracting(TrustedDeviceAuditEntity::getReasonCode).containsOnly("OLD_DEVICE_APPROVAL");
+        assertThat(events.subList(1, 3)).extracting(TrustedDeviceAuditEntity::getActorDeviceId).containsOnly(phone.id().value());
+        assertThat(events.get(1).getMetadata()).contains(phone.id().value().toString());
     }
 
     @Autowired com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection protectionBean;

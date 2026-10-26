@@ -51,6 +51,7 @@ class ArchitectureTest {
                 .adapter("jose", OUT + ".jose..")
                 .adapter("captcha", OUT + ".captcha..")
                 .adapter("mfa", OUT + ".mfa..")
+                .adapter("token", OUT + ".token..")
                 .withOptionalLayers(true)
                 // config wires every ring; it is the only package allowed to see all of them
                 .ignoreDependency(JavaClass.Predicates.resideInAPackage(CONFIG + ".."), DescribedPredicate.alwaysTrue())

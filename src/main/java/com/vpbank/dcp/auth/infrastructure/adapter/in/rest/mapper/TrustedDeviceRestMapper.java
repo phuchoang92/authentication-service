@@ -122,9 +122,10 @@ public final class TrustedDeviceRestMapper {
     private static ResponseEntity<ApiEnvelope<InitEnrollmentResponse>> keyExchange(
             InitEnrollmentResult.KeyExchange keyExchange) {
         Map<String, Object> serverPublicJwk = JwkJson.toMap(keyExchange.serverPublicJwk());
+        String publicEnrollmentId = keyExchange.enrollmentId().value().toString();
         InitEnrollmentResponse response = new InitEnrollmentResponse(
                 EnrollmentState.KEY_EXCHANGE.name(),
-                keyExchange.enrollmentId().value(),
+                publicEnrollmentId,
                 serverPublicJwk,
                 keyExchange.challenge(),
                 keyExchange.expiresAt());

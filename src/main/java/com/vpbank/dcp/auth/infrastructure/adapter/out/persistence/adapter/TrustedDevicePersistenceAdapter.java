@@ -168,10 +168,11 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
         Instant now = clock.instant();
         TrustedDevice newTrustedDevice = confirmation.device();
         UUID enrollmentId = confirmation.enrollment().id().value();
-        // These audit events carry no extra metadata; only the trust event records the receipt digest.
+        // These audit events carry no extra metadata; only the trust event records what proved the trust.
         String noMetadata = null;
         try {
-            int sequence = 0;
+            // The approval path already wrote DEVICE_REGISTERED under this correlation ID: continue its sequence.
+            int sequence = trustedDeviceAuditJpaRepository.countByCorrelationId(correlationId);
 
             TrustedDevice replacedDevice = confirmation.replaced();
             if (replacedDevice != null) {

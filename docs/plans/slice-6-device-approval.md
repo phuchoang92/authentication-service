@@ -1,6 +1,6 @@
 # Slice 6 — a new device trusted and made primary by the current primary device (DB phase 4, approval path)
 
-Status: **approved 2026-10-26, in progress** (turns 1–2 done: domain, application, persistence; turn 3 REST pending). Schema: the phase-4 columns
+Status: **implemented 2026-10-26** (turns 1–3; see README for the test run). Schema: the phase-4 columns
 (`REQUESTER_*`, `ACTOR_DEVICE_ID`, `AUTHORIZATION_*`, `PRIMARY_MODE = OLD_DEVICE_APPROVAL`) already in
 `V4__enrollment.sql`; no new migration. Slice 5 is the **primary enrollment** (`init → verify → confirm`,
 FACE on the device itself); this slice is the second path of DD 20 §4 / phase 4.

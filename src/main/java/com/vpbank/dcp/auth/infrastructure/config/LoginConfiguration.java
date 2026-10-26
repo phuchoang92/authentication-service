@@ -6,6 +6,7 @@ import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
 import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
+import com.vpbank.dcp.auth.application.port.out.gateway.AuthorizationTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.ChallengeSealer;
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
@@ -19,6 +20,7 @@ import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.service.CaptchaService;
+import com.vpbank.dcp.auth.application.service.DeviceApprovalService;
 import com.vpbank.dcp.auth.application.service.DeviceEnrollmentService;
 import com.vpbank.dcp.auth.application.service.LoginService;
 import com.vpbank.dcp.auth.application.service.PasswordUnlockService;
@@ -34,6 +36,7 @@ import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceApprovalRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.LoginRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.PasswordUnlockRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.SessionRestMapper;
@@ -49,6 +52,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.mfa.MfaReceiptVerifier;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.CustomerAuthenticationPersistenceAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.DeviceEnrollmentJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.token.RandomAuthorizationTokenGenerator;
 import java.security.SecureRandom;
 import java.text.ParseException;
 import java.time.Clock;
@@ -175,6 +179,46 @@ public class LoginConfiguration {
                 approval.tokenLifetime(),
                 approval.maxClaimAttempts(),
                 approval.maxPendingDevices());
+    }
+
+    /** One bean, six use-case views (request/status/pending/approve/authorize/claim), like DeviceEnrollmentService. */
+    @Bean
+    DeviceApprovalService deviceApprovalService(SessionStore sessionStore,
+                                                EnrollmentRepository enrollmentRepository,
+                                                TrustedDeviceRepository trustedDeviceRepository,
+                                                TrustedDeviceService trustedDeviceService,
+                                                MfaTransactionPort mfaTransactionPort,
+                                                AuthorizationTokenGenerator authorizationTokenGenerator,
+                                                TokenEnvelopeSealer tokenEnvelopeSealer,
+                                                OpaqueTokenGenerator opaqueTokenGenerator,
+                                                LoginProperties properties,
+                                                SessionPolicy sessionPolicy,
+                                                Clock clock) {
+        EnrollmentPolicy enrollmentPolicy = enrollmentPolicy(properties);
+        return new DeviceApprovalService(
+                sessionStore,
+                enrollmentRepository,
+                trustedDeviceRepository,
+                trustedDeviceService,
+                mfaTransactionPort,
+                authorizationTokenGenerator,
+                tokenEnvelopeSealer,
+                opaqueTokenGenerator,
+                EnrollmentId::random,
+                SessionId::random,
+                enrollmentPolicy,
+                sessionPolicy,
+                clock);
+    }
+
+    @Bean
+    AuthorizationTokenGenerator authorizationTokenGenerator() {
+        return new RandomAuthorizationTokenGenerator(new SecureRandom());
+    }
+
+    @Bean
+    DeviceApprovalRestMapper deviceApprovalRestMapper(ErrorMessages errorMessages) {
+        return new DeviceApprovalRestMapper(errorMessages);
     }
 
     @Bean

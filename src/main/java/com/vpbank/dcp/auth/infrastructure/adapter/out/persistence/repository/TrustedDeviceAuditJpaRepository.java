@@ -7,5 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface TrustedDeviceAuditJpaRepository extends JpaRepository<TrustedDeviceAuditEntity, UUID> {
 
+    /** Events already written under a correlation ID; the next event continues the sequence (UQ_TDA_OPERATION_SEQUENCE). */
+    int countByCorrelationId(String correlationId);
+
     List<TrustedDeviceAuditEntity> findByCorrelationIdOrderByEventSequenceAsc(String correlationId);
 }

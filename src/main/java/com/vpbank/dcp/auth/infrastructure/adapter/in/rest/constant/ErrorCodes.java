@@ -23,6 +23,10 @@ public final class ErrorCodes {
     public static final String MFA_NOT_PASSED = "MFA_NOT_PASSED";
     public static final String MFA_FAILED = "MFA_FAILED";
     public static final String MFA_EXPIRED = "MFA_EXPIRED";
+    public static final String TOO_MANY_PENDING_DEVICES = "TOO_MANY_PENDING_DEVICES";
+    public static final String NOT_PRIMARY_DEVICE = "NOT_PRIMARY_DEVICE";
+    public static final String WRONG_AUTHORIZATION = "WRONG_AUTHORIZATION";
+    public static final String AUTHORIZATION_EXPIRED = "AUTHORIZATION_EXPIRED";
     public static final String SESSION_GONE = "SESSION_GONE";
     public static final String SESSION_CONFLICT = "SESSION_CONFLICT";
     public static final String CUSTOMER_UNKNOWN = "CUSTOMER_UNKNOWN";

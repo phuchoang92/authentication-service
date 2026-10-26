@@ -30,7 +30,7 @@ HMAC(session lookup digest ‖ device lookup) so a repeated init from the same r
 the same enrollment; `EXPIRES_AT` = restricted session expiry.
 
 Deferred: BFF assertion, Kreq/DPoP, Ksrv persistence (phase 5), biometric revocation (phase 6/7),
-Customer status re-read before the ACTIVE session (phase 9), old-device approval.
+Customer status re-read before the ACTIVE session (phase 9). Old-device approval is slice 6 (`slice-6-device-approval.md`).
 
 ## API (envelope + codes as everywhere)
 

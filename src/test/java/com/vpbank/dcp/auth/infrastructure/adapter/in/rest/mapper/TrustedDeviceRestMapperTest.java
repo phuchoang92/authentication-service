@@ -69,7 +69,7 @@ class TrustedDeviceRestMapperTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         InitEnrollmentResponse body = response.getBody().data();
         assertThat(body.status()).isEqualTo("KEY_EXCHANGE");
-        assertThat(body.enrollmentId()).isEqualTo(keyExchange.enrollmentId().value());
+        assertThat(body.enrollmentId()).isEqualTo(keyExchange.enrollmentId().value().toString());
         assertThat(body.serverPublicJwk()).containsEntry("x", "abc").containsEntry("crv", "P-256");
         assertThat(body.challenge()).isEqualTo("eyJ.jwe");
     }
