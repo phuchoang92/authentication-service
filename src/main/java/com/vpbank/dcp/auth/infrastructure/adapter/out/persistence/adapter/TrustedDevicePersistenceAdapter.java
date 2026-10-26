@@ -5,6 +5,7 @@ import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
+import com.vpbank.dcp.auth.domain.enums.PrimaryMode;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
@@ -51,6 +52,7 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
     static final String EVENT_LOGIN = "DEVICE_LOGIN";
     static final String EVENT_EXPIRED = "DEVICE_EXPIRED";
     static final String EVENT_REPLACED = "DEVICE_REPLACED";
+    static final String EVENT_REGISTERED = "DEVICE_REGISTERED";
     static final String EVENT_PRIMARY_CHANGED = "PRIMARY_CHANGED";
 
     private static final String AUDIT_CAUSE_LOGIN = "LOGIN";
@@ -59,6 +61,8 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
     private static final String AUDIT_REASON_REINSTALL = "REINSTALL";
     private static final String AUDIT_REASON_DEVICE_CAP = "DEVICE_CAP";
     private static final String AUDIT_REASON_MFA_FACE = "MFA_FACE";
+    private static final String AUDIT_REASON_APPROVAL_REQUESTED = "APPROVAL_REQUESTED";
+    private static final String AUDIT_REASON_OLD_DEVICE_APPROVAL = "OLD_DEVICE_APPROVAL";
 
     @NonNull private final TrustedDeviceJpaRepository trustedDeviceJpaRepository;
     @NonNull private final PrimaryTrustedDeviceJpaRepository primaryTrustedDeviceJpaRepository;
@@ -204,9 +208,7 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
                 sequence++;
             }
 
-            TrustedDeviceEntity newDeviceEntity =
-                    TrustedDevicePersistenceMapper.toEntity(newTrustedDevice, deviceIdProtection);
-            TrustedDeviceEntity savedDeviceEntity = trustedDeviceJpaRepository.saveAndFlush(newDeviceEntity);
+            TrustedDeviceEntity savedDeviceEntity = saveTrustedRow(newTrustedDevice);
 
             PrimaryTrustedDeviceEntity.Key primaryKey = new PrimaryTrustedDeviceEntity.Key(
                     newTrustedDevice.customerId().value(),
@@ -225,27 +227,31 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
             DeviceEnrollmentPersistenceMapper.apply(enrollmentEntity, confirmation.enrollment(), now);
             deviceEnrollmentJpaRepository.saveAndFlush(enrollmentEntity);
 
-            String receiptMetadataJson = "{\"receiptDigest\":\"" + confirmation.receiptDigest() + "\"}";
+            String trustReason = trustReasonOf(confirmation);
+            String trustMetadataJson = trustMetadataOf(confirmation);
+            UUID actorDeviceId = actorDeviceIdOf(confirmation);
             TrustedDeviceAuditEntity trustedAudit = TrustedDevicePersistenceMapper.toAudit(
                     newTrustedDevice,
+                    actorDeviceId,
                     correlationId,
                     sequence,
                     EVENT_TRUSTED,
                     AUDIT_CAUSE_LOGIN,
-                    AUDIT_REASON_MFA_FACE,
+                    trustReason,
                     now,
                     enrollmentId,
-                    receiptMetadataJson);
+                    trustMetadataJson);
             trustedDeviceAuditJpaRepository.save(trustedAudit);
             sequence++;
 
             TrustedDeviceAuditEntity primaryChangedAudit = TrustedDevicePersistenceMapper.toAudit(
                     newTrustedDevice,
+                    actorDeviceId,
                     correlationId,
                     sequence,
                     EVENT_PRIMARY_CHANGED,
                     AUDIT_CAUSE_LOGIN,
-                    AUDIT_REASON_MFA_FACE,
+                    trustReason,
                     now,
                     enrollmentId,
                     noMetadata);
@@ -257,14 +263,85 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
         }
     }
 
+    /**
+     * The PENDING row of an installation waiting for approval, with its registration event (slice 6). A lost
+     * race on UQ_TD_LIVE_INSTALLATION marks the transaction rollback-only: nothing of this attempt stays and
+     * the caller re-reads the live row.
+     */
     @Override
-    public TrustedDevice registerPending(TrustedDevice pendingDevice, String correlationId) {
-        throw new UnsupportedOperationException("slice 6 turn 2: PENDING rows are not persisted yet");
+    @Transactional
+    public RegisterPendingResult registerPending(TrustedDevice pendingDevice, String correlationId) {
+        Instant now = clock.instant();
+        try {
+            TrustedDeviceEntity pendingEntity = TrustedDevicePersistenceMapper.toEntity(pendingDevice, deviceIdProtection);
+            TrustedDeviceEntity savedEntity = trustedDeviceJpaRepository.saveAndFlush(pendingEntity);
+
+            int firstEventSequence = 0;
+            TrustedDeviceAuditEntity registeredAudit = TrustedDevicePersistenceMapper.toAudit(
+                    pendingDevice,
+                    correlationId,
+                    firstEventSequence,
+                    EVENT_REGISTERED,
+                    AUDIT_CAUSE_LOGIN,
+                    AUDIT_REASON_APPROVAL_REQUESTED,
+                    now);
+            trustedDeviceAuditJpaRepository.saveAndFlush(registeredAudit);
+
+            TrustedDevice registeredDevice = TrustedDevicePersistenceMapper.toDomain(savedEntity, deviceIdProtection)
+                    .orElseThrow();
+            return new RegisterPendingResult.Registered(registeredDevice);
+        } catch (DataIntegrityViolationException raced) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            return new RegisterPendingResult.InstallationAlreadyLive();
+        } catch (DataAccessException failure) {
+            throw new RepositoryUnavailableException(failure);
+        }
     }
 
     @Override
     public int countPending(CustomerId customerId, Channel channel) {
-        throw new UnsupportedOperationException("slice 6 turn 2: PENDING rows are not persisted yet");
+        return translate(() -> trustedDeviceJpaRepository.countByCustomerIdAndChannelAndStatus(
+                customerId.value(),
+                channel.name(),
+                DeviceStatus.PENDING));
+    }
+
+    /** A new installation is inserted; a PENDING or known live row that became trusted is updated in place. */
+    private TrustedDeviceEntity saveTrustedRow(TrustedDevice trustedDevice) {
+        Optional<TrustedDeviceEntity> existingEntity = trustedDeviceJpaRepository.findById(trustedDevice.id().value());
+        if (existingEntity.isPresent()) {
+            TrustedDevicePersistenceMapper.apply(existingEntity.get(), trustedDevice);
+            return trustedDeviceJpaRepository.saveAndFlush(existingEntity.get());
+        }
+        TrustedDeviceEntity newDeviceEntity = TrustedDevicePersistenceMapper.toEntity(trustedDevice, deviceIdProtection);
+        return trustedDeviceJpaRepository.saveAndFlush(newDeviceEntity);
+    }
+
+    /** The device itself passed FACE (slice 5), or the primary device approved it (slice 6). */
+    private static String trustReasonOf(TrustConfirmation confirmation) {
+        if (confirmation.primaryMode() == PrimaryMode.OLD_DEVICE_APPROVAL) {
+            return AUDIT_REASON_OLD_DEVICE_APPROVAL;
+        }
+        return AUDIT_REASON_MFA_FACE;
+    }
+
+    /** The trust event records what proved it: the receipt digest, or the approving device. */
+    private static String trustMetadataOf(TrustConfirmation confirmation) {
+        if (confirmation.receiptDigest() != null) {
+            return "{\"receiptDigest\":\"" + confirmation.receiptDigest() + "\"}";
+        }
+        if (confirmation.actorDeviceId() != null) {
+            return "{\"approvedBy\":\"" + confirmation.actorDeviceId().value() + "\"}";
+        }
+        return null;
+    }
+
+    /** The approving primary device when there is one; otherwise the trusted device acted for itself. */
+    private static UUID actorDeviceIdOf(TrustConfirmation confirmation) {
+        if (confirmation.actorDeviceId() != null) {
+            return confirmation.actorDeviceId().value();
+        }
+        return confirmation.device().id().value();
     }
 
     private void expireRow(TrustedDevice expiredDevice) {

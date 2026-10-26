@@ -89,6 +89,15 @@ public final class TrustedDevicePersistenceMapper {
     public static TrustedDeviceAuditEntity toAudit(TrustedDevice device, String correlationId, int sequence,
                                                    String eventType, String cause, String reasonCode, Instant occurredAt,
                                                    UUID enrollmentId, String metadataJson) {
+        UUID deviceActsForItself = device.id().value();
+        return toAudit(device, deviceActsForItself, correlationId, sequence, eventType, cause, reasonCode, occurredAt,
+                enrollmentId, metadataJson);
+    }
+
+    /** {@code actorDeviceId} is the device that caused the event: the device itself, or the primary that approved it. */
+    public static TrustedDeviceAuditEntity toAudit(TrustedDevice device, UUID actorDeviceId, String correlationId,
+                                                   int sequence, String eventType, String cause, String reasonCode,
+                                                   Instant occurredAt, UUID enrollmentId, String metadataJson) {
         return TrustedDeviceAuditEntity.builder()
                 .enrollmentId(enrollmentId)
                 .metadata(metadataJson)
@@ -100,7 +109,7 @@ public final class TrustedDevicePersistenceMapper {
                 .cause(cause)
                 .actorType("CUSTOMER")
                 .actorSubject(device.customerId().value())
-                .actorDeviceId(device.id().value())
+                .actorDeviceId(actorDeviceId)
                 .actorChannel(device.channel().name())
                 .targetDeviceId(device.id().value())
                 .targetChannel(device.channel().name())

@@ -2,6 +2,7 @@ package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
 import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
+import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.RegisterPendingResult;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.TrustFirstResult;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
@@ -219,8 +220,13 @@ public final class TrustedDeviceService implements ListDevicesUseCase {
                 clock.instant(),
                 enrollmentPolicy.pendingWindow());
 
-        TrustedDevice registeredDevice = trustedDeviceRepository.registerPending(pendingDevice, correlationId);
-        return Optional.of(registeredDevice);
+        RegisterPendingResult registerResult = trustedDeviceRepository.registerPending(pendingDevice, correlationId);
+        return switch (registerResult) {
+            case RegisterPendingResult.Registered(TrustedDevice registeredDevice) -> Optional.of(registeredDevice);
+            // another login of the same installation registered first: its row is the target
+            case RegisterPendingResult.InstallationAlreadyLive() ->
+                    trustedDeviceRepository.findLive(customerId, channel, deviceId);
+        };
     }
 
     /** This installation's row ID when it is the customer's trusted primary on the channel; empty otherwise. */

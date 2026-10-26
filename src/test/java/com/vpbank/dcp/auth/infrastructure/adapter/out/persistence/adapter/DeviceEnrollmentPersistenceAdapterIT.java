@@ -25,6 +25,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.Tru
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.config.DeviceConfiguration;
 import com.vpbank.dcp.auth.infrastructure.config.JpaConfiguration;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -143,6 +144,7 @@ class DeviceEnrollmentPersistenceAdapterIT {
 
         TrustedDevice trusted = devices.trustConfirmed(TrustConfirmation.builder().device(newTablet)
                 .replaced(oldTablet.expire()).expiredByCap(List.of()).enrollment(enrollment.complete())
+                .primaryMode(PrimaryMode.FACE_CONFIRMED).faceAuthenticated(true)
                 .receiptDigest("receipt-sha").build(), "corr-1");
 
         assertThat(trusted.publicKey()).isEqualTo("{new}");
@@ -166,6 +168,86 @@ class DeviceEnrollmentPersistenceAdapterIT {
                 assertThat(a.getEnrollmentId()).isEqualTo(enrollment.id().value()));
         // The direct primary of the phone kept its mode.
         assertThat(jdbc.sql("SELECT COUNT(*) FROM PRIMARY_TRUSTED_DEVICE").query(Long.class).single()).isEqualTo(1L);
+    }
+
+    @Test
+    void anApprovalIsBoundToItsSessionReadableFromThePrimarySideAndCommitsThePendingRowAsPrimary() {
+        // The phone is the direct primary; the watch registered a PENDING row and asked for approval.
+        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, PHONE,
+                DevicePlatform.ANDROID, null, now, DevicePolicy.standard());
+        devices.trustFirstDevice(phone, "corr-0");
+        DeviceId watchId = new DeviceId("watch-3");
+        TrustedDevice watch = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE, watchId,
+                DevicePlatform.IOS, "{watch-key}", now, Duration.ofMinutes(10));
+        devices.registerPending(watch, "corr-r");
+        SessionId watchSession = SessionId.random();
+        DeviceEnrollment requested = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
+                Channel.MOBILE, watchId, watch.id(), now.plusSeconds(600)), watchSession);
+
+        // Bound to the session and the installation that made it.
+        assertThat(enrollments.findBySession(ALICE, watchId, watchSession)).map(DeviceEnrollment::id).contains(requested.id());
+        assertThat(enrollments.findBySession(ALICE, watchId, SessionId.random())).isEmpty();
+        assertThat(enrollments.findBySession(ALICE, PHONE, watchSession)).isEmpty();
+        assertThat(jdbc.sql("SELECT HEX(REQUESTER_CLIENT_DEVICE_ID_LOOKUP) FROM TRUSTED_DEVICE_ENROLLMENT").query(String.class).single())
+                .hasSize(64);
+
+        // The primary side recovers the requester's device ID from the target row's ciphertext.
+        DeviceEnrollment seenByPhone = enrollments.findApproval(requested.id(), ALICE, Channel.MOBILE).orElseThrow();
+        assertThat(seenByPhone.deviceId()).isEqualTo(watchId);
+        assertThat(seenByPhone.state()).isEqualTo(EnrollmentState.WAITING_APPROVAL);
+        assertThat(enrollments.findOpenApprovals(ALICE, Channel.MOBILE)).extracting(DeviceEnrollment::id).containsExactly(requested.id());
+        assertThat(enrollments.findApproval(requested.id(), new CustomerId("77777"), Channel.MOBILE)).isEmpty();
+
+        // Approve, authorize (token digest + MFA time), count a claim: every column round-trips.
+        DeviceEnrollment approved = enrollments.saveIfCurrent(seenByPhone.approveBy(phone.id(), "mfa-7")).orElseThrow();
+        String tokenDigest = Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[]{
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32});
+        DeviceEnrollment authorized = enrollments.saveIfCurrent(approved.authorize(tokenDigest, now.plusSeconds(180), "FACE+OTP"))
+                .orElseThrow();
+        DeviceEnrollment counted = enrollments.saveIfCurrent(authorized.countClaimAttempt()).orElseThrow();
+        var row = enrollmentRows.findById(requested.id().value()).orElseThrow();
+        assertThat(row.getState()).isEqualTo(EnrollmentState.WAITING_AUTHORIZATION);
+        assertThat(row.getActorDeviceId()).isEqualTo(phone.id().value());
+        assertThat(row.getMultifactorId()).isEqualTo("mfa-7");
+        assertThat(row.getConfirmedMfaMethod()).isEqualTo("FACE+OTP");
+        assertThat(row.getMfaConfirmedAt()).isNotNull();
+        assertThat(row.getAuthorizationTokenDigest()).hasSize(32).startsWith(new byte[]{1, 2, 3});
+        assertThat(row.getAuthorizationExpiresAt()).isEqualTo(now.plusSeconds(180));
+        assertThat(row.getAuthorizationAttempts()).isEqualTo(1);
+        DeviceEnrollment reread = enrollments.findBySession(ALICE, watchId, watchSession).orElseThrow();
+        assertThat(reread.authorizationTokenDigest()).isEqualTo(tokenDigest);
+        assertThat(reread.authorizationAttempts()).isEqualTo(1);
+        assertThat(reread.verifyAttempts()).isZero();
+        assertThat(reread.mfaMethod()).isEqualTo("FACE+OTP");
+
+        // The claim: the PENDING row becomes trusted and primary in one transaction with the enrollment and audit.
+        DeviceEnrollment consumed = counted.consumeAuthorization(now.plusSeconds(60));
+        TrustedDevice approvedWatch = devices.findLive(ALICE, Channel.MOBILE, watchId).orElseThrow()
+                .trustByApproval(now.plusSeconds(60), DevicePolicy.standard());
+        TrustedDevice trusted = devices.trustConfirmed(TrustConfirmation.builder().device(approvedWatch).replaced(null)
+                .expiredByCap(List.of()).enrollment(consumed).primaryMode(PrimaryMode.OLD_DEVICE_APPROVAL)
+                .faceAuthenticated(false).actorDeviceId(phone.id()).build(), "corr-c");
+
+        assertThat(trusted.id()).isEqualTo(watch.id());
+        assertThat(deviceRows.count()).isEqualTo(2); // the pending row moved, no new row
+        assertThat(deviceRows.findById(watch.id().value()).orElseThrow().getStatus()).isEqualTo(DeviceStatus.ACTIVE);
+        assertThat(devices.findLive(ALICE, Channel.MOBILE, watchId).orElseThrow().isTrusted(now.plusSeconds(60))).isTrue();
+        assertThat(devices.findLive(ALICE, Channel.MOBILE, PHONE).orElseThrow().isTrusted(now.plusSeconds(60))).isTrue();
+        assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).contains(watch.id());
+        var primary = primaries.findAll().getFirst();
+        assertThat(primary.getPrimaryMode()).isEqualTo(PrimaryMode.OLD_DEVICE_APPROVAL);
+        assertThat(primary.isFaceAuthenticated()).isFalse();
+        assertThat(primary.getPrimaryEnrollmentId()).isEqualTo(requested.id().value());
+        var completedRow = enrollmentRows.findById(requested.id().value()).orElseThrow();
+        assertThat(completedRow.getState()).isEqualTo(EnrollmentState.COMPLETED);
+        assertThat(completedRow.getAuthorizationConsumedAt()).isEqualTo(now.plusSeconds(60));
+        assertThat(completedRow.getAuthorizedSessionRefDigest()).isEqualTo(completedRow.getCreationIdempotencyDigest());
+        assertThat(enrollments.findOpenApprovals(ALICE, Channel.MOBILE)).isEmpty();
+        List<TrustedDeviceAuditEntity> events = audit.findByCorrelationIdOrderByEventSequenceAsc("corr-c");
+        assertThat(events).extracting(TrustedDeviceAuditEntity::getEventType).containsExactly("DEVICE_TRUSTED", "PRIMARY_CHANGED");
+        assertThat(events).extracting(TrustedDeviceAuditEntity::getReasonCode).containsOnly("OLD_DEVICE_APPROVAL");
+        assertThat(events).extracting(TrustedDeviceAuditEntity::getActorDeviceId).containsOnly(phone.id().value());
+        assertThat(events.getFirst().getMetadata()).contains(phone.id().value().toString());
     }
 
     @Autowired com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection protectionBean;

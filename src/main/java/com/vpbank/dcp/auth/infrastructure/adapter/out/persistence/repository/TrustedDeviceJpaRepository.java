@@ -1,5 +1,6 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository;
 
+import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.TrustedDeviceEntity;
 import java.util.List;
 import java.util.Optional;
@@ -14,4 +15,7 @@ public interface TrustedDeviceJpaRepository extends JpaRepository<TrustedDeviceE
 
     List<TrustedDeviceEntity> findByCustomerIdAndChannelAndLiveSlotOrderByCreatedAtAsc(String customerId, String channel,
                                                                                        Byte liveSlot);
+
+    /** How many installations wait for approval (slice 6 quota). */
+    int countByCustomerIdAndChannelAndStatus(String customerId, String channel, DeviceStatus status);
 }

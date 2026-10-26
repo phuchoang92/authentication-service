@@ -3,6 +3,7 @@ package com.vpbank.dcp.auth.domain.model;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
+import com.vpbank.dcp.auth.domain.enums.MfaFactor;
 import com.vpbank.dcp.auth.domain.exception.EnrollmentStateException;
 import java.time.Instant;
 import java.util.Objects;
@@ -114,7 +115,10 @@ public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel c
 
     public DeviceEnrollment complete() {
         requireState(EnrollmentState.MFA_REQUIRED);
-        return toBuilder().state(EnrollmentState.COMPLETED).build();
+        return toBuilder()
+                .state(EnrollmentState.COMPLETED)
+                .mfaMethod(MfaFactor.FACE.name())
+                .build();
     }
 
     // ---- slice 6 path ----

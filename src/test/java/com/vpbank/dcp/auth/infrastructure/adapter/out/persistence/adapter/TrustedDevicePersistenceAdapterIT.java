@@ -19,6 +19,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.Tru
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.config.DeviceConfiguration;
 import com.vpbank.dcp.auth.infrastructure.config.JpaConfiguration;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
@@ -141,6 +142,34 @@ class TrustedDevicePersistenceAdapterIT {
         assertThat(devices.trustFirstDevice(TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, PHONE,
                 DevicePlatform.ANDROID, null, now, DevicePolicy.standard()), "corr-5"))
                 .isInstanceOf(TrustFirstResult.AlreadyHasDevice.class); // …but the primary row still exists (phase 7 clears it)
+    }
+
+    @Test
+    void aPendingRowIsRegisteredOnceWithItsEventAndCountsAsWaiting() {
+        TrustedDevice watch = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE, new DeviceId("watch-3"),
+                DevicePlatform.IOS, "{watch-key}", now, Duration.ofMinutes(10));
+
+        TrustedDeviceRepository.RegisterPendingResult registered = devices.registerPending(watch, "corr-r1");
+
+        assertThat(registered).isInstanceOf(TrustedDeviceRepository.RegisterPendingResult.Registered.class);
+        TrustedDevice stored = devices.findLive(ALICE, Channel.MOBILE, new DeviceId("watch-3")).orElseThrow();
+        assertThat(stored.isPending()).isTrue();
+        assertThat(stored.isTrusted(now)).isFalse();
+        assertThat(stored.publicKey()).isEqualTo("{watch-key}");
+        assertThat(stored.expiresAt()).isEqualTo(now.plus(Duration.ofMinutes(10)));
+        assertThat(devices.countPending(ALICE, Channel.MOBILE)).isEqualTo(1);
+        assertThat(audit.findByCorrelationIdOrderByEventSequenceAsc("corr-r1"))
+                .extracting(TrustedDeviceAuditEntity::getEventType, TrustedDeviceAuditEntity::getReasonCode)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("DEVICE_REGISTERED", "APPROVAL_REQUESTED"));
+
+        // A second login of the same installation loses the live-slot race and leaves nothing behind.
+        TrustedDevice again = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE, new DeviceId("watch-3"),
+                DevicePlatform.IOS, "{other-key}", now, Duration.ofMinutes(10));
+        assertThat(devices.registerPending(again, "corr-r2"))
+                .isInstanceOf(TrustedDeviceRepository.RegisterPendingResult.InstallationAlreadyLive.class);
+        assertThat(rows.count()).isEqualTo(1);
+        assertThat(audit.findByCorrelationIdOrderByEventSequenceAsc("corr-r2")).isEmpty();
+        assertThat(devices.countPending(ALICE, Channel.MOBILE)).isEqualTo(1);
     }
 
     @Test

@@ -72,15 +72,15 @@ final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
     }
 
     @Override
-    public TrustedDevice registerPending(TrustedDevice pendingDevice, String correlationId) {
+    public RegisterPendingResult registerPending(TrustedDevice pendingDevice, String correlationId) {
         check();
         Optional<TrustedDevice> liveRow = findLive(pendingDevice.customerId(), pendingDevice.channel(), pendingDevice.deviceId());
         if (liveRow.isPresent()) {
-            return liveRow.get();
+            return new RegisterPendingResult.InstallationAlreadyLive();
         }
         rows.put(pendingDevice.id(), pendingDevice);
         audit.add(correlationId + ":DEVICE_REGISTERED");
-        return pendingDevice;
+        return new RegisterPendingResult.Registered(pendingDevice);
     }
 
     @Override

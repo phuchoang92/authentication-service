@@ -3,6 +3,8 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
 import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose;
+import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
@@ -10,10 +12,14 @@ import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.DeviceEnrollmentEntity;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.TrustedDeviceEntity;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.DeviceEnrollmentPersistenceMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.DeviceEnrollmentJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import lombok.NonNull;
@@ -28,8 +34,13 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
  */
 @RequiredArgsConstructor
 public class DeviceEnrollmentPersistenceAdapter implements EnrollmentRepository {
+    private static final List<EnrollmentState> WAITING_STATES =
+            List.of(EnrollmentState.WAITING_APPROVAL, EnrollmentState.WAITING_AUTHORIZATION);
+
     @NonNull private final DeviceEnrollmentJpaRepository deviceEnrollmentJpaRepository;
+    @NonNull private final TrustedDeviceJpaRepository trustedDeviceJpaRepository;
     @NonNull private final DeviceIdProtection deviceIdProtection;
+    @NonNull private final Clock clock;
 
     @Override
     public DeviceEnrollment create(DeviceEnrollment freshEnrollment, SessionId sessionId) {
@@ -96,17 +107,89 @@ public class DeviceEnrollmentPersistenceAdapter implements EnrollmentRepository 
 
     @Override
     public Optional<DeviceEnrollment> findBySession(CustomerId customerId, DeviceId deviceId, SessionId sessionId) {
-        throw new UnsupportedOperationException("slice 6 turn 2: approval lookups are not persisted yet");
+        try {
+            byte[] creationDigest = DeviceEnrollmentPersistenceMapper.creationDigest(sessionId);
+            Optional<DeviceEnrollmentEntity> enrollmentEntity = deviceEnrollmentJpaRepository
+                    .findByCustomerIdAndPurposeAndCreationIdempotencyDigest(
+                            customerId.value(),
+                            EnrollmentPurpose.TRUST_DEVICE_APPROVAL,
+                            creationDigest);
+            if (enrollmentEntity.isEmpty()) {
+                return Optional.empty();
+            }
+
+            boolean belongsToDevice = isTargetDevice(enrollmentEntity.get(), customerId, deviceId);
+            if (!belongsToDevice) {
+                return Optional.empty();
+            }
+
+            return Optional.of(DeviceEnrollmentPersistenceMapper.toDomain(enrollmentEntity.get(), deviceId));
+        } catch (DataAccessException failure) {
+            throw new RepositoryUnavailableException(failure);
+        }
     }
 
     @Override
     public Optional<DeviceEnrollment> findApproval(EnrollmentId enrollmentId, CustomerId customerId, Channel channel) {
-        throw new UnsupportedOperationException("slice 6 turn 2: approval lookups are not persisted yet");
+        try {
+            Optional<DeviceEnrollmentEntity> enrollmentEntity = deviceEnrollmentJpaRepository
+                    .findByIdAndCustomerIdAndChannelAndPurpose(
+                            enrollmentId.value(),
+                            customerId.value(),
+                            channel.name(),
+                            EnrollmentPurpose.TRUST_DEVICE_APPROVAL);
+            if (enrollmentEntity.isEmpty()) {
+                return Optional.empty();
+            }
+            return withRequesterDeviceId(enrollmentEntity.get());
+        } catch (DataAccessException failure) {
+            throw new RepositoryUnavailableException(failure);
+        }
     }
 
     @Override
     public List<DeviceEnrollment> findOpenApprovals(CustomerId customerId, Channel channel) {
-        throw new UnsupportedOperationException("slice 6 turn 2: approval lookups are not persisted yet");
+        try {
+            List<DeviceEnrollmentEntity> waitingEntities = deviceEnrollmentJpaRepository
+                    .findByCustomerIdAndChannelAndPurposeAndStateInOrderByCreatedAtAsc(
+                            customerId.value(),
+                            channel.name(),
+                            EnrollmentPurpose.TRUST_DEVICE_APPROVAL,
+                            WAITING_STATES);
+
+            List<DeviceEnrollment> approvals = new ArrayList<>();
+            for (DeviceEnrollmentEntity waitingEntity : waitingEntities) {
+                // a request whose target row cannot be read any more is not shown
+                withRequesterDeviceId(waitingEntity).ifPresent(approvals::add);
+            }
+            return List.copyOf(approvals);
+        } catch (DataAccessException failure) {
+            throw new RepositoryUnavailableException(failure);
+        }
+    }
+
+    /**
+     * From the primary device's side the requester's device ID is not in the request: it is recovered from
+     * the target device row's ciphertext. An unreadable or missing target makes the request absent.
+     */
+    private Optional<DeviceEnrollment> withRequesterDeviceId(DeviceEnrollmentEntity enrollmentEntity) {
+        if (enrollmentEntity.getTargetDeviceId() == null) {
+            return Optional.empty();
+        }
+        Optional<TrustedDeviceEntity> targetEntity = trustedDeviceJpaRepository.findById(enrollmentEntity.getTargetDeviceId());
+        if (targetEntity.isEmpty()) {
+            return Optional.empty();
+        }
+
+        CustomerId customerId = new CustomerId(enrollmentEntity.getCustomerId());
+        Channel channel = Channel.valueOf(enrollmentEntity.getChannel());
+        Optional<DeviceId> requesterDeviceId = deviceIdProtection.decrypt(
+                targetEntity.get().getClientDeviceIdKeyId(),
+                targetEntity.get().getClientDeviceIdCiphertext(),
+                customerId,
+                channel);
+
+        return requesterDeviceId.map(deviceId -> DeviceEnrollmentPersistenceMapper.toDomain(enrollmentEntity, deviceId));
     }
 
     @Override
@@ -124,9 +207,14 @@ public class DeviceEnrollmentPersistenceAdapter implements EnrollmentRepository 
                 return Optional.empty();
             }
 
-            // Only the confirmed-trust transaction records the MFA confirmation time.
-            Instant noMfaConfirmedAt = null;
-            DeviceEnrollmentPersistenceMapper.apply(enrollmentEntity, changedEnrollment, noMfaConfirmedAt);
+            // The FACE path records its MFA time in the trust transaction; the approval path when the token is issued.
+            Instant mfaConfirmedAt = null;
+            boolean approverPassedMfa = changedEnrollment.isApproval()
+                    && changedEnrollment.state() == EnrollmentState.WAITING_AUTHORIZATION;
+            if (approverPassedMfa) {
+                mfaConfirmedAt = clock.instant();
+            }
+            DeviceEnrollmentPersistenceMapper.apply(enrollmentEntity, changedEnrollment, mfaConfirmedAt);
 
             DeviceEnrollmentEntity savedEnrollmentEntity = deviceEnrollmentJpaRepository.saveAndFlush(enrollmentEntity);
             DeviceEnrollment savedEnrollment =

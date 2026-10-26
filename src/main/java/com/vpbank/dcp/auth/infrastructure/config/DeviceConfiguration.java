@@ -67,8 +67,14 @@ public class DeviceConfiguration {
 
     @Bean
     EnrollmentRepository enrollmentRepository(DeviceEnrollmentJpaRepository deviceEnrollmentJpaRepository,
-                                              DeviceIdProtection deviceIdProtection) {
-        return new DeviceEnrollmentPersistenceAdapter(deviceEnrollmentJpaRepository, deviceIdProtection);
+                                              TrustedDeviceJpaRepository trustedDeviceJpaRepository,
+                                              DeviceIdProtection deviceIdProtection,
+                                              Clock clock) {
+        return new DeviceEnrollmentPersistenceAdapter(
+                deviceEnrollmentJpaRepository,
+                trustedDeviceJpaRepository,
+                deviceIdProtection,
+                clock);
     }
 
     private static Map<String, byte[]> decode(Map<String, String> base64ByKeyId, String setting) {

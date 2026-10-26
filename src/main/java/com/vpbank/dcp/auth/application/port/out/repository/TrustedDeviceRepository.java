@@ -39,16 +39,23 @@ public interface TrustedDeviceRepository {
     TrustedDevice trustConfirmed(TrustConfirmation confirmation, String correlationId);
 
     /**
-     * Slice 6: a new installation waits for approval as a PENDING live row. A lost race on the one-live-row
-     * rule returns the row that won (the caller's enrollment then targets it). Writes one audit event.
+     * Slice 6: a new installation waits for approval as a PENDING live row, written with one audit event.
+     * A lost race on the one-live-row rule rolls everything back and answers {@code InstallationAlreadyLive};
+     * the caller re-reads the live row.
      */
-    TrustedDevice registerPending(TrustedDevice pendingDevice, String correlationId);
+    RegisterPendingResult registerPending(TrustedDevice pendingDevice, String correlationId);
 
     /** How many installations of this customer on this channel are waiting for approval. */
     int countPending(CustomerId customerId, Channel channel);
 
     /** Saves a change only if the stored version is still {@code changed.version()}; returns the stored row. */
     Optional<TrustedDevice> saveIfCurrent(TrustedDevice changed, String correlationId);
+
+    sealed interface RegisterPendingResult {
+        record Registered(TrustedDevice device) implements RegisterPendingResult { }
+
+        record InstallationAlreadyLive() implements RegisterPendingResult { }
+    }
 
     sealed interface TrustFirstResult {
         record Trusted(TrustedDevice device) implements TrustFirstResult { }
