@@ -2,7 +2,6 @@ package com.vpbank.dcp.auth.infrastructure.config;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
-import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
 import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
@@ -22,6 +21,7 @@ import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceReposito
 import com.vpbank.dcp.auth.application.service.CaptchaService;
 import com.vpbank.dcp.auth.application.service.DeviceApprovalService;
 import com.vpbank.dcp.auth.application.service.DeviceEnrollmentService;
+import com.vpbank.dcp.auth.application.service.DeviceManagementService;
 import com.vpbank.dcp.auth.application.service.LoginService;
 import com.vpbank.dcp.auth.application.service.PasswordUnlockService;
 import com.vpbank.dcp.auth.application.service.SessionManagementService;
@@ -38,6 +38,7 @@ import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceApprovalRestMapper;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.LoginRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.PasswordUnlockRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.SessionRestMapper;
@@ -124,10 +125,7 @@ public class LoginConfiguration {
         return new SessionManagementService(sessionService);
     }
 
-    /**
-     * Exposed by its concrete type: LoginService depends on it directly (§6.1), while the controller
-     * is injected by the ListDevicesUseCase interface it implements (one bean, two views).
-     */
+    /** The common device actions (§6.1), exposed by their concrete type; it implements no use case. */
     @Bean
     TrustedDeviceService trustedDeviceService(TrustedDeviceRepository trustedDeviceRepository,
                                               DevicePolicy devicePolicy,
@@ -330,10 +328,21 @@ public class LoginConfiguration {
         return new TrustedDeviceRestMapper(errorMessages);
     }
 
+    /** Device management use cases (list now; revoke, rename and history next). */
     @Bean
-    SessionFilter sessionFilter(CurrentSessionUseCase currentSessionUseCase,
-                                ErrorMessages errorMessages,
-                                LocaleResolver localeResolver) {
-        return new SessionFilter(currentSessionUseCase, errorMessages, localeResolver);
+    DeviceManagementService deviceManagementService(SessionService sessionService,
+                                                    TrustedDeviceService trustedDeviceService) {
+        return new DeviceManagementService(sessionService, trustedDeviceService);
+    }
+
+    @Bean
+    DeviceRestMapper deviceRestMapper(ErrorMessages errorMessages) {
+        return new DeviceRestMapper(errorMessages);
+    }
+
+    /** Validates the Bearer token's shape only; every use case reads its own session (slice 8). */
+    @Bean
+    SessionFilter sessionFilter(ErrorMessages errorMessages, LocaleResolver localeResolver) {
+        return new SessionFilter(errorMessages, localeResolver);
     }
 }

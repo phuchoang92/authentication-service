@@ -35,6 +35,7 @@ import com.vpbank.dcp.auth.application.result.ConfirmEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
 import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
 import com.vpbank.dcp.auth.application.result.InitEnrollmentResult;
+import com.vpbank.dcp.auth.application.result.ListDevicesResult;
 import com.vpbank.dcp.auth.application.result.ListPendingDevicesResult;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.application.result.LogoutResult;
@@ -56,6 +57,7 @@ import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceApprovalRestMapper;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.LoginRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.PasswordUnlockRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.SessionRestMapper;
@@ -100,9 +102,9 @@ class LoginRestTest {
         @Bean PasswordUnlockRestMapper passwordUnlockRestMapper(ErrorMessages errors) { return new PasswordUnlockRestMapper(errors); }
         @Bean TrustedDeviceRestMapper trustedDeviceRestMapper(ErrorMessages errors) { return new TrustedDeviceRestMapper(errors); }
         @Bean DeviceApprovalRestMapper deviceApprovalRestMapper(ErrorMessages errors) { return new DeviceApprovalRestMapper(errors); }
-        @Bean SessionFilter sessionFilter(CurrentSessionUseCase sessions, ErrorMessages errors,
-                                          org.springframework.web.servlet.LocaleResolver locales) {
-            return new SessionFilter(sessions, errors, locales);
+        @Bean DeviceRestMapper deviceRestMapper(ErrorMessages errors) { return new DeviceRestMapper(errors); }
+        @Bean SessionFilter sessionFilter(ErrorMessages errors, org.springframework.web.servlet.LocaleResolver locales) {
+            return new SessionFilter(errors, locales);
         }
     }
 
@@ -366,12 +368,16 @@ class LoginRestTest {
         when(current.resolve(new OpaqueToken(restrictedToken))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
                 new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("tablet-99"), Channel.MOBILE,
                 SessionStatus.NEED_TRUSTED_DEVICE, IDLE, IDLE)));
-        when(devices.list(new CustomerId("90359"), Channel.MOBILE)).thenReturn(java.util.List.of(DeviceSummary.builder()
-                .deviceId(new com.vpbank.dcp.auth.domain.model.DeviceId("dev-12345678"))
-                .platform(DevicePlatform.ANDROID)
-                .status(DeviceStatus.ACTIVE)
-                .trustLevel(TrustLevel.TRUSTED).primary(true)
-                .trustedAt(IDLE).expiresAt(ABSOLUTE).lastLoginAt(IDLE).build()));
+        // The filter no longer reads the session: the use case decides from the token it is handed.
+        when(devices.list(new com.vpbank.dcp.auth.application.command.ListDevicesCommand(new OpaqueToken(TOKEN))))
+                .thenReturn(new ListDevicesResult.Devices(java.util.List.of(DeviceSummary.builder()
+                        .deviceId(new com.vpbank.dcp.auth.domain.model.DeviceId("dev-12345678"))
+                        .platform(DevicePlatform.ANDROID)
+                        .status(DeviceStatus.ACTIVE)
+                        .trustLevel(TrustLevel.TRUSTED).primary(true)
+                        .trustedAt(IDLE).expiresAt(ABSOLUTE).lastLoginAt(IDLE).build())));
+        when(devices.list(new com.vpbank.dcp.auth.application.command.ListDevicesCommand(new OpaqueToken(restrictedToken))))
+                .thenReturn(new ListDevicesResult.DeviceTrustRequired());
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/devices")
                         .header("Authorization", "Bearer " + TOKEN))
@@ -379,6 +385,7 @@ class LoginRestTest {
                 .andExpect(jsonPath("$.data[0].deviceId").value("…5678"))
                 .andExpect(jsonPath("$.data[0].primary").value(true))
                 .andExpect(jsonPath("$.data[0].status").value("ACTIVE"));
+        verifyNoInteractions(current);
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/devices")
                         .header("Authorization", "Bearer " + restrictedToken).header("Accept-Language", "en"))

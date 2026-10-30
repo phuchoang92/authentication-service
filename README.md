@@ -6,7 +6,7 @@ New authentication service, built bottom-up from the DB design phases in
 Development rules: [architecture and package boundaries](ARCHITECTURE.md),
 [code conventions and readability examples](CODE_CONVENTIONS.md).
 
-**Status (2026-10-26): slices 1–7 done, code aligned with
+**Status (2026-10-30): slices 1–8 done, code aligned with
 [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)** on [ARCHITECTURE.md](ARCHITECTURE.md) (layer-first
 hexagonal under `domain` / `application` / `infrastructure`, business enums in `domain.enums`,
 Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
@@ -18,7 +18,8 @@ Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
 ([plan](docs/plans/slice-4-trusted-device.md)) and device enrollment init → verify → confirm with
 FACE ([plan](docs/plans/slice-5-enrollment.md)) and approval of a new device by the current primary
 device through a QR token ([plan](docs/plans/slice-6-device-approval.md)) and the self-describing session token
-([plan](docs/plans/slice-7-session-token.md)), each off by default.
+([plan](docs/plans/slice-7-session-token.md)) and the common session actions with one Valkey read per request
+([plan](docs/plans/slice-8-session-actions.md)), each off by default.
 
 | Path | Caller | Result |
 |---|---|---|
@@ -46,6 +47,13 @@ hashed or hidden yet, so the BFF reads the session by the token's channel and ID
 itself. Idle 15 min slides on extend (`sessionLookup{channel, sessionId}`), absolute 20 min never moves.
 The password is verified by Keycloak Direct Grant (client secret) and the KC-signed ID token is checked
 against the realm JWKS.
+
+**One Valkey read per request (slice 8):** the session filter on `/api/**` only checks that the Bearer token has
+the right shape; it reads nothing. The use case behind the route reads the session once, decides whether that
+session kind may use the route (a restricted session gets `403 DEVICE_TRUST_REQUIRED` outside logout and the
+trust flows, a missing one `401 SESSION_REQUIRED`), and does its work. `SessionService` holds the common session
+actions (find by kind, issue, extend, consume, end) that login, the trust flows and the session use cases compose,
+the same way `TrustedDeviceService` holds the device actions. Removing a session is one atomic `DEL`.
 
 **Trusted device (phase 3):** a MOBILE login carries `deviceId` + `platform` (+ optional P-256
 `devicePublicKey`). The first device of a customer on a channel is trusted and made primary directly
@@ -111,7 +119,7 @@ Java 25, Maven 3.9, Docker for the MySQL integration tests:
 mvn -o verify
 ```
 
-Last run (2026-10-26, slice 7 complete): 258 tests, 0 failures — 232 unit
+Last run (2026-10-30, slice 8 complete): 262 tests, 0 failures — 236 unit
 (domain state machines and value objects, frozen enum codes, services with in-memory doubles incl. the
 approval flow, web/persistence/partner mappers, Valkey key vector and codec, error catalogue, Keycloak
 admin + Direct Grant with a test-signed ID token, JWE sealer and challenge sealer round trips, MFA HTTP

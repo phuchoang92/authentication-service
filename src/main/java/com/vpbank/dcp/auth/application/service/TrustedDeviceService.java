@@ -1,6 +1,5 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
 import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.RegisterPendingResult;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.TrustFirstResult;
@@ -34,7 +33,7 @@ import lombok.RequiredArgsConstructor;
  * is verified and decides the session from the answer; it never touches device rows itself.
  */
 @RequiredArgsConstructor
-public final class TrustedDeviceService implements ListDevicesUseCase {
+public final class TrustedDeviceService {
     /** Devices that never logged in sort as the oldest when the cap chooses what to expire. */
     private static final Comparator<TrustedDevice> OLDEST_LOGIN_FIRST =
             Comparator.comparing(device -> device.lastLoginAt() == null ? Instant.EPOCH : device.lastLoginAt());
@@ -293,8 +292,8 @@ public final class TrustedDeviceService implements ListDevicesUseCase {
         return devicesExpiredByCap;
     }
 
-    @Override
-    public List<DeviceSummary> list(CustomerId customerId, Channel channel) {
+    /** The customer's live devices on the channel, with the primary flagged; display data for the device list. */
+    public List<DeviceSummary> listDevices(CustomerId customerId, Channel channel) {
         Optional<TrustedDeviceId> primaryDeviceId = trustedDeviceRepository.findPrimary(customerId, channel);
         List<TrustedDevice> liveTrustedDevices = trustedDeviceRepository.findLive(customerId, channel);
 

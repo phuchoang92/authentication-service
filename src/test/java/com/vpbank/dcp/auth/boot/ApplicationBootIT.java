@@ -167,7 +167,9 @@ class ApplicationBootIT {
         // Logout needs the session; afterwards the token is dead and extend says gone.
         mvc.perform(post("/api/v1/logout")).andExpect(status().isUnauthorized());
         mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + token)).andExpect(status().isNoContent());
-        mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+        // Logout is idempotent (slice 8): a token without a live session is already logged out.
+        mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + token)).andExpect(status().isNoContent());
+        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
         mvc.perform(post("/internal/v1/sessions/extend").contentType(MediaType.APPLICATION_JSON).content(extendBody))
                 .andExpect(status().isGone());
 
@@ -254,7 +256,8 @@ class ApplicationBootIT {
                 .andReturn();
 
         // The restricted session is gone; the new ACTIVE token is sealed to the key sent at confirm and sees two devices.
-        mvc.perform(post("/api/v1/logout").header("Authorization", "Bearer " + restrictedToken)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", "Bearer " + restrictedToken))
+                .andExpect(status().isUnauthorized());
         String tabletActiveToken = tokenOf(confirm, tabletKenc);
         mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + tabletActiveToken))
                 .andExpect(status().isOk())

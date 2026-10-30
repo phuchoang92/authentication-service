@@ -146,10 +146,10 @@ class TrustedDeviceServiceTest {
     @Test
     void theDeviceListMarksThePrimary() {
         service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, null, "corr-1");
-        List<DeviceSummary> list = service.list(ALICE, Channel.MOBILE);
+        List<DeviceSummary> list = service.listDevices(ALICE, Channel.MOBILE);
         assertThat(list).hasSize(1);
         assertThat(list.getFirst().primary()).isTrue();
         assertThat(list.getFirst().deviceId()).isEqualTo(PHONE);
-        assertThat(service.list(new CustomerId("77777"), Channel.MOBILE)).isEmpty();
+        assertThat(service.listDevices(new CustomerId("77777"), Channel.MOBILE)).isEmpty();
     }
 }

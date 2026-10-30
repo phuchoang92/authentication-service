@@ -1,6 +1,6 @@
 # Slice 8 — common session actions, one Valkey read per request, plain delete
 
-Status: **approved 2026-10-27, in progress** (turn 1: common `SessionService`, `SessionManagementService`, `SessionStore.delete`).
+Status: **implemented 2026-10-30** (turns 1–2; see README for the test run).
 
 ## Context
 

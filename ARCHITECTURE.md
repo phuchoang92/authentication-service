@@ -162,7 +162,7 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-26, slices 1–7 implemented, layout and conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
+**Current (2026-10-30, slices 1–8 implemented, layout and conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
 `RestConfiguration`), `infrastructure.adapter.out.*`, `infrastructure.config`,
 `application.command` / `application.result`, `application.port.in` with use-case interfaces
 only, and `application.port.out.{repository,gateway,model,exception}` with no top-level types at
@@ -185,7 +185,10 @@ PENDING row, the primary check and `confirmTrustByApproval`; REST IDs are opaque
 CODE_CONVENTIONS §5). Slice decisions:
 `docs/plans/slice-2-login-session.md`, `slice-3-password-lockout.md`, `slice-4-trusted-device.md`,
 `slice-5-enrollment.md`, `slice-6-device-approval.md`, `slice-7-session-token.md` (session token
-`s1:auth:session:<channel>:<sessionId>:<secret>`, Valkey key by channel and session ID, no HMAC).
+`s1:auth:session:<channel>:<sessionId>:<secret>`, Valkey key by channel and session ID, no HMAC),
+`slice-8-session-actions.md` (common `SessionService` actions beside `TrustedDeviceService`; `SessionManagementService`,
+`DeviceManagementService` and the flows compose them; `SessionFilter` validates the token shape only, each use case
+performs its single session read; `SessionStore.delete` is one atomic DEL).
 That record does not verify the new enum/constant layout. Its implementation slice must
 update architecture checks and preserve enum wire/storage codes; no tests are run here.
 
@@ -574,7 +577,7 @@ architecture-test updates; this documentation update does not enable them in sou
 | Outbound port | `<Noun>Port` or capability name in `port.out.gateway`; `<Noun>Repository` / `<Noun>Store` in `port.out.repository` | `IdentityProviderPort`, `TokenEnvelopeSealer`, `RegistrationRepository`, `SessionStore` |
 | Outbound model / exception | meaningful contract noun in `port.out.model`; distinguished dependency failure in `port.out.exception` | `NewIdentityUser`, `CustomerProfile`, `PartnerUnavailableException` |
 | Adapter | `<Tech><Noun>Adapter` | `KeycloakAdminAdapter`, `RegistrationPersistenceAdapter`, `ValkeySessionAdapter` |
-| Servlet filter | `<Noun>Filter`, in `infrastructure.adapter.in.rest.common`; resolves its own locale and writes the envelope itself | `SessionFilter` |
+| Servlet filter | `<Noun>Filter`, in `infrastructure.adapter.in.rest.common`; resolves its own locale and writes the envelope itself; validates shape, never reads a store (the use case performs the one read) | `SessionFilter` |
 | JPA entity / repository | `<Noun>Entity`, `<Noun>JpaRepository` | `RegistrationEntity` |
 | REST DTO | `<Noun>Request`, `<Noun>Response` | `RegistrationRequest` |
 | Mapper | `<Noun><Layer>Mapper` | `RegistrationRestMapper`, `RegistrationPersistenceMapper` |

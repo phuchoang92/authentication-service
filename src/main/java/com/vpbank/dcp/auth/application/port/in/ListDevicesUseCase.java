@@ -1,11 +1,9 @@
 package com.vpbank.dcp.auth.application.port.in;
 
-import com.vpbank.dcp.auth.application.result.DeviceSummary;
-import com.vpbank.dcp.auth.domain.enums.Channel;
-import com.vpbank.dcp.auth.domain.model.CustomerId;
-import java.util.List;
+import com.vpbank.dcp.auth.application.command.ListDevicesCommand;
+import com.vpbank.dcp.auth.application.result.ListDevicesResult;
 
-/** App → Auth (ACTIVE session): the customer's devices on the channel. */
+/** The caller's devices on its channel (slice 4), resolved from the session behind the token. */
 public interface ListDevicesUseCase {
-    List<DeviceSummary> list(CustomerId customerId, Channel channel);
+    ListDevicesResult list(ListDevicesCommand command);
 }
