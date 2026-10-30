@@ -5,28 +5,22 @@ import com.vpbank.dcp.auth.application.command.LoginCommand;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
-import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
-import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
-import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
 import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
-import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.result.LoginResult;
+import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DeviceRouting;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
-import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
-import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.function.Supplier;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
@@ -48,14 +42,9 @@ public final class LoginService implements LoginUseCase {
     @NonNull private final CustomerAuthenticationRepository customerAuthenticationRepository;
     @NonNull private final CredentialVerifierPort credentialVerifierPort;
     @NonNull private final CaptchaStore captchaStore;
-    @NonNull private final SessionStore sessionStore;
-    @NonNull private final TokenEnvelopeSealer tokenEnvelopeSealer;
-    @NonNull private final OpaqueTokenGenerator opaqueTokenGenerator;
-    @NonNull private final Supplier<SessionId> sessionIdGenerator;
+    @NonNull private final SessionService sessionService;
     @NonNull private final TrustedDeviceService trustedDeviceService;
-    @NonNull private final SessionPolicy sessionPolicy;
     @NonNull private final LockoutPolicy lockoutPolicy;
-    @NonNull private final DevicePolicy devicePolicy;
     @NonNull private final Clock clock;
 
     @Override
@@ -99,7 +88,7 @@ public final class LoginService implements LoginUseCase {
                 customerAuthenticationRepository.saveLockoutIfCurrent(identity, resetLockout);
             }
 
-            SessionId sessionId = sessionIdGenerator.get();
+            SessionId sessionId = sessionService.newSessionId();
             String correlationId = sessionId.toString();
             DeviceRouting deviceRouting = trustedDeviceService.routeAfterPassword(
                     identity.customerId(),
@@ -109,30 +98,24 @@ public final class LoginService implements LoginUseCase {
                     command.devicePublicKey(),
                     correlationId);
 
-            Instant now = clock.instant();
-            Session session = switch (deviceRouting) {
-                case DeviceRouting.FullSession() -> Session.start(
+            IssuedSession issuedSession = switch (deviceRouting) {
+                case DeviceRouting.FullSession() -> sessionService.issueActive(
                         sessionId,
                         identity.customerId(),
                         command.deviceId(),
                         command.channel(),
-                        now,
-                        sessionPolicy);
-                case DeviceRouting.NeedTrust() -> Session.startRestricted(
+                        command.tokenEncryptionKey());
+                case DeviceRouting.NeedTrust() -> sessionService.issueRestricted(
                         sessionId,
                         identity.customerId(),
                         command.deviceId(),
                         command.channel(),
-                        now,
-                        devicePolicy);
+                        command.tokenEncryptionKey());
             };
-
-            OpaqueToken token = opaqueTokenGenerator.next(session.channel(), session.id());
-            String tokenEnvelope = tokenEnvelopeSealer.seal(command.tokenEncryptionKey(), token, session);
-            sessionStore.create(session, token);
+            Session session = issuedSession.session();
 
             return new LoginResult.Authenticated(
-                    tokenEnvelope,
+                    issuedSession.tokenEnvelope(),
                     session.customerId(),
                     session.status(),
                     session.idleExpiresAt(),

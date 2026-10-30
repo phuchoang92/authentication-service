@@ -59,10 +59,12 @@ class LoginServiceTest {
     private final OpaqueTokenGenerator tokens = mock(OpaqueTokenGenerator.class);
     private final InMemoryTrustedDeviceRepository devices = new InMemoryTrustedDeviceRepository();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-    private final LoginService service = new LoginService(identities, credentials, captchas, sessions, sealer, tokens,
-            SessionId::random, new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random, clock),
+    private final SessionService sessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
             new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)),
-            LockoutPolicy.standard(), DevicePolicy.standard(), clock);
+            DevicePolicy.standard(), clock);
+    private final LoginService service = new LoginService(identities, credentials, captchas, sessionService,
+            new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random, clock),
+            LockoutPolicy.standard(), clock);
 
     @BeforeEach
     void happyPath() {

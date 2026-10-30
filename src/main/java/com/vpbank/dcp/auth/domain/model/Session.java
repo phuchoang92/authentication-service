@@ -3,10 +3,11 @@ package com.vpbank.dcp.auth.domain.model;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.exception.SessionStateException;
+import lombok.Builder;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
-import lombok.Builder;
 
 /**
  * One login session. An ACTIVE session's idle expiry slides with eligible activity up to the
@@ -32,7 +33,9 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
         }
     }
 
-    /** A fresh ACTIVE session: idle = now + idle, absolute = now + absolute, version 0. */
+    /**
+     * A fresh ACTIVE session: idle = now + idle, absolute = now + absolute, version 0.
+     */
     public static Session start(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
                                 Instant now, SessionPolicy policy) {
         return Session.builder()
@@ -48,7 +51,9 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
                 .build();
     }
 
-    /** A restricted session for a device that still needs trust: idle = absolute = now + TTL. */
+    /**
+     * A restricted session for a device that still needs trust: idle = absolute = now + TTL.
+     */
     public static Session startRestricted(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
                                           Instant now, DevicePolicy policy) {
         // A restricted session has one fixed deadline: idle and absolute expiry are the same instant.
@@ -66,12 +71,16 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
                 .build();
     }
 
-    /** Not ended and neither deadline has passed (restricted sessions are live too). */
+    /**
+     * Not ended and neither deadline has passed (restricted sessions are live too).
+     */
     public boolean isLive(Instant now) {
         return status.live() && now.isBefore(idleExpiresAt) && now.isBefore(absoluteExpiresAt);
     }
 
-    /** Live and ACTIVE: may call business routes and be extended. */
+    /**
+     * Live and ACTIVE: may call business routes and be extended.
+     */
     public boolean isFull(Instant now) {
         return isLive(now) && status.full();
     }
@@ -103,8 +112,9 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
         return toBuilder().status(SessionStatus.ENDED).build();
     }
 
-    /** The store saw this version; the next change builds on it. */
-    /** Init attached the enrollment: its ID, the device key and Ksrv, the challenge digest. Restricted sessions only. */
+    /**
+     * Init attached the enrollment: its ID, the device key and Ksrv, the challenge digest. Restricted sessions only.
+     */
     public Session withEnrollment(EnrollmentContext context) {
         if (status != SessionStatus.NEED_TRUSTED_DEVICE) {
             throw new SessionStateException("Only a restricted session carries an enrollment");

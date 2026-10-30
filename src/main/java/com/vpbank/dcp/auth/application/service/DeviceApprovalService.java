@@ -15,16 +15,13 @@ import com.vpbank.dcp.auth.application.port.in.RequestApprovalUseCase;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.gateway.AuthorizationTokenGenerator;
-import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CreateResult;
-import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
-import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
-import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.result.ApprovalStatusResult;
 import com.vpbank.dcp.auth.application.result.ApproveEnrollmentResult;
@@ -34,17 +31,16 @@ import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
 import com.vpbank.dcp.auth.application.result.ListPendingDevicesResult;
 import com.vpbank.dcp.auth.application.result.PendingDeviceSummary;
 import com.vpbank.dcp.auth.application.result.RequestApprovalResult;
+import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.MfaFactor;
-import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
-import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.time.Clock;
@@ -72,18 +68,14 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     /** The last wrong token leaves no attempt; the enrollment is already failed when it is reported. */
     private static final int NO_ATTEMPTS_LEFT = 0;
 
-    @NonNull private final SessionStore sessionStore;
+    @NonNull private final SessionService sessionService;
     @NonNull private final EnrollmentRepository enrollmentRepository;
     @NonNull private final TrustedDeviceRepository trustedDeviceRepository;
     @NonNull private final TrustedDeviceService trustedDeviceService;
     @NonNull private final MfaTransactionPort mfaTransactionPort;
     @NonNull private final AuthorizationTokenGenerator authorizationTokenGenerator;
-    @NonNull private final TokenEnvelopeSealer tokenEnvelopeSealer;
-    @NonNull private final OpaqueTokenGenerator opaqueTokenGenerator;
     @NonNull private final Supplier<EnrollmentId> enrollmentIdGenerator;
-    @NonNull private final Supplier<SessionId> sessionIdGenerator;
     @NonNull private final EnrollmentPolicy enrollmentPolicy;
-    @NonNull private final SessionPolicy sessionPolicy;
     @NonNull private final Clock clock;
 
     // ---- the new device ----
@@ -423,7 +415,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
         Session restrictedSession = storedSession.session();
 
         // Only one claim may commit: the restricted session is consumed first.
-        boolean sessionConsumed = sessionStore.deleteIfCurrent(storedSession.lookup(), restrictedSession);
+        boolean sessionConsumed = sessionService.consume(storedSession);
         if (!sessionConsumed) {
             return new ClaimEnrollmentResult.Conflict();
         }
@@ -432,39 +424,27 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
         String correlationId = restrictedSession.id().toString();
         TrustedDevice trustedDevice = trustedDeviceService.confirmTrustByApproval(consumedEnrollment, correlationId);
 
-        Session activeSession = Session.start(
-                sessionIdGenerator.get(),
+        IssuedSession activeSession = sessionService.issueActive(
+                sessionService.newSessionId(),
                 trustedDevice.customerId(),
                 trustedDevice.deviceId(),
                 restrictedSession.channel(),
-                clock.instant(),
-                sessionPolicy);
-
-        OpaqueToken token = opaqueTokenGenerator.next(activeSession.channel(), activeSession.id());
-        String tokenEnvelope = tokenEnvelopeSealer.seal(command.tokenEncryptionKey(), token, activeSession);
-        sessionStore.create(activeSession, token);
+                command.tokenEncryptionKey());
 
         return new ClaimEnrollmentResult.Trusted(
-                tokenEnvelope,
-                activeSession.idleExpiresAt(),
-                activeSession.absoluteExpiresAt());
+                activeSession.tokenEnvelope(),
+                activeSession.session().idleExpiresAt(),
+                activeSession.session().absoluteExpiresAt());
     }
 
     // ---- shared steps ----
 
     private Optional<StoredSession> findRestrictedSession(OpaqueToken token) {
-        Instant now = clock.instant();
-        return sessionStore.findByToken(token)
-                .filter(stored -> stored.session().isLive(now))
-                .filter(stored -> stored.session().status() == SessionStatus.NEED_TRUSTED_DEVICE)
-                .filter(stored -> stored.session().deviceId() != null);
+        return sessionService.findRestricted(token);
     }
 
     private Optional<StoredSession> findActiveSession(OpaqueToken token) {
-        Instant now = clock.instant();
-        return sessionStore.findByToken(token)
-                .filter(stored -> stored.session().isFull(now))
-                .filter(stored -> stored.session().deviceId() != null);
+        return sessionService.findActive(token);
     }
 
     /** The caller's device row ID when that device is the customer's trusted primary on the channel. */
@@ -484,7 +464,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     /** A terminal enrollment state is written first, then the restricted session is dropped. */
     private void endRestrictedSession(StoredSession storedSession, DeviceEnrollment terminalEnrollment) {
         enrollmentRepository.saveIfCurrent(terminalEnrollment);
-        sessionStore.deleteIfCurrent(storedSession.lookup(), storedSession.session());
+        sessionService.end(storedSession);
     }
 
     private static Optional<TrustedDevice> findById(List<TrustedDevice> devices, TrustedDeviceId deviceId) {

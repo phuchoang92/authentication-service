@@ -97,10 +97,14 @@ public final class ValkeySessionAdapter implements SessionStore {
         return Optional.of(nextVersion);
     }
 
+    /** One DEL; Valkey answers how many keys went, so a race has exactly one winner. */
     @Override
-    public boolean deleteIfCurrent(SessionLookup lookup, Session current) {
+    public boolean delete(SessionLookup lookup) {
         String key = sessionKeys.forLookup(lookup);
-        return translate(() -> compareAndSet(key, current.sessionVersion(), ops -> ops.delete(key)));
+        return translate(() -> {
+            Boolean removed = stringRedisTemplate.delete(key);
+            return Boolean.TRUE.equals(removed);
+        });
     }
 
     /** WATCH key → stored version must equal {@code expectedVersion} → MULTI, write, EXEC. */

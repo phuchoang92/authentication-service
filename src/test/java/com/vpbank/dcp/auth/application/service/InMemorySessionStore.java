@@ -58,14 +58,9 @@ final class InMemorySessionStore implements SessionStore {
     }
 
     @Override
-    public boolean deleteIfCurrent(SessionLookup lookup, Session current) {
+    public boolean delete(SessionLookup lookup) {
         check();
-        Session stored = rows.get(lookup);
-        if (stored == null || stored.sessionVersion() != current.sessionVersion()) {
-            return false;
-        }
-        rows.remove(lookup);
-        return true;
+        return rows.remove(lookup) != null;
     }
 
     Session only() {

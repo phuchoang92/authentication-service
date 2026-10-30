@@ -1,16 +1,21 @@
 package com.vpbank.dcp.auth.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-import com.vpbank.dcp.auth.application.command.ExtendSessionCommand;
-import com.vpbank.dcp.auth.application.command.LogoutCommand;
-import com.vpbank.dcp.auth.application.result.ExtendSessionResult;
-import com.vpbank.dcp.auth.application.result.LogoutResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
+import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
+import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
-import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import java.time.Clock;
@@ -18,115 +23,67 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+/** The common session actions the flows compose: issue, find by kind, consume once, end. */
 class SessionServiceTest {
-    private static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
-    private static final String DIGEST = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    private static final OpaqueToken TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:" + DIGEST);
+    private static final Instant NOW = Instant.parse("2026-10-30T10:00:00Z");
+    private static final CustomerId ALICE = new CustomerId("90359");
+    private static final DeviceId PHONE = new DeviceId("phone-1");
+    private static final SessionId SESSION = new SessionId(UUID.fromString("00000000-0000-4000-8000-000000000001"));
+    private static final OpaqueToken TOKEN = OpaqueToken.of(Channel.MOBILE, SESSION, "A".repeat(43));
+    private static final String KENC = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"..\",\"y\":\"..\"}";
 
-    private final SessionPolicy policy = new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20),
-            Duration.ofSeconds(30));
     private final InMemorySessionStore sessions = new InMemorySessionStore();
-    private final MutableClock clock = new MutableClock(T0.plus(Duration.ofMinutes(5)));
-    private final SessionService service = new SessionService(sessions, policy, clock);
+    private final TokenEnvelopeSealer sealer = mock(TokenEnvelopeSealer.class);
+    private final OpaqueTokenGenerator tokens = mock(OpaqueTokenGenerator.class);
+    private final SessionService service = new SessionService(sessions, sealer, tokens, () -> SESSION,
+            new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)),
+            DevicePolicy.standard(), Clock.fixed(NOW, ZoneOffset.UTC));
 
-    SessionServiceTest() {
-        sessions.create(Session.start(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE, T0, policy), TOKEN);
+    @BeforeEach
+    void tokenAndEnvelope() {
+        when(tokens.next(eq(Channel.MOBILE), eq(SESSION))).thenReturn(TOKEN);
+        when(sealer.seal(eq(KENC), eq(TOKEN), any())).thenReturn("jwe.compact");
     }
 
     @Test
-    void resolvesALiveSessionWithoutTouchingIt() {
-        assertThat(service.resolve(TOKEN)).isPresent()
-                .hasValueSatisfying(summary -> assertThat(summary.customerId()).isEqualTo(new CustomerId("90359")));
-        assertThat(sessions.only().sessionVersion()).isZero();
+    void issuesAFullSessionSealedToTheAppKeyAndFindsItAsActiveOnly() {
+        IssuedSession issued = service.issueActive(service.newSessionId(), ALICE, PHONE, Channel.MOBILE, KENC);
 
-        clock.now = T0.plus(Duration.ofMinutes(15));
-        assertThat(service.resolve(TOKEN)).isEmpty();
+        assertThat(issued.tokenEnvelope()).isEqualTo("jwe.compact");
+        assertThat(issued.session().status()).isEqualTo(SessionStatus.ACTIVE);
+        assertThat(issued.session().idleExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(15)));
+        assertThat(issued.session().absoluteExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(20)));
+        assertThat(issued.toString()).doesNotContain("jwe");
+        assertThat(service.findLive(TOKEN)).map(StoredSession::session).contains(sessions.only());
+        assertThat(service.findActive(TOKEN)).isPresent();
+        assertThat(service.findRestricted(TOKEN)).isEmpty();
     }
 
     @Test
-    void extendsFromTheAdmissionTimeAndBumpsTheVersion() {
-        ExtendSessionResult result = service.extend(command(clock.now.minusSeconds(5)));
+    void issuesARestrictedSessionWithTheFixedDeadlineAndFindsItAsRestrictedOnly() {
+        IssuedSession issued = service.issueRestricted(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
 
-        assertThat(result).isInstanceOf(ExtendSessionResult.Extended.class);
-        assertThat(((ExtendSessionResult.Extended) result).idleExpiresAt())
-                .isEqualTo(clock.now.minusSeconds(5).plus(Duration.ofMinutes(15)));
-        assertThat(sessions.only().sessionVersion()).isEqualTo(1);
+        assertThat(issued.session().status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
+        assertThat(issued.session().idleExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
+        assertThat(issued.session().absoluteExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
+        assertThat(service.findRestricted(TOKEN)).isPresent();
+        assertThat(service.findActive(TOKEN)).isEmpty();
     }
 
     @Test
-    void aLostRaceIsRetriedWithTheSameAdmissionTimeThenReportedAsConflict() {
-        sessions.concurrentBumps = 1;
-        assertThat(service.extend(command(clock.now))).isInstanceOf(ExtendSessionResult.Extended.class);
-        assertThat(sessions.only().sessionVersion()).isEqualTo(2);
+    void consumeWinsOnceAndEndRemovesWithoutAnAnswer() {
+        service.issueRestricted(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
+        StoredSession stored = service.findRestricted(TOKEN).orElseThrow();
 
-        sessions.concurrentBumps = SessionService.EXTEND_ATTEMPTS;
-        assertThat(service.extend(command(clock.now))).isInstanceOf(ExtendSessionResult.Conflict.class);
-    }
+        assertThat(service.consume(stored)).isTrue();
+        assertThat(service.consume(stored)).isFalse(); // the second claimant loses
+        assertThat(service.findLive(TOKEN)).isEmpty();
 
-    @Test
-    void anUnknownExpiredOrOutOfSkewAdmissionIsGoneOrRejected() {
-        assertThat(service.extend(ExtendSessionCommand.builder().channel(Channel.MOBILE).sessionId(new SessionId(UUID.fromString("00000000-0000-4000-8000-000000000002")))
-                .admittedAt(clock.now).routeId("accounts.read").build())).isInstanceOf(ExtendSessionResult.Gone.class);
-        assertThat(service.extend(command(clock.now.minusSeconds(60)))).isInstanceOf(ExtendSessionResult.Rejected.class);
-        clock.now = T0.plus(Duration.ofMinutes(21));
-        assertThat(service.extend(command(clock.now))).isInstanceOf(ExtendSessionResult.Gone.class);
-    }
-
-    @Test
-    void aRestrictedSessionResolvesButIsNeverExtended() {
-        OpaqueToken restrictedToken = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000002:" + "B".repeat(43));
-        sessions.create(Session.startRestricted(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE, T0,
-                com.vpbank.dcp.auth.domain.model.DevicePolicy.standard()), restrictedToken);
-
-        assertThat(service.resolve(restrictedToken)).hasValueSatisfying(summary ->
-                assertThat(summary.status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE));
-        assertThat(service.extend(ExtendSessionCommand.builder().channel(Channel.MOBILE).sessionId(new SessionId(UUID.fromString("00000000-0000-4000-8000-000000000002")))
-                .admittedAt(clock.now).routeId("accounts.read").build())).isInstanceOf(ExtendSessionResult.Gone.class);
-        assertThat(service.logout(new LogoutCommand(restrictedToken))).isInstanceOf(LogoutResult.Ended.class);
-    }
-
-    @Test
-    void logoutEndsTheSessionAndIsIdempotent() {
-        assertThat(service.logout(new LogoutCommand(TOKEN))).isInstanceOf(LogoutResult.Ended.class);
+        service.issueActive(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
+        service.end(service.findLive(TOKEN).orElseThrow());
         assertThat(sessions.rows).isEmpty();
-        assertThat(service.logout(new LogoutCommand(TOKEN))).isInstanceOf(LogoutResult.Ended.class);
-    }
-
-    @Test
-    void storeOutageIsUnavailable() {
-        sessions.unavailable = true;
-        assertThat(service.extend(command(clock.now))).isInstanceOf(ExtendSessionResult.Unavailable.class);
-        assertThat(service.logout(new LogoutCommand(TOKEN))).isInstanceOf(LogoutResult.Unavailable.class);
-    }
-
-    private static ExtendSessionCommand command(Instant admittedAt) {
-        return ExtendSessionCommand.builder().channel(Channel.MOBILE).sessionId(TOKEN.sessionId()).admittedAt(admittedAt)
-                .routeId("accounts.read").admissionId("adm-1").build();
-    }
-
-    /** A clock the test moves by hand. */
-    private static final class MutableClock extends Clock {
-        Instant now;
-
-        MutableClock(Instant now) {
-            this.now = now;
-        }
-
-        @Override
-        public ZoneOffset getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(java.time.ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return now;
-        }
     }
 }

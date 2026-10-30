@@ -24,6 +24,7 @@ import com.vpbank.dcp.auth.application.service.DeviceApprovalService;
 import com.vpbank.dcp.auth.application.service.DeviceEnrollmentService;
 import com.vpbank.dcp.auth.application.service.LoginService;
 import com.vpbank.dcp.auth.application.service.PasswordUnlockService;
+import com.vpbank.dcp.auth.application.service.SessionManagementService;
 import com.vpbank.dcp.auth.application.service.SessionService;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
@@ -68,8 +69,9 @@ import org.springframework.web.servlet.LocaleResolver;
 
 /**
  * Login, logout and extend (slice 2), off by default. The whole object graph of the capability
- * is here; the session store and policy come from {@link ValkeyConfiguration}. {@link SessionService}
- * is exposed by its concrete type (it implements three use cases); controllers see the interfaces.
+ * is here; the session store and policy come from {@link ValkeyConfiguration}. {@link SessionService} holds
+ * the common session actions and {@link SessionManagementService} the three session use cases; controllers see
+ * the interfaces.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "auth.login", name = "enabled", havingValue = "true")
@@ -81,27 +83,45 @@ public class LoginConfiguration {
     LoginUseCase loginUseCase(CustomerAuthenticationRepository customerAuthenticationRepository,
                               CredentialVerifierPort credentialVerifierPort,
                               CaptchaStore captchaStore,
-                              SessionStore sessionStore,
-                              TokenEnvelopeSealer tokenEnvelopeSealer,
-                              OpaqueTokenGenerator opaqueTokenGenerator,
+                              SessionService sessionService,
                               TrustedDeviceService trustedDeviceService,
-                              SessionPolicy sessionPolicy,
                               LockoutPolicy lockoutPolicy,
-                              DevicePolicy devicePolicy,
                               Clock clock) {
         return new LoginService(
                 customerAuthenticationRepository,
                 credentialVerifierPort,
                 captchaStore,
+                sessionService,
+                trustedDeviceService,
+                lockoutPolicy,
+                clock);
+    }
+
+    /**
+     * The common session actions (§6.1), exposed by their concrete type: Login, the trust flows and the
+     * session use cases compose them; it implements no use case itself.
+     */
+    @Bean
+    SessionService sessionService(SessionStore sessionStore,
+                                  TokenEnvelopeSealer tokenEnvelopeSealer,
+                                  OpaqueTokenGenerator opaqueTokenGenerator,
+                                  SessionPolicy sessionPolicy,
+                                  DevicePolicy devicePolicy,
+                                  Clock clock) {
+        return new SessionService(
                 sessionStore,
                 tokenEnvelopeSealer,
                 opaqueTokenGenerator,
                 SessionId::random,
-                trustedDeviceService,
                 sessionPolicy,
-                lockoutPolicy,
                 devicePolicy,
                 clock);
+    }
+
+    /** One bean, three use-case views (resolve / extend / logout). */
+    @Bean
+    SessionManagementService sessionManagementService(SessionService sessionService) {
+        return new SessionManagementService(sessionService);
     }
 
     /**
@@ -142,31 +162,24 @@ public class LoginConfiguration {
 
     /** One bean, three use-case views (init/verify/confirm), like SessionService. */
     @Bean
-    DeviceEnrollmentService deviceEnrollmentService(SessionStore sessionStore,
+    DeviceEnrollmentService deviceEnrollmentService(SessionService sessionService,
                                                     EnrollmentRepository enrollmentRepository,
                                                     TrustedDeviceService trustedDeviceService,
                                                     MfaTransactionPort mfaTransactionPort,
                                                     ServerKeyPairGenerator serverKeyPairGenerator,
                                                     ChallengeSealer challengeSealer,
-                                                    TokenEnvelopeSealer tokenEnvelopeSealer,
-                                                    OpaqueTokenGenerator opaqueTokenGenerator,
                                                     LoginProperties properties,
-                                                    SessionPolicy sessionPolicy,
                                                     Clock clock) {
         EnrollmentPolicy enrollmentPolicy = enrollmentPolicy(properties);
         return new DeviceEnrollmentService(
-                sessionStore,
+                sessionService,
                 enrollmentRepository,
                 trustedDeviceService,
                 mfaTransactionPort,
                 serverKeyPairGenerator,
                 challengeSealer,
-                tokenEnvelopeSealer,
-                opaqueTokenGenerator,
                 EnrollmentId::random,
-                SessionId::random,
                 enrollmentPolicy,
-                sessionPolicy,
                 clock);
     }
 
@@ -183,31 +196,24 @@ public class LoginConfiguration {
 
     /** One bean, six use-case views (request/status/pending/approve/authorize/claim), like DeviceEnrollmentService. */
     @Bean
-    DeviceApprovalService deviceApprovalService(SessionStore sessionStore,
+    DeviceApprovalService deviceApprovalService(SessionService sessionService,
                                                 EnrollmentRepository enrollmentRepository,
                                                 TrustedDeviceRepository trustedDeviceRepository,
                                                 TrustedDeviceService trustedDeviceService,
                                                 MfaTransactionPort mfaTransactionPort,
                                                 AuthorizationTokenGenerator authorizationTokenGenerator,
-                                                TokenEnvelopeSealer tokenEnvelopeSealer,
-                                                OpaqueTokenGenerator opaqueTokenGenerator,
                                                 LoginProperties properties,
-                                                SessionPolicy sessionPolicy,
                                                 Clock clock) {
         EnrollmentPolicy enrollmentPolicy = enrollmentPolicy(properties);
         return new DeviceApprovalService(
-                sessionStore,
+                sessionService,
                 enrollmentRepository,
                 trustedDeviceRepository,
                 trustedDeviceService,
                 mfaTransactionPort,
                 authorizationTokenGenerator,
-                tokenEnvelopeSealer,
-                opaqueTokenGenerator,
                 EnrollmentId::random,
-                SessionId::random,
                 enrollmentPolicy,
-                sessionPolicy,
                 clock);
     }
 
@@ -276,10 +282,6 @@ public class LoginConfiguration {
         return new LockoutPolicy(lockout.captchaAfter(), temporaryLocks, lockout.permanentAt());
     }
 
-    @Bean
-    SessionService sessionService(SessionStore sessionStore, SessionPolicy sessionPolicy, Clock clock) {
-        return new SessionService(sessionStore, sessionPolicy, clock);
-    }
 
     @Bean
     CustomerAuthenticationRepository customerAuthenticationRepository(

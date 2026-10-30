@@ -77,9 +77,11 @@ class DeviceEnrollmentServiceTest {
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final TrustedDeviceService trustedDevices = new TrustedDeviceService(devices, DevicePolicy.standard(),
             TrustedDeviceId::random, clock);
-    private final DeviceEnrollmentService service = new DeviceEnrollmentService(sessions, enrollments, trustedDevices, mfa,
-            serverKeys, challenges, sealer, tokens, () -> ENROLLMENT, SessionId::random, EnrollmentPolicy.standard(),
-            new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)), clock);
+    private final SessionService sessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
+            new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)),
+            DevicePolicy.standard(), clock);
+    private final DeviceEnrollmentService service = new DeviceEnrollmentService(sessionService, enrollments, trustedDevices,
+            mfa, serverKeys, challenges, () -> ENROLLMENT, EnrollmentPolicy.standard(), clock);
 
     @BeforeEach
     void aliceHasAPrimaryPhoneAndATabletWithARestrictedSession() {

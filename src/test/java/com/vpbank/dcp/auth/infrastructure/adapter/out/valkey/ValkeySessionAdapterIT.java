@@ -104,14 +104,14 @@ class ValkeySessionAdapterIT {
     }
 
     @Test
-    void deleteIsCompareAndSetAndAbsentAfterwards() {
+    void deleteRemovesOnceAndAnswersFalseAfterwards() {
         store.create(session, TOKEN);
         SessionLookup lookup = keys.lookupOf(TOKEN);
 
-        assertThat(store.deleteIfCurrent(lookup, session.withSessionVersion(7))).isFalse();
-        assertThat(store.deleteIfCurrent(lookup, session)).isTrue();
+        // One atomic DEL: the first caller removes the key, every later one learns it is gone.
+        assertThat(store.delete(lookup)).isTrue();
         assertThat(store.findByToken(TOKEN)).isEmpty();
-        assertThat(store.deleteIfCurrent(lookup, session)).isFalse();
+        assertThat(store.delete(lookup)).isFalse();
     }
 
     @Test

@@ -18,15 +18,14 @@ import com.vpbank.dcp.auth.application.port.out.model.OpenedChallenge;
 import com.vpbank.dcp.auth.application.port.out.model.ServerKeyPair;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
-import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.result.ConfirmEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.InitEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
 import com.vpbank.dcp.auth.application.result.VerifyEnrollmentResult;
+import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.MfaFactor;
-import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.*;
 import java.time.Clock;
 import java.time.Instant;
@@ -54,7 +53,7 @@ public final class DeviceEnrollmentService
     private static final List<MfaFactor> FACE_ONLY = List.of(MfaFactor.FACE);
 
     @NonNull
-    private final SessionStore sessionStore;
+    private final SessionService sessionService;
     @NonNull
     private final EnrollmentRepository enrollmentRepository;
     @NonNull
@@ -66,17 +65,9 @@ public final class DeviceEnrollmentService
     @NonNull
     private final ChallengeSealer challengeSealer;
     @NonNull
-    private final TokenEnvelopeSealer tokenEnvelopeSealer;
-    @NonNull
-    private final OpaqueTokenGenerator opaqueTokenGenerator;
-    @NonNull
     private final Supplier<EnrollmentId> enrollmentIdGenerator;
     @NonNull
-    private final Supplier<SessionId> sessionIdGenerator;
-    @NonNull
     private final EnrollmentPolicy enrollmentPolicy;
-    @NonNull
-    private final SessionPolicy sessionPolicy;
     @NonNull
     private final Clock clock;
 
@@ -151,7 +142,7 @@ public final class DeviceEnrollmentService
                     .build();
 
             Session sessionWithEnrollment = session.withEnrollment(enrollmentContext);
-            Optional<Session> savedSession = sessionStore.saveIfCurrent(storedSession.lookup(), sessionWithEnrollment);
+            Optional<Session> savedSession = sessionService.saveIfCurrent(storedSession, sessionWithEnrollment);
             if (savedSession.isEmpty()) {
                 return new InitEnrollmentResult.Conflict();
             }
@@ -251,7 +242,7 @@ public final class DeviceEnrollmentService
         }
 
         Session sessionWithProvenKey = storedSession.session().withEnrollment(enrollmentContext.proven());
-        Optional<Session> savedSession = sessionStore.saveIfCurrent(storedSession.lookup(), sessionWithProvenKey);
+        Optional<Session> savedSession = sessionService.saveIfCurrent(storedSession, sessionWithProvenKey);
         if (savedSession.isEmpty()) {
             return new VerifyEnrollmentResult.Conflict();
         }
@@ -324,7 +315,7 @@ public final class DeviceEnrollmentService
         Session restrictedSession = storedSession.session();
 
         // Only one confirm may commit: the restricted session is consumed first.
-        boolean sessionConsumed = sessionStore.deleteIfCurrent(storedSession.lookup(), restrictedSession);
+        boolean sessionConsumed = sessionService.consume(storedSession);
         if (!sessionConsumed) {
             return new ConfirmEnrollmentResult.Conflict();
         }
@@ -337,29 +328,21 @@ public final class DeviceEnrollmentService
                 receiptDigest,
                 correlationId);
 
-        Session activeSession = Session.start(
-                sessionIdGenerator.get(),
+        IssuedSession activeSession = sessionService.issueActive(
+                sessionService.newSessionId(),
                 trustedDevice.customerId(),
                 trustedDevice.deviceId(),
                 restrictedSession.channel(),
-                clock.instant(),
-                sessionPolicy);
-
-        OpaqueToken token = opaqueTokenGenerator.next(activeSession.channel(), activeSession.id());
-        String tokenEnvelope = tokenEnvelopeSealer.seal(command.tokenEncryptionKey(), token, activeSession);
-        sessionStore.create(activeSession, token);
+                command.tokenEncryptionKey());
 
         return new ConfirmEnrollmentResult.Trusted(
-                tokenEnvelope,
-                activeSession.idleExpiresAt(),
-                activeSession.absoluteExpiresAt());
+                activeSession.tokenEnvelope(),
+                activeSession.session().idleExpiresAt(),
+                activeSession.session().absoluteExpiresAt());
     }
 
     private Optional<StoredSession> findRestrictedSession(OpaqueToken token) {
-        Instant now = clock.instant();
-        return sessionStore.findByToken(token)
-                .filter(stored -> stored.session().isLive(now))
-                .filter(stored -> stored.session().status() == SessionStatus.NEED_TRUSTED_DEVICE);
+        return sessionService.findRestricted(token);
     }
 
     private Optional<DeviceEnrollment> findOpenEnrollment(EnrollmentId enrollmentId, Session session,
@@ -376,7 +359,7 @@ public final class DeviceEnrollmentService
      */
     private void endRestrictedSession(StoredSession storedSession, DeviceEnrollment terminalEnrollment) {
         enrollmentRepository.saveIfCurrent(terminalEnrollment);
-        sessionStore.deleteIfCurrent(storedSession.lookup(), storedSession.session());
+        sessionService.end(storedSession);
     }
 
     /**

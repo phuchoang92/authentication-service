@@ -18,9 +18,9 @@ import com.vpbank.dcp.auth.application.command.ListPendingDevicesCommand;
 import com.vpbank.dcp.auth.application.command.RequestApprovalCommand;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.gateway.AuthorizationTokenGenerator;
-import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CreateResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
@@ -88,9 +88,10 @@ class DeviceApprovalServiceTest {
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final TrustedDeviceService trustedDevices = new TrustedDeviceService(devices, DevicePolicy.standard(),
             TrustedDeviceId::random, clock);
-    private final DeviceApprovalService service = new DeviceApprovalService(sessions, enrollments, devices, trustedDevices,
-            mfa, qrTokens, sealer, tokens, () -> ENROLLMENT, SessionId::random, EnrollmentPolicy.standard(),
-            new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)), clock);
+    private final SessionService sessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
+            sessionPolicy(), DevicePolicy.standard(), clock);
+    private final DeviceApprovalService service = new DeviceApprovalService(sessionService, enrollments, devices,
+            trustedDevices, mfa, qrTokens, () -> ENROLLMENT, EnrollmentPolicy.standard(), clock);
 
     private TrustedDevice phone;
 
@@ -312,9 +313,10 @@ class DeviceApprovalServiceTest {
                 .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
 
         Clock later = Clock.fixed(NOW.plusSeconds(180), ZoneOffset.UTC);
-        DeviceApprovalService laterService = new DeviceApprovalService(sessions, enrollments, devices, trustedDevices, mfa,
-                qrTokens, sealer, tokens, () -> ENROLLMENT, SessionId::random, EnrollmentPolicy.standard(),
-                sessionPolicy(), later);
+        SessionService laterSessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
+                sessionPolicy(), DevicePolicy.standard(), later);
+        DeviceApprovalService laterService = new DeviceApprovalService(laterSessionService, enrollments, devices,
+                trustedDevices, mfa, qrTokens, () -> ENROLLMENT, EnrollmentPolicy.standard(), later);
         assertThat(laterService.claim(new ClaimEnrollmentCommand(WATCH_TOKEN, QR_TOKEN, "{watch-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.AuthorizationExpired.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.EXPIRED);

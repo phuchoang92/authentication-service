@@ -5,6 +5,7 @@ import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Session;
+
 import java.util.Optional;
 
 /**
@@ -14,7 +15,9 @@ import java.util.Optional;
  */
 public interface SessionStore {
 
-    /** Stores a new ACTIVE session under the token's lookup; TTL = idle deadline. */
+    /**
+     * Stores a new ACTIVE session under the token's lookup; TTL = idle deadline.
+     */
     void create(Session session, OpaqueToken token);
 
     Optional<StoredSession> findByToken(OpaqueToken token);
@@ -27,6 +30,11 @@ public interface SessionStore {
      */
     Optional<Session> saveIfCurrent(SessionLookup lookup, Session changed);
 
-    /** Removes the session only if its version is still current. False = stale or already gone. */
-    boolean deleteIfCurrent(SessionLookup lookup, Session current);
+    /**
+     * Removes the session with one atomic delete. True when this call removed it, false when it was
+     * already gone; of two racing callers exactly one gets true, which is the one-shot consumption the
+     * trust flows need. No version check: nothing decided from a session depends on it being unchanged
+     * when it is removed.
+     */
+    boolean delete(SessionLookup lookup);
 }
