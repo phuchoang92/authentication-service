@@ -6,11 +6,12 @@ New authentication service, built bottom-up from the DB design phases in
 Development rules: [architecture and package boundaries](ARCHITECTURE.md),
 [code conventions and readability examples](CODE_CONVENTIONS.md).
 
-**Status (2026-10-30): slices 1–8 done, code aligned with
+**Status (2026-10-31): slices 1–10 implemented, code aligned with
 [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md)** on [ARCHITECTURE.md](ARCHITECTURE.md) (layer-first
 hexagonal under `domain` / `application` / `infrastructure`, business enums in `domain.enums`,
-Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
-`V1__identity.sql`, `V2__password_lockout.sql`, `V3__trusted_device.sql`), the registration API
+Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–4 plus the audit table (Flyway
+`V1__identity.sql`, `V2__password_lockout.sql`, `V3__trusted_device.sql`, `V4__enrollment.sql`,
+`V5__security_audit.sql`), the registration API
 `POST /internal/v1/callback/authentication-creation` (contract §1 of
 `new-customer-onboarding-api-plan.md`), password login / session / logout / extend
 ([plan](docs/plans/slice-2-login-session.md)), password lockout with CAPTCHA
@@ -19,7 +20,8 @@ Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–3 (Flyway
 FACE ([plan](docs/plans/slice-5-enrollment.md)) and approval of a new device by the current primary
 device through a QR token ([plan](docs/plans/slice-6-device-approval.md)) and the self-describing session token
 ([plan](docs/plans/slice-7-session-token.md)) and the common session actions with one Valkey read per request
-([plan](docs/plans/slice-8-session-actions.md)), each off by default.
+([plan](docs/plans/slice-8-session-actions.md)) and the asynchronous security activity audit of login outcomes
+([plan](docs/plans/slice-9-security-audit.md)), each off by default.
 
 | Path | Caller | Result |
 |---|---|---|
@@ -110,6 +112,12 @@ A retry with the same data returns the same `requestId`; an unfinished earlier a
 - The endpoint has no caller authentication yet; enable it only on an internal network.
 - If enabling the Keycloak user succeeds but the identity insert then finds the username taken,
   the Keycloak user stays enabled without an Auth identity (reported as conflict; needs cleanup).
+- Security audit (slice 9) is best-effort by design: a full queue or a database outage drops events (counted,
+  logged by type). No retention/purge (open policy gate), no metric for the drop counter (no actuator yet),
+  no export to a broker/SIEM (no broker selected), and only login outcomes so far — lockout, session and
+  enrollment activity are later slices on the same table. Device-trust transitions stay in
+  `TRUSTED_DEVICE_AUDIT`, written synchronously; a proposal to copy them into the activity table (slice 10)
+  was reviewed and folded back on 2026-10-31, see [its note](docs/plans/slice-10-shared-activity-audit.md).
 
 ## Build
 
@@ -119,17 +127,25 @@ Java 25, Maven 3.9, Docker for the MySQL integration tests:
 mvn -o verify
 ```
 
-Last run (2026-10-30, slice 8 complete): 262 tests, 0 failures — 236 unit
+Last run (2026-10-31, slice 9 complete, slice 10 folded back): 284 tests, 0 failures — 256 unit
+(domain state machines and value objects, frozen enum codes, services with in-memory doubles incl. the approval flow and
+the login audit mapping, web/persistence/partner mappers, Valkey key vector and codec, error catalogue, Keycloak admin +
+Direct Grant, JWE and challenge sealers, MFA HTTP adapter, lockout, CAPTCHA, `@WebMvcTest` slices, the generic audit
+queue/writer thread, the audit store and its configuration, 12 ArchUnit rules) and 28 on Testcontainers (persistence ITs
+incl. `SecurityAuditEventPersistenceAdapterIT` on MySQL 8.4, Valkey ITs, `ApplicationBootIT` with the audit on: four login
+rows land from the writer thread). No real Customer, Keycloak, Notification or MFA service was called.
+
+Previous run (2026-10-31, slice 9; retained verification record): 282 tests, 0 failures — 254 unit
 (domain state machines and value objects, frozen enum codes, services with in-memory doubles incl. the
 approval flow, web/persistence/partner mappers, Valkey key vector and codec, error catalogue, Keycloak
 admin + Direct Grant with a test-signed ID token, JWE sealer and challenge sealer round trips, MFA HTTP
 adapter with test-signed FACE and FACE+OTP receipts, lockout escalation, CAPTCHA generator/service,
 `@WebMvcTest` slices incl. the session filter, the trusted-device and approval routes, configuration,
-12 ArchUnit rules) and 26 on Testcontainers (`RegistrationPersistenceAdapterIT`,
+the generic audit queue/writer thread, the audit store and its configuration, 12 ArchUnit rules) and 28 on Testcontainers (`RegistrationPersistenceAdapterIT`,
 `CustomerAuthenticationPersistenceAdapterIT`, `TrustedDevicePersistenceAdapterIT` incl. pending rows and
-`DeviceEnrollmentPersistenceAdapterIT` incl. the approval round trip on MySQL 8.4, `ValkeySessionAdapterIT`
+`DeviceEnrollmentPersistenceAdapterIT` incl. the approval round trip and `SecurityAuditEventPersistenceAdapterIT` (inserts only) on MySQL 8.4, `ValkeySessionAdapterIT`
 and `ValkeyCaptchaStoreIT` on `valkey/valkey:9.1`, `ApplicationBootIT` booting everything against MySQL +
-Valkey: register → 2 failures → CAPTCHA → login → decrypt envelope → extend → logout → lock → unlock →
+Valkey: register → 2 failures → CAPTCHA → login → decrypt envelope → four login audit rows land from the writer thread → extend → logout → lock → unlock →
 second device NEED_TRUSTED_DEVICE → device list → tablet enrollment init → verify → confirm → ACTIVE →
 watch request → tablet pending/approve/authorize (MFA mocked) → wrong QR token → claim → watch primary,
 three devices). No real Customer, Keycloak, Notification or MFA service was called.
@@ -150,5 +166,6 @@ three devices). No real Customer, Keycloak, Notification or MFA service was call
 | `AUTH_KC_LOGIN_CLIENT_ID`, `AUTH_KC_LOGIN_CLIENT_SECRET` | Direct Grant client (`authentication-service`) |
 | `AUTH_CAPTCHA_ANSWER_HMAC_KEY_BASE64` | ≥32-byte HMAC key for the stored CAPTCHA answers |
 | `AUTH_DEVICE_LOOKUP_HMAC_KEY_D1_BASE64`, `AUTH_DEVICE_ENCRYPTION_KEY_E1_BASE64` | ≥32-byte keys protecting the stored device ID (`d1` lookup HMAC, `e1` AES-256-GCM) |
+| `AUTH_AUDIT_ENABLED` | `true` to write login outcomes and completed device trust to `SECURITY_AUDIT_EVENT` from a background thread (default `false`); `auth.audit.queue-capacity` 10000, `batch-size` 100, `shutdown-drain` PT2S |
 
 Timeouts default to 3 s per partner; no call is retried.

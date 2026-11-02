@@ -18,10 +18,13 @@ import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
+import com.vpbank.dcp.auth.application.port.out.model.SecurityAuditEvent;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.PasswordStatus;
+import com.vpbank.dcp.auth.domain.enums.SecurityEventReason;
+import com.vpbank.dcp.auth.domain.enums.SecurityEventType;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
@@ -41,6 +44,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -58,13 +63,15 @@ class LoginServiceTest {
     private final TokenEnvelopeSealer sealer = mock(TokenEnvelopeSealer.class);
     private final OpaqueTokenGenerator tokens = mock(OpaqueTokenGenerator.class);
     private final InMemoryTrustedDeviceRepository devices = new InMemoryTrustedDeviceRepository();
+    private final RecordingSecurityAuditStore audit = new RecordingSecurityAuditStore();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final SessionService sessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
             new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)),
             DevicePolicy.standard(), clock);
+    private final TrustedDeviceService trustedDeviceService =
+            new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random, clock);
     private final LoginService service = new LoginService(identities, credentials, captchas, sessionService,
-            new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random, clock),
-            LockoutPolicy.standard(), clock);
+            trustedDeviceService, audit, LockoutPolicy.standard(), clock);
 
     @BeforeEach
     void happyPath() {
@@ -235,6 +242,131 @@ class LoginServiceTest {
         sessions.unavailable = false;
         identities.unavailable = true;
         assertThat(service.login(command())).isInstanceOf(LoginResult.Unavailable.class);
+    }
+
+    // --- security audit: one event per attempt, identifiers only (slice 9) ---
+
+    @Test
+    void aFullLoginIsAuditedAsSucceededWithTheSessionAndNoFailureCount() {
+        service.login(command());
+
+        SecurityAuditEvent event = audit.only();
+        assertThat(event.eventType()).isEqualTo(SecurityEventType.LOGIN_SUCCEEDED);
+        assertThat(event.reason()).isEqualTo(SecurityEventReason.FULL_SESSION);
+        assertThat(event.customerId()).isEqualTo(CUSTOMER);
+        assertThat(event.channel()).isEqualTo(Channel.MOBILE);
+        assertThat(event.platform()).isEqualTo(DevicePlatform.ANDROID);
+        assertThat(event.sessionId()).isEqualTo(sessions.only().id());
+        assertThat(event.failedCount()).isNull();
+        assertThat(event.occurredAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void aRestrictedLoginIsAuditedAsARestrictedSession() {
+        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), CUSTOMER, Channel.MOBILE,
+                new DeviceId("phone"), DevicePlatform.ANDROID, null, NOW, DevicePolicy.standard());
+        devices.rows.put(phone.id(), phone);
+        devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(CUSTOMER, Channel.MOBILE), phone.id());
+
+        service.login(command());
+
+        assertThat(audit.only().eventType()).isEqualTo(SecurityEventType.LOGIN_SUCCEEDED);
+        assertThat(audit.only().reason()).isEqualTo(SecurityEventReason.RESTRICTED_SESSION);
+        assertThat(audit.only().sessionId()).isEqualTo(sessions.only().id());
+    }
+
+    @Test
+    void aWebLoginIsAuditedWithoutAPlatform() {
+        LoginCommand web = LoginCommand.builder().userName(ALICE).password(new Password("Secret123".toCharArray()))
+                .channel(Channel.WEB).tokenEncryptionKey(KENC).build();
+        service.login(web);
+
+        assertThat(audit.only().channel()).isEqualTo(Channel.WEB);
+        assertThat(audit.only().platform()).isNull();
+    }
+
+    @Test
+    void anUnknownUserIsAuditedWithoutACustomerAndAWrongPasswordWithTheNewCount() {
+        identities.rows.clear();
+        service.login(command());
+        assertThat(audit.last().eventType()).isEqualTo(SecurityEventType.LOGIN_FAILED);
+        assertThat(audit.last().reason()).isEqualTo(SecurityEventReason.UNKNOWN_USER);
+        assertThat(audit.last().customerId()).isNull();
+        assertThat(audit.last().failedCount()).isNull();
+        assertThat(audit.last().sessionId()).isNull();
+
+        identities.rows.put(CUSTOMER, identity("ACTIVE", PasswordLockout.none()));
+        when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Rejected());
+        service.login(command());
+        assertThat(audit.last().eventType()).isEqualTo(SecurityEventType.LOGIN_FAILED);
+        assertThat(audit.last().reason()).isEqualTo(SecurityEventReason.WRONG_PASSWORD);
+        assertThat(audit.last().customerId()).isEqualTo(CUSTOMER);
+        assertThat(audit.last().failedCount()).isEqualTo(1);
+        assertThat(audit.events).hasSize(2);
+    }
+
+    @Test
+    void theFailureThatLocksIsAuditedAsLockedWithTheCountThatLocked() {
+        when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Rejected());
+        service.login(command());
+        service.login(command());
+        service.login(withCaptcha(command()));
+
+        assertThat(audit.events).extracting(SecurityAuditEvent::reason).containsExactly(
+                SecurityEventReason.WRONG_PASSWORD, SecurityEventReason.WRONG_PASSWORD, SecurityEventReason.LOCKED);
+        assertThat(audit.events).extracting(SecurityAuditEvent::failedCount).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    void refusalsAreAuditedWithTheirReasonAndTheCurrentCount() {
+        identities.rows.put(CUSTOMER, identity("ACTIVE", new PasswordLockout(PasswordStatus.PERMANENTLY_LOCKED, 5, null)));
+        service.login(command());
+        assertThat(audit.last().eventType()).isEqualTo(SecurityEventType.LOGIN_REFUSED);
+        assertThat(audit.last().reason()).isEqualTo(SecurityEventReason.LOCKED);
+        assertThat(audit.last().failedCount()).isEqualTo(5);
+
+        identities.rows.put(CUSTOMER, identity("ACTIVE", new PasswordLockout(PasswordStatus.ACTIVE, 2, null)));
+        service.login(command());
+        assertThat(audit.last().eventType()).isEqualTo(SecurityEventType.LOGIN_REFUSED);
+        assertThat(audit.last().reason()).isEqualTo(SecurityEventReason.CAPTCHA_REQUIRED);
+        assertThat(audit.last().failedCount()).isEqualTo(2);
+
+        identities.rows.put(CUSTOMER, identity("SUSPENDED", PasswordLockout.none()));
+        service.login(command());
+        assertThat(audit.last().eventType()).isEqualTo(SecurityEventType.LOGIN_REFUSED);
+        assertThat(audit.last().reason()).isEqualTo(SecurityEventReason.NOT_READY);
+        assertThat(audit.last().customerId()).isEqualTo(CUSTOMER);
+        assertThat(audit.events).hasSize(3);
+    }
+
+    @Test
+    void anOutageIsAuditedAsUnavailableNamingTheSideThatFailed() {
+        when(credentials.verify(eq(ALICE), any())).thenThrow(new PartnerUnavailableException("Keycloak"));
+        service.login(command());
+        assertThat(audit.last().eventType()).isEqualTo(SecurityEventType.LOGIN_UNAVAILABLE);
+        assertThat(audit.last().reason()).isEqualTo(SecurityEventReason.PARTNER);
+        assertThat(audit.last().customerId()).isNull();
+
+        when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Verified("iss", "sub-1"));
+        sessions.unavailable = true;
+        service.login(command());
+        assertThat(audit.last().eventType()).isEqualTo(SecurityEventType.LOGIN_UNAVAILABLE);
+        assertThat(audit.last().reason()).isEqualTo(SecurityEventReason.REPOSITORY);
+        assertThat(audit.events).extracting(SecurityAuditEvent::reason).containsExactly(
+                SecurityEventReason.PARTNER, SecurityEventReason.REPOSITORY);
+    }
+
+    @Test
+    void theAuditIsRecordedOnlyAfterThePasswordWasWiped() {
+        Password password = new Password("Secret123".toCharArray());
+        List<Boolean> passwordWipedWhenRecorded = new ArrayList<>();
+        LoginService observed = new LoginService(identities, credentials, captchas, sessionService, trustedDeviceService,
+                event -> passwordWipedWhenRecorded.add(new String(password.value()).chars().allMatch(c -> c == '\0')),
+                LockoutPolicy.standard(), clock);
+
+        observed.login(command(password));
+
+        assertThat(passwordWipedWhenRecorded).containsExactly(true);
     }
 
     private static LoginCommand command() {

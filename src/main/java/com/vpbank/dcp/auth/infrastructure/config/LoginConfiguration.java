@@ -15,6 +15,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.ServerKeyPairGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
@@ -86,6 +87,7 @@ public class LoginConfiguration {
                               CaptchaStore captchaStore,
                               SessionService sessionService,
                               TrustedDeviceService trustedDeviceService,
+                              SecurityAuditStore securityAuditStore,
                               LockoutPolicy lockoutPolicy,
                               Clock clock) {
         return new LoginService(
@@ -94,6 +96,7 @@ public class LoginConfiguration {
                 captchaStore,
                 sessionService,
                 trustedDeviceService,
+                securityAuditStore,
                 lockoutPolicy,
                 clock);
     }

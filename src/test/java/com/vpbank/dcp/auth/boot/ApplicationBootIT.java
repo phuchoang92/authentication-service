@@ -35,8 +35,12 @@ import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.UserName;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.SecurityAuditEventEntity;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.SecurityAuditEventJpaRepository;
+import java.time.Duration;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -63,7 +67,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * until locked and is unlocked by the bank; finally a second device gets a restricted session that
  * can neither list devices nor extend, while the first device sees itself as the trusted primary.
  * Partner ports (Customer, Keycloak admin + Direct Grant, Notification) are mocked; the CAPTCHA
- * generator is replaced by a fixed answer.
+ * generator is replaced by a fixed answer. The security audit is on, so the first four login
+ * attempts must show up in SECURITY_AUDIT_EVENT shortly after they were answered (slice 9).
  */
 @Testcontainers
 @SpringBootTest(properties = {
@@ -80,6 +85,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "auth.login.keycloak.realm=test",
         "auth.login.keycloak.client-id=authentication-service",
         "auth.login.keycloak.client-secret=secret",
+        "auth.audit.enabled=true",
         "auth.mfa.origin=https://mfa.test",
         "auth.mfa.receipt-issuer=mfa-service",
         "auth.mfa.receipt-public-jwk={\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU\","
@@ -109,6 +115,7 @@ class ApplicationBootIT {
 
     @Autowired MockMvc mvc;
     @Autowired CustomerAuthenticationJpaRepository identities;
+    @Autowired SecurityAuditEventJpaRepository auditRows;
     @MockitoBean CustomerDirectoryPort customers;
     @MockitoBean IdentityProviderPort keycloakAdmin;
     @MockitoBean SmsSenderPort sms;
@@ -158,6 +165,16 @@ class ApplicationBootIT {
         jwe.decrypt(new ECDHDecrypter(kenc));
         String token = field(jwe.getPayload().toString(), "token");
         assertThat(token).matches("s1:auth:session:MOBILE:[0-9a-f-]{36}:[A-Za-z0-9_-]{43}");
+
+        // The audit writer runs behind the request: two counted failures, one refusal, one success, in order.
+        List<SecurityAuditEventEntity> timeline = auditTimelineOf("90359", 4);
+        assertThat(timeline).extracting(SecurityAuditEventEntity::getEventType)
+                .containsExactly("LOGIN_FAILED", "LOGIN_FAILED", "LOGIN_REFUSED", "LOGIN_SUCCEEDED");
+        assertThat(timeline).extracting(SecurityAuditEventEntity::getReasonCode)
+                .containsExactly("WRONG_PASSWORD", "WRONG_PASSWORD", "CAPTCHA_REQUIRED", "FULL_SESSION");
+        assertThat(timeline).extracting(SecurityAuditEventEntity::getFailedCount).containsExactly(1, 2, 2, null);
+        assertThat(timeline.getLast().getSessionId().toString()).isEqualTo(token.split(":")[4]);
+        assertThat(timeline).allSatisfy(row -> assertThat(row.getRecordedAt()).isAfterOrEqualTo(row.getOccurredAt()));
 
         // The BFF extends by the channel and session ID it reads from the token; it never sends the secret.
         String extendBody = extendBodyFor(token);
@@ -342,6 +359,17 @@ class ApplicationBootIT {
         JWEObject response = new JWEObject(header, new Payload(challengePayload));
         response.encrypt(new ECDHEncrypter(ksrv));
         return response.serialize();
+    }
+
+    /** The customer's audit rows once at least {@code atLeast} have landed; the writer is asynchronous, so poll briefly. */
+    private List<SecurityAuditEventEntity> auditTimelineOf(String customerId, int atLeast) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        List<SecurityAuditEventEntity> rows = auditRows.findByCustomerIdOrderByOccurredAtAscIdAsc(customerId);
+        while (rows.size() < atLeast && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+            rows = auditRows.findByCustomerIdOrderByOccurredAtAscIdAsc(customerId);
+        }
+        return rows;
     }
 
     private static String tokenOf(MvcResult login, ECKey kenc) throws Exception {

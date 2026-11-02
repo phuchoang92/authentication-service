@@ -38,7 +38,7 @@ class LoginConfigurationTest {
 
     private final WebApplicationContextRunner runner = new WebApplicationContextRunner()
             .withUserConfiguration(RestConfiguration.class, ValkeyConfiguration.class, DeviceConfiguration.class,
-                    LoginConfiguration.class, LoginController.class)
+                    AuditConfiguration.class, LoginConfiguration.class, LoginController.class)
             .withBean(StringRedisTemplate.class, () -> Mockito.mock(StringRedisTemplate.class))
             .withBean(CustomerAuthenticationJpaRepository.class, () -> Mockito.mock(CustomerAuthenticationJpaRepository.class))
             .withBean(TrustedDeviceJpaRepository.class, () -> Mockito.mock(TrustedDeviceJpaRepository.class))

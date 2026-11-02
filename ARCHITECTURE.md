@@ -103,12 +103,12 @@ com.vpbank.dcp.auth
 │   │   ├── in                                RegisterCustomerUseCase (interfaces only)
 │   │   └── out
 │   │       ├── repository                    RegistrationRepository, CustomerAuthenticationRepository,
-│   │       │                                 SessionStore, CaptchaStore
+│   │       │                                 SessionStore, CaptchaStore, SecurityAuditStore
 │   │       ├── gateway                       CustomerDirectoryPort, IdentityProviderPort, SmsSenderPort,
 │   │       │                                 CredentialVerifierPort, TokenEnvelopeSealer,
 │   │       │                                 OpaqueTokenGenerator, CaptchaGenerator
 │   │       ├── model                         NewIdentityUser, InitialPasswordSms, CustomerProfile,
-│   │       │                                 CustomerAuthentication, StoredSession
+│   │       │                                 CustomerAuthentication, StoredSession, SecurityAuditEvent
 │   │       └── exception                     RepositoryUnavailableException, PartnerUnavailableException,
 │   │                                         InvalidEncryptionKeyException
 │   └── service                               RegisterCustomerService (implements the use case),
@@ -162,7 +162,7 @@ src/main/resources
 └── ValidationMessages_vi.properties, ValidationMessages_en.properties   Bean Validation texts
 ```
 
-**Current (2026-10-30, slices 1–8 implemented, layout and conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
+**Current (2026-10-31, slices 1–9 implemented, layout and conventions applied):** the source uses `infrastructure.adapter.in.rest` (`*RestMapper`,
 `RestConfiguration`), `infrastructure.adapter.out.*`, `infrastructure.config`,
 `application.command` / `application.result`, `application.port.in` with use-case interfaces
 only, and `application.port.out.{repository,gateway,model,exception}` with no top-level types at
@@ -414,6 +414,7 @@ class/method contract even though the classes share role packages.
 | 11 | Value objects | validate once, carry meaning in signatures (`UserName`, not `String`) | `domain.model` |
 | 12 | ArchUnit guard | executable checks guard implemented rules; new targets need explicit test updates before enforcement can be claimed | `ArchitectureTest` |
 | 13 | Direct service composition | reuse the owning capability's business operations without a forwarding interface or HTTP call | `application.service` (§6.1) |
+| 14 | Fire-and-forget audit port | the login answer never waits on, or fails because of, the activity audit; the port promises "never blocks, never throws", the event is built only from values the service always has, and the queue + background thread is one reusable class any append-only, best-effort table can sit behind | `SecurityAuditStore` → `QueuedSecurityAuditStore` → `persistence.common.QueuedBatchWriter<E>` + `BatchWriter<E>` (slice 9) |
 
 Patterns deliberately **not** used: generic `BaseService`/`BaseController`, repository
 interfaces in the domain for every entity, MapStruct, `@Service`/`@Component` scanning for
@@ -916,6 +917,7 @@ public final class RegistrationRestMapper {
 
 | Date | Decision | Reason | Alternative rejected |
 |---|---|---|---|
+| 2026-10-31 | Shared typed activity audit after completed operations | one service operation, reason-derived event type, versioned allowlisted payloads and existing best-effort queue; record trust after its repository commit without changing existing transition audits | per-business audit service hierarchy; registry for a single writer; changing trust transaction guarantees; implicit durable delivery |
 | 2026-10-25 | Spring Data JPA for persistence | entities + `ddl-auto=validate` keep code and schema in sync; `@Version` gives CAS; repositories are declarative | `JdbcClient` plain SQL (no mapping layer, hand-written CAS) |
 | 2026-10-25 | Hand-written mappers | readable, debuggable, no annotation processor; MapStruct not available offline | MapStruct |
 | 2026-10-25 | Scoped Lombok constructors and builders | `@Builder` for data; `@RequiredArgsConstructor` and optional `@NonNull` for assignment-only bean constructors; explicit constructors retain initialization/invariant logic | all handwritten assignment-only constructors; blanket `@AllArgsConstructor`; unrestricted Lombok |

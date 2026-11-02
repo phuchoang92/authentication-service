@@ -8,11 +8,15 @@ import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableE
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
+import com.vpbank.dcp.auth.application.port.out.model.SecurityAuditEvent;
 import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DeviceRouting;
+import com.vpbank.dcp.auth.domain.enums.SecurityEventReason;
+import com.vpbank.dcp.auth.domain.enums.SecurityEventType;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
@@ -36,6 +40,11 @@ import lombok.RequiredArgsConstructor;
  * is counted with compare-and-set; only a success resets the count. The password is wiped as soon
  * as the provider has answered. After the password, {@link TrustedDeviceService} decides whether this
  * device gets a full ACTIVE session or a restricted NEED_TRUSTED_DEVICE one (DD 20 §2).
+ *
+ * <p>Every attempt ends with one {@link SecurityAuditEvent} handed to the {@link SecurityAuditStore}
+ * after the decision is made and the password is wiped (slice 9). The store never blocks or throws,
+ * and the event is built only from values this class always has, so the audit cannot change the
+ * answer or its timing.
  */
 @RequiredArgsConstructor
 public final class LoginService implements LoginUseCase {
@@ -44,87 +53,110 @@ public final class LoginService implements LoginUseCase {
     @NonNull private final CaptchaStore captchaStore;
     @NonNull private final SessionService sessionService;
     @NonNull private final TrustedDeviceService trustedDeviceService;
+    @NonNull private final SecurityAuditStore securityAuditStore;
     @NonNull private final LockoutPolicy lockoutPolicy;
     @NonNull private final Clock clock;
 
+    /**
+     * The outcome of one attempt and what the audit needs to say about it: the reason (which names the
+     * event type), the identity the attempt was about (null for an unknown user name or an outage)
+     * and the session a success issued.
+     */
+    private record Decision(LoginResult result, SecurityEventReason reason, CustomerAuthentication identity,
+                            SessionId sessionId) {
+    }
+
     @Override
     public LoginResult login(LoginCommand command) {
+        Decision decision;
         try {
-            Optional<CustomerAuthentication> foundIdentity =
-                    customerAuthenticationRepository.findByUserName(command.userName());
-
-            if (foundIdentity.isPresent()) {
-                CustomerAuthentication identity = foundIdentity.get();
-                if (identity.lockout().isLocked(clock.instant())) {
-                    return new LoginResult.AccountLocked();
-                }
-                boolean captchaRequired = identity.lockout().captchaRequired(lockoutPolicy);
-                if (captchaRequired && !captchaSolved(command, identity.customerId())) {
-                    return new LoginResult.CaptchaRequired();
-                }
-            }
-
-            // Keycloak is asked even for an unknown user, so both answers take similar time.
-            VerificationResult verificationResult =
-                    credentialVerifierPort.verify(command.userName(), command.password());
-            if (foundIdentity.isEmpty()) {
-                return new LoginResult.InvalidCredentials();
-            }
-            CustomerAuthentication identity = foundIdentity.get();
-
-            boolean passwordAccepted =
-                    verificationResult instanceof VerificationResult.Verified(var issuer, var subject)
-                            && identity.isSameIdentity(issuer, subject);
-            if (!passwordAccepted) {
-                return recordFailure(identity);
-            }
-
-            if (!identity.isActive()) {
-                return new LoginResult.AccountNotReady();
-            }
-
-            if (identity.lockout().failedCount() > 0) {
-                PasswordLockout resetLockout = identity.lockout().reset();
-                customerAuthenticationRepository.saveLockoutIfCurrent(identity, resetLockout);
-            }
-
-            SessionId sessionId = sessionService.newSessionId();
-            String correlationId = sessionId.toString();
-            DeviceRouting deviceRouting = trustedDeviceService.routeAfterPassword(
-                    identity.customerId(),
-                    command.channel(),
-                    command.deviceId(),
-                    command.platform(),
-                    command.devicePublicKey(),
-                    correlationId);
-
-            IssuedSession issuedSession = switch (deviceRouting) {
-                case DeviceRouting.FullSession() -> sessionService.issueActive(
-                        sessionId,
-                        identity.customerId(),
-                        command.deviceId(),
-                        command.channel(),
-                        command.tokenEncryptionKey());
-                case DeviceRouting.NeedTrust() -> sessionService.issueRestricted(
-                        sessionId,
-                        identity.customerId(),
-                        command.deviceId(),
-                        command.channel(),
-                        command.tokenEncryptionKey());
-            };
-            Session session = issuedSession.session();
-
-            return new LoginResult.Authenticated(
-                    issuedSession.tokenEnvelope(),
-                    session.customerId(),
-                    session.status(),
-                    session.idleExpiresAt(),
-                    session.absoluteExpiresAt());
-        } catch (RepositoryUnavailableException | PartnerUnavailableException failure) {
-            return new LoginResult.Unavailable();
+            decision = decide(command);
+        } catch (RepositoryUnavailableException failure) {
+            decision = new Decision(new LoginResult.Unavailable(), SecurityEventReason.REPOSITORY, null, null);
+        } catch (PartnerUnavailableException failure) {
+            decision = new Decision(new LoginResult.Unavailable(), SecurityEventReason.PARTNER, null, null);
         } finally {
             command.password().clear();
         }
+        securityAuditStore.record(auditEvent(command, decision));
+        return decision.result();
+    }
+
+    private Decision decide(LoginCommand command) {
+        Optional<CustomerAuthentication> foundIdentity =
+                customerAuthenticationRepository.findByUserName(command.userName());
+
+        if (foundIdentity.isPresent()) {
+            CustomerAuthentication identity = foundIdentity.get();
+            if (identity.lockout().isLocked(clock.instant())) {
+                return new Decision(new LoginResult.AccountLocked(), SecurityEventReason.LOCKED, identity, null);
+            }
+            boolean captchaRequired = identity.lockout().captchaRequired(lockoutPolicy);
+            if (captchaRequired && !captchaSolved(command, identity.customerId())) {
+                return new Decision(new LoginResult.CaptchaRequired(), SecurityEventReason.CAPTCHA_REQUIRED, identity, null);
+            }
+        }
+
+        // Keycloak is asked even for an unknown user, so both answers take similar time.
+        VerificationResult verificationResult =
+                credentialVerifierPort.verify(command.userName(), command.password());
+        if (foundIdentity.isEmpty()) {
+            return new Decision(new LoginResult.InvalidCredentials(), SecurityEventReason.UNKNOWN_USER, null, null);
+        }
+        CustomerAuthentication identity = foundIdentity.get();
+
+        boolean passwordAccepted =
+                verificationResult instanceof VerificationResult.Verified(var issuer, var subject)
+                        && identity.isSameIdentity(issuer, subject);
+        if (!passwordAccepted) {
+            return recordFailure(identity);
+        }
+
+        if (!identity.isActive()) {
+            return new Decision(new LoginResult.AccountNotReady(), SecurityEventReason.NOT_READY, identity, null);
+        }
+
+        if (identity.lockout().failedCount() > 0) {
+            PasswordLockout resetLockout = identity.lockout().reset();
+            customerAuthenticationRepository.saveLockoutIfCurrent(identity, resetLockout);
+        }
+
+        SessionId sessionId = sessionService.newSessionId();
+        String correlationId = sessionId.toString();
+        DeviceRouting deviceRouting = trustedDeviceService.routeAfterPassword(
+                identity.customerId(),
+                command.channel(),
+                command.deviceId(),
+                command.platform(),
+                command.devicePublicKey(),
+                correlationId);
+
+        IssuedSession issuedSession = switch (deviceRouting) {
+            case DeviceRouting.FullSession() -> sessionService.issueActive(
+                    sessionId,
+                    identity.customerId(),
+                    command.deviceId(),
+                    command.channel(),
+                    command.tokenEncryptionKey());
+            case DeviceRouting.NeedTrust() -> sessionService.issueRestricted(
+                    sessionId,
+                    identity.customerId(),
+                    command.deviceId(),
+                    command.channel(),
+                    command.tokenEncryptionKey());
+        };
+        Session session = issuedSession.session();
+
+        LoginResult.Authenticated authenticated = new LoginResult.Authenticated(
+                issuedSession.tokenEnvelope(),
+                session.customerId(),
+                session.status(),
+                session.idleExpiresAt(),
+                session.absoluteExpiresAt());
+        SecurityEventReason sessionKind = session.status().full()
+                ? SecurityEventReason.FULL_SESSION
+                : SecurityEventReason.RESTRICTED_SESSION;
+        return new Decision(authenticated, sessionKind, identity, session.id());
     }
 
     /** A challenge is consumed on first use whether right or wrong, so a guess costs a new CAPTCHA. */
@@ -141,7 +173,7 @@ public final class LoginService implements LoginUseCase {
      * row is re-read once so the escalation is applied to the latest count, then the attempt is
      * answered. If the write still loses, the other writer's lock (if any) stands.
      */
-    private LoginResult recordFailure(CustomerAuthentication identity) {
+    private Decision recordFailure(CustomerAuthentication identity) {
         Instant now = clock.instant();
 
         PasswordLockout escalatedLockout = identity.lockout().afterFailure(now, lockoutPolicy);
@@ -157,12 +189,31 @@ public final class LoginService implements LoginUseCase {
             });
         }
 
-        PasswordLockout effectiveLockout = savedIdentity
-                .map(CustomerAuthentication::lockout)
-                .orElse(identity.lockout());
-        if (effectiveLockout.isLocked(now)) {
-            return new LoginResult.AccountLocked();
+        // The identity as it stands after this failure; if the write lost twice, the row as it was.
+        CustomerAuthentication identityAfterFailure = savedIdentity.orElse(identity);
+        if (identityAfterFailure.lockout().isLocked(now)) {
+            return new Decision(new LoginResult.AccountLocked(), SecurityEventReason.LOCKED, identityAfterFailure, null);
         }
-        return new LoginResult.InvalidCredentials();
+        return new Decision(new LoginResult.InvalidCredentials(), SecurityEventReason.WRONG_PASSWORD, identityAfterFailure, null);
+    }
+
+    /**
+     * The decision as one audit row. Identifiers only: the customer when the user name matched, the
+     * session a success issued, and the lockout count for anything but a success (a success has
+     * just reset it).
+     */
+    private SecurityAuditEvent auditEvent(LoginCommand command, Decision decision) {
+        CustomerAuthentication identity = decision.identity();
+        boolean succeeded = decision.reason().type() == SecurityEventType.LOGIN_SUCCEEDED;
+        Integer failedCount = identity == null || succeeded ? null : identity.lockout().failedCount();
+        return SecurityAuditEvent.builder()
+                .reason(decision.reason())
+                .customerId(identity == null ? null : identity.customerId())
+                .channel(command.channel())
+                .platform(command.platform())
+                .sessionId(decision.sessionId())
+                .failedCount(failedCount)
+                .occurredAt(clock.instant())
+                .build();
     }
 }
