@@ -13,11 +13,17 @@ import com.vpbank.dcp.auth.application.result.ClaimEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.ListPendingDevicesResult;
 import com.vpbank.dcp.auth.application.result.PendingDeviceSummary;
 import com.vpbank.dcp.auth.application.result.RequestApprovalResult;
+import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
+import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
+import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAdmission;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.ClaimEnrollmentRequest;
@@ -27,6 +33,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -34,7 +41,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 class DeviceApprovalRestMapperTest {
-    private static final String TOKEN = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:" + "A".repeat(43);
+    private static final AdmittedSession ADMITTED = new AdmittedSession(
+            new SessionId(UUID.fromString("00000000-0000-4000-8000-000000000001")), new CustomerId("90359"),
+            Channel.MOBILE, new DeviceId("dev-1"), SessionStatus.NEED_TRUSTED_DEVICE);
+    private static final BffAdmission ADMISSION = new BffAdmission(ADMITTED);
     private static final Instant EXPIRES = Instant.parse("2026-10-26T10:10:00Z");
     private static final EnrollmentId ENROLLMENT = EnrollmentId.random();
     private static final Map<String, Object> JWK = Map.of("kty", "EC");
@@ -48,21 +58,23 @@ class DeviceApprovalRestMapperTest {
 
     @Test
     void commandsCarryTypedIdsAndJwkTextAndRefuseMalformedInput() {
-        RequestApprovalCommand request = mapper.toRequestCommand(TOKEN, new RequestApprovalRequest(JWK, "IOS"));
+        RequestApprovalCommand request = mapper.toRequestCommand(ADMISSION, new RequestApprovalRequest(JWK, "IOS"));
         assertThat(request.devicePublicJwk()).isEqualTo("{\"kty\":\"EC\"}");
         assertThat(request.platform()).isEqualTo(DevicePlatform.IOS);
-        assertThat(mapper.toRequestCommand(TOKEN, new RequestApprovalRequest(null, null)).devicePublicJwk()).isNull();
+        assertThat(mapper.toRequestCommand(ADMISSION, new RequestApprovalRequest(null, null)).devicePublicJwk()).isNull();
 
-        ApproveEnrollmentCommand approve = mapper.toApproveCommand(TOKEN, ENROLLMENT.value().toString());
+        ApproveEnrollmentCommand approve = mapper.toApproveCommand(ADMISSION, ENROLLMENT.value().toString());
         assertThat(approve.enrollmentId()).isEqualTo(ENROLLMENT);
-        assertThatThrownBy(() -> mapper.toApproveCommand(TOKEN, "not-a-uuid")).isInstanceOf(InvalidRequestException.class);
-        assertThatThrownBy(() -> mapper.toAuthorizeCommand("bad-token", ENROLLMENT.value().toString()))
-                .isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> mapper.toApproveCommand(ADMISSION, "not-a-uuid")).isInstanceOf(InvalidRequestException.class);
+        assertThat(approve.admitted()).isEqualTo(ADMITTED);
+        assertThat(mapper.toAuthorizeCommand(ADMISSION, ENROLLMENT.value().toString()).enrollmentId()).isEqualTo(ENROLLMENT);
+        assertThat(mapper.toStatusCommand(ADMISSION).admitted()).isEqualTo(ADMITTED);
+        assertThat(mapper.toPendingCommand(ADMISSION).admitted()).isEqualTo(ADMITTED);
 
-        ClaimEnrollmentCommand claim = mapper.toClaimCommand(TOKEN, new ClaimEnrollmentRequest("qr", JWK));
+        ClaimEnrollmentCommand claim = mapper.toClaimCommand(ADMISSION, new ClaimEnrollmentRequest("qr", JWK));
         assertThat(claim.authorizationToken()).isEqualTo("qr");
         assertThat(claim.tokenEncryptionKey()).isEqualTo("{\"kty\":\"EC\"}");
-        assertThatThrownBy(() -> mapper.toClaimCommand(TOKEN, new ClaimEnrollmentRequest("qr", Map.of("kty", 1))))
+        assertThatThrownBy(() -> mapper.toClaimCommand(ADMISSION, new ClaimEnrollmentRequest("qr", Map.of("kty", 1))))
                 .isInstanceOf(InvalidRequestException.class);
     }
 

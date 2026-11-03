@@ -4,9 +4,11 @@ import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.BffAssertionKeys;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.CaptchaKeys;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.RandomOpaqueTokenGenerator;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.SessionKeys;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyAssertionReplayStore;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyCaptchaStore;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeySessionAdapter;
 import java.security.SecureRandom;
@@ -44,6 +46,12 @@ public class ValkeyConfiguration {
         byte[] answerHmacKey = decodeKey(captchaProperties.answerHmacKeyBase64());
         CaptchaKeys captchaKeys = new CaptchaKeys(answerHmacKey);
         return new ValkeyCaptchaStore(stringRedisTemplate, captchaKeys, clock);
+    }
+
+    /** Used BFF assertion IDs (slice 11): one SET NX per admitted trusted-device request. */
+    @Bean
+    ValkeyAssertionReplayStore valkeyAssertionReplayStore(StringRedisTemplate stringRedisTemplate, Clock clock) {
+        return new ValkeyAssertionReplayStore(stringRedisTemplate, new BffAssertionKeys(), clock);
     }
 
     @Bean

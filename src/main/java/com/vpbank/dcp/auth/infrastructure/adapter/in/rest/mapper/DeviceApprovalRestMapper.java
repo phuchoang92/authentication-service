@@ -17,8 +17,8 @@ import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAdmission;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.FieldDetail;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
@@ -40,8 +40,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 /**
- * Approval of a new device by the primary device, wire ↔ use cases (slice 6). The session token arrives as
- * text from the session filter; the enrollment ID is an opaque string on the wire (CODE_CONVENTIONS §5) and a
+ * Approval of a new device by the primary device, wire ↔ use cases (slice 6). The admitted session arrives from the BFF
+ * assertion filter; the enrollment ID is an opaque string on the wire (CODE_CONVENTIONS §5) and a
  * typed ID inside. The status/code table lives here, so the controller decides nothing.
  */
 @RequiredArgsConstructor
@@ -53,54 +53,54 @@ public final class DeviceApprovalRestMapper {
 
     // ---- requests → commands ----
 
-    public RequestApprovalCommand toRequestCommand(String token, RequestApprovalRequest request) {
+    public RequestApprovalCommand toRequestCommand(BffAdmission admission, RequestApprovalRequest request) {
         try {
             // Both are optional: a known installation keeps the key and platform Auth already stores.
             String devicePublicJwk = request.devicePublicJwk() == null ? null : JwkJson.toJson(request.devicePublicJwk());
             DevicePlatform platform = request.platform() == null ? null : DevicePlatform.valueOf(request.platform());
 
-            return new RequestApprovalCommand(new OpaqueToken(token), devicePublicJwk, platform);
+            return new RequestApprovalCommand(admission.admittedSession(), devicePublicJwk, platform);
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }
     }
 
-    public ApprovalStatusCommand toStatusCommand(String token) {
+    public ApprovalStatusCommand toStatusCommand(BffAdmission admission) {
         try {
-            return new ApprovalStatusCommand(new OpaqueToken(token));
+            return new ApprovalStatusCommand(admission.admittedSession());
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }
     }
 
-    public ListPendingDevicesCommand toPendingCommand(String token) {
+    public ListPendingDevicesCommand toPendingCommand(BffAdmission admission) {
         try {
-            return new ListPendingDevicesCommand(new OpaqueToken(token));
+            return new ListPendingDevicesCommand(admission.admittedSession());
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }
     }
 
-    public ApproveEnrollmentCommand toApproveCommand(String token, String enrollmentId) {
+    public ApproveEnrollmentCommand toApproveCommand(BffAdmission admission, String enrollmentId) {
         try {
-            return new ApproveEnrollmentCommand(new OpaqueToken(token), toEnrollmentId(enrollmentId));
+            return new ApproveEnrollmentCommand(admission.admittedSession(), toEnrollmentId(enrollmentId));
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }
     }
 
-    public AuthorizeEnrollmentCommand toAuthorizeCommand(String token, String enrollmentId) {
+    public AuthorizeEnrollmentCommand toAuthorizeCommand(BffAdmission admission, String enrollmentId) {
         try {
-            return new AuthorizeEnrollmentCommand(new OpaqueToken(token), toEnrollmentId(enrollmentId));
+            return new AuthorizeEnrollmentCommand(admission.admittedSession(), toEnrollmentId(enrollmentId));
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }
     }
 
-    public ClaimEnrollmentCommand toClaimCommand(String token, ClaimEnrollmentRequest request) {
+    public ClaimEnrollmentCommand toClaimCommand(BffAdmission admission, ClaimEnrollmentRequest request) {
         try {
             String tokenEncryptionKey = JwkJson.toJson(request.tokenEncryptionKey());
-            return new ClaimEnrollmentCommand(new OpaqueToken(token), request.authorizationToken(), tokenEncryptionKey);
+            return new ClaimEnrollmentCommand(admission.admittedSession(), request.authorizationToken(), tokenEncryptionKey);
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }

@@ -3,8 +3,9 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter;
 import com.vpbank.dcp.auth.application.port.out.model.SecurityAuditEvent;
 import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.QueuedBatchWriter;
-import java.time.Duration;
 import org.springframework.context.SmartLifecycle;
+
+import java.time.Duration;
 
 /**
  * The asynchronous half of the security audit: a {@link QueuedBatchWriter} in front of
@@ -15,7 +16,9 @@ import org.springframework.context.SmartLifecycle;
 public final class QueuedSecurityAuditStore implements SecurityAuditStore, SmartLifecycle {
     private final QueuedBatchWriter<SecurityAuditEvent> queue;
 
-    public QueuedSecurityAuditStore(SecurityAuditEventPersistenceAdapter writer, int queueCapacity, int batchSize,
+    public QueuedSecurityAuditStore(SecurityAuditEventPersistenceAdapter writer,
+                                    int queueCapacity,
+                                    int batchSize,
                                     Duration shutdownDrain) {
         this.queue = new QueuedBatchWriter<>(
                 "security-audit-writer",
@@ -31,7 +34,9 @@ public final class QueuedSecurityAuditStore implements SecurityAuditStore, Smart
         queue.offer(event);
     }
 
-    /** Events that never reached SECURITY_AUDIT_EVENT since start. */
+    /**
+     * Events that never reached SECURITY_AUDIT_EVENT since start.
+     */
     public long droppedCount() {
         return queue.droppedCount();
     }

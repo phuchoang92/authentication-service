@@ -20,7 +20,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.Creat
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
-import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
+import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.result.ApprovalStatusResult;
@@ -35,12 +35,10 @@ import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.MfaFactor;
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
-import com.vpbank.dcp.auth.domain.model.Session;
-import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.time.Clock;
@@ -59,6 +57,10 @@ import lombok.RequiredArgsConstructor;
  * service) and receives a one-time authorization token to show as a QR. The new device claims that
  * token from the same restricted session; the trust commit then makes it trusted and primary, ends the
  * restricted session and issues a full ACTIVE one. Auth keeps only the token's digest.
+ *
+ * <p>Slice 11: the caller is the session the BFF admitted ({@link AdmittedSession}). Auth reads no session
+ * to learn who calls; it checks only that the kind of session fits the route, and addresses the restricted
+ * session by the asserted channel and session ID when it consumes or ends it.
  */
 @RequiredArgsConstructor
 public final class DeviceApprovalService implements RequestApprovalUseCase, ApprovalStatusUseCase,
@@ -83,28 +85,23 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     @Override
     public RequestApprovalResult request(RequestApprovalCommand command) {
         try {
-            Optional<StoredSession> restrictedSession = findRestrictedSession(command.token());
-            if (restrictedSession.isEmpty()) {
-                return new RequestApprovalResult.SessionGone();
-            }
-            Session session = restrictedSession.get().session();
-
-            // The primary enrollment (FACE on this device) already started on this session.
-            if (session.enrollment() != null) {
+            AdmittedSession caller = command.admitted();
+            if (!caller.restricted()) {
                 return new RequestApprovalResult.Conflict();
             }
 
-            // A repeated request from the same session gets the same answer.
+            // A repeated request from the same session gets the same answer. A primary enrollment (FACE on
+            // this device) already started on this session is found here too and answered as a conflict.
             Optional<DeviceEnrollment> earlierRequest =
-                    enrollmentRepository.findBySession(session.customerId(), session.deviceId(), session.id());
+                    enrollmentRepository.findBySession(caller.customerId(), caller.deviceId(), caller.sessionId());
             if (earlierRequest.isPresent()) {
                 return answerForEarlier(earlierRequest.get());
             }
 
             Optional<KnownDeviceSummary> knownDevice = trustedDeviceService.knownDevice(
-                    session.customerId(),
-                    session.channel(),
-                    session.deviceId());
+                    caller.customerId(),
+                    caller.channel(),
+                    caller.deviceId());
 
             // An unknown installation must send both; a known live row keeps what Auth already stores.
             String devicePublicJwk = command.devicePublicJwk();
@@ -114,11 +111,11 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
                 return new RequestApprovalResult.DeviceKeyRequired();
             }
 
-            String correlationId = session.id().toString();
+            String correlationId = caller.sessionId().toString();
             Optional<TrustedDevice> targetDevice = trustedDeviceService.registerPendingDevice(
-                    session.customerId(),
-                    session.channel(),
-                    session.deviceId(),
+                    caller.customerId(),
+                    caller.channel(),
+                    caller.deviceId(),
                     platform,
                     devicePublicJwk,
                     enrollmentPolicy,
@@ -127,14 +124,16 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
                 return new RequestApprovalResult.TooManyPending();
             }
 
+            // The request waits as long as its PENDING device row does; Auth no longer reads the session's deadline.
+            Instant requestExpiresAt = clock.instant().plus(enrollmentPolicy.pendingWindow());
             DeviceEnrollment freshRequest = DeviceEnrollment.requestApproval(
                     enrollmentIdGenerator.get(),
-                    session.customerId(),
-                    session.channel(),
-                    session.deviceId(),
+                    caller.customerId(),
+                    caller.channel(),
+                    caller.deviceId(),
                     targetDevice.get().id(),
-                    session.absoluteExpiresAt());
-            DeviceEnrollment storedRequest = enrollmentRepository.create(freshRequest, session.id());
+                    requestExpiresAt);
+            DeviceEnrollment storedRequest = enrollmentRepository.create(freshRequest, caller.sessionId());
 
             // A race on the one-enrollment-per-session rule returns whatever that session created first.
             if (!storedRequest.id().equals(freshRequest.id())) {
@@ -157,14 +156,13 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     @Override
     public ApprovalStatusResult status(ApprovalStatusCommand command) {
         try {
-            Optional<StoredSession> restrictedSession = findRestrictedSession(command.token());
-            if (restrictedSession.isEmpty()) {
-                return new ApprovalStatusResult.SessionGone();
+            AdmittedSession caller = command.admitted();
+            if (!caller.restricted()) {
+                return new ApprovalStatusResult.NoRequest();
             }
-            Session session = restrictedSession.get().session();
 
             Optional<DeviceEnrollment> request =
-                    enrollmentRepository.findBySession(session.customerId(), session.deviceId(), session.id());
+                    enrollmentRepository.findBySession(caller.customerId(), caller.deviceId(), caller.sessionId());
             if (request.isEmpty() || !request.get().isApproval()) {
                 return new ApprovalStatusResult.NoRequest();
             }
@@ -186,21 +184,16 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     @Override
     public ListPendingDevicesResult pending(ListPendingDevicesCommand command) {
         try {
-            Optional<StoredSession> activeSession = findActiveSession(command.token());
-            if (activeSession.isEmpty()) {
-                return new ListPendingDevicesResult.SessionGone();
-            }
-            Session session = activeSession.get().session();
-
-            Optional<TrustedDeviceId> primaryDeviceId = primaryDeviceIdOf(session);
+            AdmittedSession caller = command.admitted();
+            Optional<TrustedDeviceId> primaryDeviceId = primaryDeviceIdOf(caller);
             if (primaryDeviceId.isEmpty()) {
                 return new ListPendingDevicesResult.NotPrimaryDevice();
             }
 
             Instant now = clock.instant();
             List<DeviceEnrollment> openApprovals =
-                    enrollmentRepository.findOpenApprovals(session.customerId(), session.channel());
-            List<TrustedDevice> liveDevices = trustedDeviceRepository.findLive(session.customerId(), session.channel());
+                    enrollmentRepository.findOpenApprovals(caller.customerId(), caller.channel());
+            List<TrustedDevice> liveDevices = trustedDeviceRepository.findLive(caller.customerId(), caller.channel());
 
             List<PendingDeviceSummary> summaries = new ArrayList<>();
             for (DeviceEnrollment approval : openApprovals) {
@@ -228,18 +221,13 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     @Override
     public ApproveEnrollmentResult approve(ApproveEnrollmentCommand command) {
         try {
-            Optional<StoredSession> activeSession = findActiveSession(command.token());
-            if (activeSession.isEmpty()) {
-                return new ApproveEnrollmentResult.SessionGone();
-            }
-            Session session = activeSession.get().session();
-
-            Optional<TrustedDeviceId> primaryDeviceId = primaryDeviceIdOf(session);
+            AdmittedSession caller = command.admitted();
+            Optional<TrustedDeviceId> primaryDeviceId = primaryDeviceIdOf(caller);
             if (primaryDeviceId.isEmpty()) {
                 return new ApproveEnrollmentResult.NotPrimaryDevice();
             }
 
-            Optional<DeviceEnrollment> waitingRequest = findOpenApproval(command.enrollmentId(), session,
+            Optional<DeviceEnrollment> waitingRequest = findOpenApproval(command.enrollmentId(), caller,
                     EnrollmentState.WAITING_APPROVAL);
             if (waitingRequest.isEmpty() || waitingRequest.get().hasApprovalInProgress()) {
                 return new ApproveEnrollmentResult.Conflict();
@@ -247,8 +235,8 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
             DeviceEnrollment enrollment = waitingRequest.get();
 
             MfaTransactionRequest mfaTransactionRequest = MfaTransactionRequest.builder()
-                    .customerId(session.customerId())
-                    .channel(session.channel())
+                    .customerId(caller.customerId())
+                    .channel(caller.channel())
                     .authOperationId(enrollment.id())
                     .purpose(enrollment.purpose())
                     .factors(FACE_AND_OTP)
@@ -281,18 +269,13 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     @Override
     public AuthorizeEnrollmentResult authorize(AuthorizeEnrollmentCommand command) {
         try {
-            Optional<StoredSession> activeSession = findActiveSession(command.token());
-            if (activeSession.isEmpty()) {
-                return new AuthorizeEnrollmentResult.SessionGone();
-            }
-            Session session = activeSession.get().session();
-
-            Optional<TrustedDeviceId> primaryDeviceId = primaryDeviceIdOf(session);
+            AdmittedSession caller = command.admitted();
+            Optional<TrustedDeviceId> primaryDeviceId = primaryDeviceIdOf(caller);
             if (primaryDeviceId.isEmpty()) {
                 return new AuthorizeEnrollmentResult.NotPrimaryDevice();
             }
 
-            Optional<DeviceEnrollment> approvedRequest = findOpenApproval(command.enrollmentId(), session,
+            Optional<DeviceEnrollment> approvedRequest = findOpenApproval(command.enrollmentId(), caller,
                     EnrollmentState.WAITING_APPROVAL);
             if (approvedRequest.isEmpty() || !approvedRequest.get().hasApprovalInProgress()) {
                 return new AuthorizeEnrollmentResult.Conflict();
@@ -326,7 +309,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
                     enrollmentRepository.saveIfCurrent(expiredEnrollment);
                     yield new AuthorizeEnrollmentResult.MfaExpired();
                 }
-                case CheckResult.Passed(String receiptDigest) -> issueAuthorizationToken(enrollment, mfaCheckRequest);
+                case CheckResult.Passed(_) -> issueAuthorizationToken(enrollment, mfaCheckRequest);
             };
         } catch (RepositoryUnavailableException | PartnerUnavailableException failure) {
             return new AuthorizeEnrollmentResult.Unavailable();
@@ -355,16 +338,15 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     @Override
     public ClaimEnrollmentResult claim(ClaimEnrollmentCommand command) {
         try {
-            Optional<StoredSession> restrictedSession = findRestrictedSession(command.token());
-            if (restrictedSession.isEmpty()) {
-                return new ClaimEnrollmentResult.SessionGone();
+            AdmittedSession caller = command.admitted();
+            if (!caller.restricted()) {
+                return new ClaimEnrollmentResult.Conflict();
             }
-            StoredSession storedSession = restrictedSession.get();
-            Session session = storedSession.session();
+            SessionLookup restrictedSessionLookup = lookupOf(caller);
 
             // The claim is bound to the session that made the request.
             Optional<DeviceEnrollment> request =
-                    enrollmentRepository.findBySession(session.customerId(), session.deviceId(), session.id());
+                    enrollmentRepository.findBySession(caller.customerId(), caller.deviceId(), caller.sessionId());
             boolean waitingForToken = request.isPresent()
                     && request.get().isApproval()
                     && request.get().state() == EnrollmentState.WAITING_AUTHORIZATION
@@ -376,7 +358,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
 
             if (enrollment.authorizationExpired(clock.instant())) {
                 DeviceEnrollment expiredEnrollment = enrollment.expire();
-                endRestrictedSession(storedSession, expiredEnrollment);
+                endRestrictedSession(restrictedSessionLookup, expiredEnrollment);
                 return new ClaimEnrollmentResult.AuthorizationExpired();
             }
 
@@ -391,44 +373,42 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
             String presentedDigest = EnrollmentDigests.digest(command.authorizationToken());
             boolean rightToken = EnrollmentDigests.sameDigest(countedEnrollment.authorizationTokenDigest(), presentedDigest);
             if (!rightToken) {
-                return wrongToken(storedSession, countedEnrollment);
+                return wrongToken(restrictedSessionLookup, countedEnrollment);
             }
 
-            return commitTrust(command, storedSession, countedEnrollment);
+            return commitTrust(command, caller, countedEnrollment);
         } catch (RepositoryUnavailableException failure) {
             return new ClaimEnrollmentResult.Unavailable();
         }
     }
 
-    private ClaimEnrollmentResult wrongToken(StoredSession storedSession, DeviceEnrollment countedEnrollment) {
+    private ClaimEnrollmentResult wrongToken(SessionLookup restrictedSessionLookup, DeviceEnrollment countedEnrollment) {
         if (countedEnrollment.claimAttemptsExhausted(enrollmentPolicy)) {
             DeviceEnrollment failedEnrollment = countedEnrollment.fail();
-            endRestrictedSession(storedSession, failedEnrollment);
+            endRestrictedSession(restrictedSessionLookup, failedEnrollment);
             return new ClaimEnrollmentResult.WrongAuthorization(NO_ATTEMPTS_LEFT);
         }
         int attemptsLeft = enrollmentPolicy.maxClaimAttempts() - countedEnrollment.authorizationAttempts();
         return new ClaimEnrollmentResult.WrongAuthorization(attemptsLeft);
     }
 
-    private ClaimEnrollmentResult commitTrust(ClaimEnrollmentCommand command, StoredSession storedSession,
+    private ClaimEnrollmentResult commitTrust(ClaimEnrollmentCommand command, AdmittedSession caller,
                                               DeviceEnrollment countedEnrollment) {
-        Session restrictedSession = storedSession.session();
-
         // Only one claim may commit: the restricted session is consumed first.
-        boolean sessionConsumed = sessionService.consume(storedSession);
+        boolean sessionConsumed = sessionService.consume(lookupOf(caller));
         if (!sessionConsumed) {
             return new ClaimEnrollmentResult.Conflict();
         }
 
         DeviceEnrollment consumedEnrollment = countedEnrollment.consumeAuthorization(clock.instant());
-        String correlationId = restrictedSession.id().toString();
+        String correlationId = caller.sessionId().toString();
         TrustedDevice trustedDevice = trustedDeviceService.confirmTrustByApproval(consumedEnrollment, correlationId);
 
         IssuedSession activeSession = sessionService.issueActive(
                 sessionService.newSessionId(),
                 trustedDevice.customerId(),
                 trustedDevice.deviceId(),
-                restrictedSession.channel(),
+                caller.channel(),
                 command.tokenEncryptionKey());
 
         return new ClaimEnrollmentResult.Trusted(
@@ -439,32 +419,35 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
 
     // ---- shared steps ----
 
-    private Optional<StoredSession> findRestrictedSession(OpaqueToken token) {
-        return sessionService.findRestricted(token);
+    /** Where the caller's session lives; the assertion names it, so nothing is read to find it. */
+    private static SessionLookup lookupOf(AdmittedSession caller) {
+        return new SessionLookup(caller.channel(), caller.sessionId());
     }
 
-    private Optional<StoredSession> findActiveSession(OpaqueToken token) {
-        return sessionService.findActive(token);
+    /**
+     * The caller's device row ID when the caller is on a full ACTIVE session and that device is the
+     * customer's trusted primary on the channel. A restricted session never approves.
+     */
+    private Optional<TrustedDeviceId> primaryDeviceIdOf(AdmittedSession caller) {
+        if (!caller.full()) {
+            return Optional.empty();
+        }
+        return trustedDeviceService.primaryDeviceId(caller.customerId(), caller.channel(), caller.deviceId());
     }
 
-    /** The caller's device row ID when that device is the customer's trusted primary on the channel. */
-    private Optional<TrustedDeviceId> primaryDeviceIdOf(Session session) {
-        return trustedDeviceService.primaryDeviceId(session.customerId(), session.channel(), session.deviceId());
-    }
-
-    private Optional<DeviceEnrollment> findOpenApproval(EnrollmentId enrollmentId, Session session,
+    private Optional<DeviceEnrollment> findOpenApproval(EnrollmentId enrollmentId, AdmittedSession caller,
                                                         EnrollmentState expectedState) {
         Instant now = clock.instant();
-        return enrollmentRepository.findApproval(enrollmentId, session.customerId(), session.channel())
+        return enrollmentRepository.findApproval(enrollmentId, caller.customerId(), caller.channel())
                 .filter(DeviceEnrollment::isApproval)
                 .filter(enrollment -> enrollment.isOpen(now))
                 .filter(enrollment -> enrollment.state() == expectedState);
     }
 
     /** A terminal enrollment state is written first, then the restricted session is dropped. */
-    private void endRestrictedSession(StoredSession storedSession, DeviceEnrollment terminalEnrollment) {
+    private void endRestrictedSession(SessionLookup restrictedSessionLookup, DeviceEnrollment terminalEnrollment) {
         enrollmentRepository.saveIfCurrent(terminalEnrollment);
-        sessionService.end(storedSession);
+        sessionService.end(restrictedSessionLookup);
     }
 
     private static Optional<TrustedDevice> findById(List<TrustedDevice> devices, TrustedDeviceId deviceId) {

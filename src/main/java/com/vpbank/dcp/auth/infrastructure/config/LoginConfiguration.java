@@ -36,6 +36,9 @@ import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.AssertionReplayGuard;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAssertionFilter;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAssertionVerifier;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceApprovalRestMapper;
@@ -56,6 +59,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.Custom
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.DeviceEnrollmentJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.token.RandomAuthorizationTokenGenerator;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyAssertionReplayStore;
 import java.security.SecureRandom;
 import java.text.ParseException;
 import java.time.Clock;
@@ -77,9 +81,10 @@ import org.springframework.web.servlet.LocaleResolver;
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "auth.login", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties({LoginProperties.class, MfaProperties.class})
+@EnableConfigurationProperties({LoginProperties.class, MfaProperties.class, BffProperties.class})
 public class LoginConfiguration {
     private static final String MFA_RECEIPT_KEY_SETTING = "auth.mfa.receipt-public-jwk";
+    private static final String BFF_ASSERTION_KEY_SETTING = "auth.bff.assertion-public-jwk";
 
     @Bean
     LoginUseCase loginUseCase(CustomerAuthenticationRepository customerAuthenticationRepository,
@@ -242,7 +247,7 @@ public class LoginConfiguration {
     MfaTransactionPort mfaTransactionPort(MfaProperties mfaProperties,
                                           DeviceEnrollmentJpaRepository deviceEnrollmentJpaRepository,
                                           Clock clock) {
-        ECKey mfaReceiptKey = pinnedReceiptKey(mfaProperties.receiptPublicJwk());
+        ECKey mfaReceiptKey = pinnedPublicKey(MFA_RECEIPT_KEY_SETTING, mfaProperties.receiptPublicJwk());
         MfaReceiptVerifier mfaReceiptVerifier =
                 new MfaReceiptVerifier(mfaReceiptKey, mfaProperties.receiptIssuer(), clock);
 
@@ -258,17 +263,18 @@ public class LoginConfiguration {
     }
 
     /** The startup failure names the setting and never echoes the key material (no cause attached). */
-    private static ECKey pinnedReceiptKey(String receiptPublicJwk) {
-        ECKey receiptKey;
+    /** A pinned verification key from a setting; anything but a public P-256 JWK stops startup naming the setting. */
+    private static ECKey pinnedPublicKey(String setting, String publicJwk) {
+        ECKey pinnedKey;
         try {
-            receiptKey = ECKey.parse(receiptPublicJwk);
+            pinnedKey = ECKey.parse(publicJwk);
         } catch (ParseException | IllegalArgumentException | ClassCastException invalid) {
-            throw new IllegalStateException(MFA_RECEIPT_KEY_SETTING + " is not a public EC P-256 JWK");
+            throw new IllegalStateException(setting + " is not a public EC P-256 JWK");
         }
-        if (receiptKey.isPrivate() || !Curve.P_256.equals(receiptKey.getCurve())) {
-            throw new IllegalStateException(MFA_RECEIPT_KEY_SETTING + " is not a public EC P-256 JWK");
+        if (pinnedKey.isPrivate() || !Curve.P_256.equals(pinnedKey.getCurve())) {
+            throw new IllegalStateException(setting + " is not a public EC P-256 JWK");
         }
-        return receiptKey;
+        return pinnedKey;
     }
 
     @Bean
@@ -347,5 +353,25 @@ public class LoginConfiguration {
     @Bean
     SessionFilter sessionFilter(ErrorMessages errorMessages, LocaleResolver localeResolver) {
         return new SessionFilter(errorMessages, localeResolver);
+    }
+
+    /** The BFF's assertion key is pinned; its key ID must be in the JWK because the header has to name it. */
+    @Bean
+    BffAssertionVerifier bffAssertionVerifier(BffProperties bffProperties, Clock clock) {
+        ECKey bffAssertionKey = pinnedPublicKey(BFF_ASSERTION_KEY_SETTING, bffProperties.assertionPublicJwk());
+        if (bffAssertionKey.getKeyID() == null) {
+            throw new IllegalStateException(BFF_ASSERTION_KEY_SETTING + " has no kid");
+        }
+        return new BffAssertionVerifier(bffAssertionKey, bffProperties.assertionIssuer(), clock);
+    }
+
+    /** Admits the trusted-device routes from a BFF assertion, each assertion once (slice 11). */
+    @Bean
+    BffAssertionFilter bffAssertionFilter(BffAssertionVerifier bffAssertionVerifier,
+                                          ValkeyAssertionReplayStore valkeyAssertionReplayStore,
+                                          ErrorMessages errorMessages,
+                                          LocaleResolver localeResolver) {
+        AssertionReplayGuard assertionReplayGuard = valkeyAssertionReplayStore::firstUse;
+        return new BffAssertionFilter(bffAssertionVerifier, assertionReplayGuard, errorMessages, localeResolver);
     }
 }

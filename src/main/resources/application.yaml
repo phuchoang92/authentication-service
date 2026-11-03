@@ -68,6 +68,11 @@ auth:
     queue-capacity: 10000
     batch-size: 100
     shutdown-drain: PT2S
+  bff:
+    # Slice 11: the BFF admits the app's session and calls the trusted-device routes with a signed assertion
+    # (ES256, typ bff-assertion+jwt). The pinned public JWK must carry its kid. No default.
+    assertion-issuer: ${AUTH_BFF_ASSERTION_ISSUER:mobile-bff}
+    assertion-public-jwk: ${AUTH_BFF_ASSERTION_PUBLIC_JWK:}
   mfa:
     origin: ${AUTH_MFA_ORIGIN:}
     receipt-issuer: ${AUTH_MFA_RECEIPT_ISSUER:mfa-service}

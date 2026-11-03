@@ -5,13 +5,14 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.Disabl
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.QueuedSecurityAuditStore;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.SecurityAuditEventPersistenceAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.SecurityAuditEventJpaRepository;
-import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import java.time.Clock;
 
 /**
  * Security activity audit (slice 9). Unlike the other capabilities this one always provides its port,
@@ -22,7 +23,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 @EnableConfigurationProperties(AuditProperties.class)
 public class AuditConfiguration {
 
-    /** Exposed by its concrete type so Spring sees the {@code SmartLifecycle} that starts and stops the writer. */
+    /**
+     * Exposed by its concrete type so Spring sees the {@code SmartLifecycle} that starts and stops the writer.
+     */
     @Bean
     @ConditionalOnProperty(prefix = "auth.audit", name = "enabled", havingValue = "true")
     QueuedSecurityAuditStore queuedSecurityAuditStore(AuditProperties properties,

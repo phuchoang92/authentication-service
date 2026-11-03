@@ -19,7 +19,8 @@ import com.vpbank.dcp.auth.application.result.ClaimEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.ListPendingDevicesResult;
 import com.vpbank.dcp.auth.application.result.RequestApprovalResult;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAdmission;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAssertionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.ClaimEnrollmentRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.RequestApprovalRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.response.AuthorizeEnrollmentResponse;
@@ -45,8 +46,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * App → Auth under {@code /api/v1/trusted-device} (slice 6, DD 20 §4 approval path). The new device calls
  * {@code request}, {@code status} and {@code claim} from its restricted session; the primary device calls
- * {@code pending}, {@code approve} and {@code authorize} from its ACTIVE session. The session filter admits
- * both kinds on this prefix; the use cases refuse the wrong kind.
+ * {@code pending}, {@code approve} and {@code authorize} from its ACTIVE session. The BFF admits both
+ * kinds and says which in its assertion ({@link BffAssertionFilter}); the use cases refuse the wrong kind.
  */
 @RestController
 @ConditionalOnProperty(prefix = "auth.login", name = "enabled", havingValue = "true")
@@ -70,43 +71,43 @@ public class DeviceApprovalController {
     @PostMapping(path = "/api/v1/trusted-device/request", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<RequestApprovalResponse>> request(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token,
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission,
             @Valid @RequestBody RequestApprovalRequest body) {
-        RequestApprovalCommand command = deviceApprovalRestMapper.toRequestCommand(token, body);
+        RequestApprovalCommand command = deviceApprovalRestMapper.toRequestCommand(admission, body);
         RequestApprovalResult result = requestApprovalUseCase.request(command);
         return deviceApprovalRestMapper.toResponse(result);
     }
 
     @GetMapping(path = "/api/v1/trusted-device/status", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<RequestApprovalResponse>> status(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token) {
-        ApprovalStatusCommand command = deviceApprovalRestMapper.toStatusCommand(token);
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission) {
+        ApprovalStatusCommand command = deviceApprovalRestMapper.toStatusCommand(admission);
         ApprovalStatusResult result = approvalStatusUseCase.status(command);
         return deviceApprovalRestMapper.toResponse(result);
     }
 
     @GetMapping(path = "/api/v1/trusted-device/pending", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<List<PendingDeviceResponse>>> pending(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token) {
-        ListPendingDevicesCommand command = deviceApprovalRestMapper.toPendingCommand(token);
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission) {
+        ListPendingDevicesCommand command = deviceApprovalRestMapper.toPendingCommand(admission);
         ListPendingDevicesResult result = listPendingDevicesUseCase.pending(command);
         return deviceApprovalRestMapper.toResponse(result);
     }
 
     @PostMapping(path = "/api/v1/trusted-device/pending/{enrollmentId}/approve", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<VerifyEnrollmentResponse>> approve(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token,
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission,
             @PathVariable String enrollmentId) {
-        ApproveEnrollmentCommand command = deviceApprovalRestMapper.toApproveCommand(token, enrollmentId);
+        ApproveEnrollmentCommand command = deviceApprovalRestMapper.toApproveCommand(admission, enrollmentId);
         ApproveEnrollmentResult result = approveEnrollmentUseCase.approve(command);
         return deviceApprovalRestMapper.toResponse(result);
     }
 
     @PostMapping(path = "/api/v1/trusted-device/pending/{enrollmentId}/authorize", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<AuthorizeEnrollmentResponse>> authorize(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token,
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission,
             @PathVariable String enrollmentId) {
-        AuthorizeEnrollmentCommand command = deviceApprovalRestMapper.toAuthorizeCommand(token, enrollmentId);
+        AuthorizeEnrollmentCommand command = deviceApprovalRestMapper.toAuthorizeCommand(admission, enrollmentId);
         AuthorizeEnrollmentResult result = authorizeEnrollmentUseCase.authorize(command);
         return deviceApprovalRestMapper.toResponse(result);
     }
@@ -114,9 +115,9 @@ public class DeviceApprovalController {
     @PostMapping(path = "/api/v1/trusted-device/claim", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<ConfirmEnrollmentResponse>> claim(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token,
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission,
             @Valid @RequestBody ClaimEnrollmentRequest body) {
-        ClaimEnrollmentCommand command = deviceApprovalRestMapper.toClaimCommand(token, body);
+        ClaimEnrollmentCommand command = deviceApprovalRestMapper.toClaimCommand(admission, body);
         ClaimEnrollmentResult result = claimEnrollmentUseCase.claim(command);
         return deviceApprovalRestMapper.toResponse(result);
     }

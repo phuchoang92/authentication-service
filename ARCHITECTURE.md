@@ -917,6 +917,7 @@ public final class RegistrationRestMapper {
 
 | Date | Decision | Reason | Alternative rejected |
 |---|---|---|---|
+| 2026-11-03 | Trusted-device routes admitted by a signed BFF assertion (slice 11) | the BFF already validates the session token, status and deadlines; Auth verifies a pinned-key ES256 assertion with an exact claim set, uses each `jti` once and checks the asserted session kind per route, so the trust flows stop reading the session to learn the caller | re-reading the session in every trust step; trusting unsigned forwarded headers |
 | 2026-10-31 | Shared typed activity audit after completed operations | one service operation, reason-derived event type, versioned allowlisted payloads and existing best-effort queue; record trust after its repository commit without changing existing transition audits | per-business audit service hierarchy; registry for a single writer; changing trust transaction guarantees; implicit durable delivery |
 | 2026-10-25 | Spring Data JPA for persistence | entities + `ddl-auto=validate` keep code and schema in sync; `@Version` gives CAS; repositories are declarative | `JdbcClient` plain SQL (no mapping layer, hand-written CAS) |
 | 2026-10-25 | Hand-written mappers | readable, debuggable, no annotation processor; MapStruct not available offline | MapStruct |

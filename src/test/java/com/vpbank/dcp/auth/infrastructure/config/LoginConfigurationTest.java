@@ -7,6 +7,7 @@ import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAssertionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.controller.LoginController;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
@@ -14,6 +15,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.Dev
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.PrimaryTrustedDeviceJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceAuditJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyAssertionReplayStore;
 import java.util.Base64;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -23,6 +25,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 class LoginConfigurationTest {
     /** A fixed public P-256 JWK (RFC 7517 example key), good enough to pin at startup. */
     private static final String MFA_KEY = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU\",\"y\":\"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0\",\"kid\":\"mfa-receipt-1\"}";
+    /** The same RFC 7517 example key, named, as the pinned BFF assertion key (slice 11). */
+    private static final String BFF_KEY = MFA_KEY.replace("mfa-receipt-1", "bff-assertion-1");
     private static final String[] ENABLED = {
             "auth.login.enabled=true",
             "auth.login.keycloak.base-url=https://kc.test",
@@ -34,7 +38,9 @@ class LoginConfigurationTest {
             "auth.device.encryption-keys-base64.e1=" + Base64.getEncoder().encodeToString(new byte[32]),
             "auth.mfa.origin=https://mfa.test",
             "auth.mfa.receipt-issuer=mfa-service",
-            "auth.mfa.receipt-public-jwk=" + MFA_KEY};
+            "auth.mfa.receipt-public-jwk=" + MFA_KEY,
+            "auth.bff.assertion-issuer=mobile-bff",
+            "auth.bff.assertion-public-jwk=" + BFF_KEY};
 
     private final WebApplicationContextRunner runner = new WebApplicationContextRunner()
             .withUserConfiguration(RestConfiguration.class, ValkeyConfiguration.class, DeviceConfiguration.class,
@@ -50,7 +56,8 @@ class LoginConfigurationTest {
     void offByDefaultSoNoLoginEndpointStoreOrFilterExists() {
         runner.run(context -> assertThat(context).hasNotFailed()
                 .doesNotHaveBean(LoginUseCase.class).doesNotHaveBean(SessionStore.class)
-                .doesNotHaveBean(SessionFilter.class).doesNotHaveBean(LoginController.class));
+                .doesNotHaveBean(SessionFilter.class).doesNotHaveBean(BffAssertionFilter.class)
+                .doesNotHaveBean(LoginController.class));
     }
 
     @Test
@@ -61,7 +68,25 @@ class LoginConfigurationTest {
                 .hasSingleBean(TrustedDeviceRepository.class)
                 .hasSingleBean(com.vpbank.dcp.auth.application.port.in.InitEnrollmentUseCase.class)
                 .hasSingleBean(com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.class)
-                .hasSingleBean(SessionFilter.class).hasSingleBean(LoginController.class));
+                .hasSingleBean(SessionFilter.class).hasSingleBean(LoginController.class)
+                .hasSingleBean(BffAssertionFilter.class).hasSingleBean(ValkeyAssertionReplayStore.class));
+    }
+
+    @Test
+    void aMissingBadOrUnnamedBffKeyStopsStartupNamingTheSetting() {
+        runner.withPropertyValues(ENABLED).withPropertyValues("auth.bff.assertion-public-jwk=")
+                .run(context -> assertThat(context).hasFailed());
+        runner.withPropertyValues(ENABLED).withPropertyValues("auth.bff.assertion-public-jwk={\"kty\":\"oct\"}")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("auth.bff.assertion-public-jwk");
+                });
+        runner.withPropertyValues(ENABLED)
+                .withPropertyValues("auth.bff.assertion-public-jwk=" + BFF_KEY.replace(",\"kid\":\"bff-assertion-1\"", ""))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("auth.bff.assertion-public-jwk has no kid");
+                });
     }
 
     @Test

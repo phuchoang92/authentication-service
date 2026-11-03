@@ -8,9 +8,16 @@ import com.vpbank.dcp.auth.application.command.InitEnrollmentCommand;
 import com.vpbank.dcp.auth.application.result.ConfirmEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.InitEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.VerifyEnrollmentResult;
+import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
+import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
+import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAdmission;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.ConfirmEnrollmentRequest;
@@ -22,6 +29,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -29,7 +37,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 class TrustedDeviceRestMapperTest {
-    private static final String TOKEN = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:" + "A".repeat(43);
+    private static final AdmittedSession ADMITTED = new AdmittedSession(
+            new SessionId(UUID.fromString("00000000-0000-4000-8000-000000000001")), new CustomerId("90359"),
+            Channel.MOBILE, new DeviceId("dev-1"), SessionStatus.NEED_TRUSTED_DEVICE);
+    private static final BffAdmission ADMISSION = new BffAdmission(ADMITTED);
     private static final Instant EXPIRES = Instant.parse("2026-10-25T10:10:00Z");
     private final TrustedDeviceRestMapper mapper =
             new TrustedDeviceRestMapper(new ErrorMessages(RestConfiguration.errorMessageSource()));
@@ -44,20 +55,19 @@ class TrustedDeviceRestMapperTest {
         Map<String, Object> jwk = new LinkedHashMap<>();
         jwk.put("kty", "EC");
         jwk.put("crv", "P-256");
-        InitEnrollmentCommand withKey = mapper.toInitCommand(TOKEN, new InitEnrollmentRequest(jwk, "IOS"));
+        InitEnrollmentCommand withKey = mapper.toInitCommand(ADMISSION, new InitEnrollmentRequest(jwk, "IOS"));
         assertThat(withKey.devicePublicJwk()).isEqualTo("{\"kty\":\"EC\",\"crv\":\"P-256\"}");
         assertThat(withKey.platform()).isEqualTo(DevicePlatform.IOS);
-        assertThat(withKey.token().value()).isEqualTo(TOKEN);
+        assertThat(withKey.admitted()).isEqualTo(ADMITTED);
 
-        InitEnrollmentCommand knownDevice = mapper.toInitCommand(TOKEN, new InitEnrollmentRequest(null, null));
+        InitEnrollmentCommand knownDevice = mapper.toInitCommand(ADMISSION, new InitEnrollmentRequest(null, null));
         assertThat(knownDevice.devicePublicJwk()).isNull();
         assertThat(knownDevice.platform()).isNull();
 
-        assertThatThrownBy(() -> mapper.toInitCommand(TOKEN, new InitEnrollmentRequest(Map.of("kty", 1), null)))
+        assertThatThrownBy(() -> mapper.toInitCommand(ADMISSION, new InitEnrollmentRequest(Map.of("kty", 1), null)))
                 .isInstanceOf(InvalidRequestException.class);
-        assertThatThrownBy(() -> mapper.toConfirmCommand("not-a-token", new ConfirmEnrollmentRequest(jwk)))
-                .isInstanceOf(InvalidRequestException.class);
-        ConfirmEnrollmentCommand confirm = mapper.toConfirmCommand(TOKEN, new ConfirmEnrollmentRequest(jwk));
+        ConfirmEnrollmentCommand confirm = mapper.toConfirmCommand(ADMISSION, new ConfirmEnrollmentRequest(jwk));
+        assertThat(confirm.admitted()).isEqualTo(ADMITTED);
         assertThat(confirm.tokenEncryptionKey()).contains("\"crv\":\"P-256\"");
     }
 

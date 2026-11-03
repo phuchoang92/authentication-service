@@ -54,8 +54,12 @@ import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.SessionId;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.AssertionReplayGuard;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAssertionFilter;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAssertionVerifier;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestBffAssertions;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceApprovalRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.LoginRestMapper;
@@ -106,6 +110,22 @@ class LoginRestTest {
         @Bean SessionFilter sessionFilter(ErrorMessages errors, org.springframework.web.servlet.LocaleResolver locales) {
             return new SessionFilter(errors, locales);
         }
+        @Bean BffAssertionFilter bffAssertionFilter(ErrorMessages errors, org.springframework.web.servlet.LocaleResolver locales) {
+            BffAssertionVerifier verifier = new BffAssertionVerifier(TestBffAssertions.publicKey(), TestBffAssertions.ISSUER,
+                    java.time.Clock.systemUTC());
+            java.util.Set<String> usedAssertionIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+            AssertionReplayGuard replayGuard = (assertionId, rememberUntil) -> usedAssertionIds.add(assertionId);
+            return new BffAssertionFilter(verifier, replayGuard, errors, locales);
+        }
+    }
+
+    private static String restrictedAssertion() {
+        return TestBffAssertions.assertion("00000000-0000-4000-8000-000000000003", "90359", "MOBILE", "tablet-2",
+                "NEED_TRUSTED_DEVICE");
+    }
+
+    private static String activeAssertion() {
+        return TestBffAssertions.assertion("00000000-0000-4000-8000-000000000001", "90359", "MOBILE", "dev-1", "ACTIVE");
     }
 
     @Autowired MockMvc mvc;
@@ -128,21 +148,14 @@ class LoginRestTest {
 
     @Test
     void approvalRoutesPassOpaqueIdsAndMapTheirOutcomes() throws Exception {
-        String restrictedToken = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000003:" + "C".repeat(43);
-        when(current.resolve(new OpaqueToken(TOKEN))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
-                new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("dev-1"), Channel.MOBILE,
-                SessionStatus.ACTIVE, IDLE, ABSOLUTE)));
-        when(current.resolve(new OpaqueToken(restrictedToken))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
-                new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("watch-3"), Channel.MOBILE,
-                SessionStatus.NEED_TRUSTED_DEVICE, IDLE, IDLE)));
         EnrollmentId enrollmentId = EnrollmentId.random();
 
-        // The new device: request (restricted token), status poll.
+        // The new device: request (restricted session), status poll.
         mvc.perform(post("/api/v1/trusted-device/request").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isUnauthorized());
         verifyNoInteractions(requestApproval);
         when(requestApproval.request(any())).thenReturn(new RequestApprovalResult.WaitingApproval(enrollmentId, IDLE));
-        mvc.perform(post("/api/v1/trusted-device/request").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/request").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"devicePublicJwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"w\",\"y\":\"w\"},\"platform\":\"IOS\"}"))
                 .andExpect(status().isOk())
@@ -153,13 +166,13 @@ class LoginRestTest {
         org.assertj.core.api.Assertions.assertThat(requestCaptor.getValue().platform()).isEqualTo(DevicePlatform.IOS);
         org.assertj.core.api.Assertions.assertThat(requestCaptor.getValue().devicePublicJwk()).contains("\"crv\":\"P-256\"");
         when(requestApproval.request(any())).thenReturn(new RequestApprovalResult.TooManyPending());
-        mvc.perform(post("/api/v1/trusted-device/request").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/request").header("Authorization", "Bearer " + restrictedAssertion())
                         .header("Accept-Language", "en").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("TOO_MANY_PENDING_DEVICES"));
         when(approvalStatus.status(any())).thenReturn(new ApprovalStatusResult.Status(enrollmentId,
                 EnrollmentState.WAITING_AUTHORIZATION, IDLE));
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/trusted-device/status")
-                        .header("Authorization", "Bearer " + restrictedToken))
+                        .header("Authorization", "Bearer " + restrictedAssertion()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_AUTHORIZATION"));
 
         // The primary device: pending list, approve, authorize; a non-primary caller is refused by the use case.
@@ -167,21 +180,21 @@ class LoginRestTest {
                 enrollmentId, new com.vpbank.dcp.auth.domain.model.DeviceId("watch-3000"), DevicePlatform.IOS,
                 EnrollmentState.WAITING_APPROVAL, IDLE))));
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/trusted-device/pending")
-                        .header("Authorization", "Bearer " + TOKEN))
+                        .header("Authorization", "Bearer " + activeAssertion()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].enrollmentId").value(enrollmentId.value().toString()))
                 .andExpect(jsonPath("$.data[0].deviceId").value("…3000"))
                 .andExpect(jsonPath("$.data[0].platform").value("IOS"));
         when(approveEnrollment.approve(any())).thenReturn(new ApproveEnrollmentResult.NotPrimaryDevice());
         mvc.perform(post("/api/v1/trusted-device/pending/" + enrollmentId.value() + "/approve")
-                        .header("Authorization", "Bearer " + TOKEN).header("Accept-Language", "en"))
+                        .header("Authorization", "Bearer " + activeAssertion()).header("Accept-Language", "en"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.error.code").value("NOT_PRIMARY_DEVICE"))
                 .andExpect(jsonPath("$.error.message").value("Only the primary device can approve a new device"));
-        mvc.perform(post("/api/v1/trusted-device/pending/not-a-uuid/approve").header("Authorization", "Bearer " + TOKEN))
+        mvc.perform(post("/api/v1/trusted-device/pending/not-a-uuid/approve").header("Authorization", "Bearer " + activeAssertion()))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"));
         when(approveEnrollment.approve(any())).thenReturn(new ApproveEnrollmentResult.MfaRequired("mfa-7", IDLE));
         mvc.perform(post("/api/v1/trusted-device/pending/" + enrollmentId.value() + "/approve")
-                        .header("Authorization", "Bearer " + TOKEN))
+                        .header("Authorization", "Bearer " + activeAssertion()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("MFA_REQUIRED"))
                 .andExpect(jsonPath("$.data.mfaTransactionId").value("mfa-7"));
         var approveCaptor = ArgumentCaptor.forClass(com.vpbank.dcp.auth.application.command.ApproveEnrollmentCommand.class);
@@ -189,59 +202,56 @@ class LoginRestTest {
         org.assertj.core.api.Assertions.assertThat(approveCaptor.getValue().enrollmentId()).isEqualTo(enrollmentId);
         when(authorizeEnrollment.authorize(any())).thenReturn(new AuthorizeEnrollmentResult.Authorized(enrollmentId, "qr-token", IDLE));
         mvc.perform(post("/api/v1/trusted-device/pending/" + enrollmentId.value() + "/authorize")
-                        .header("Authorization", "Bearer " + TOKEN))
+                        .header("Authorization", "Bearer " + activeAssertion()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_AUTHORIZATION"))
                 .andExpect(jsonPath("$.data.authorizationToken").value("qr-token"));
         when(authorizeEnrollment.authorize(any())).thenReturn(new AuthorizeEnrollmentResult.MfaPending());
         mvc.perform(post("/api/v1/trusted-device/pending/" + enrollmentId.value() + "/authorize")
-                        .header("Authorization", "Bearer " + TOKEN))
+                        .header("Authorization", "Bearer " + activeAssertion()))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MFA_NOT_PASSED"));
 
         // The new device claims: wrong token detail, then success.
         String claimBody = "{\"authorizationToken\":\"qr-token\",\"tokenEncryptionKey\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"a\",\"y\":\"b\"}}";
         when(claimEnrollment.claim(any())).thenReturn(new ClaimEnrollmentResult.WrongAuthorization(4));
-        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + restrictedAssertion())
                         .header("Accept-Language", "en").contentType(MediaType.APPLICATION_JSON).content(claimBody))
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("WRONG_AUTHORIZATION"))
                 .andExpect(jsonPath("$.error.message").value("The QR code is not correct"))
                 .andExpect(jsonPath("$.error.details[0].field").value("attemptsLeft"))
                 .andExpect(jsonPath("$.error.details[0].message").value("4"));
         when(claimEnrollment.claim(any())).thenReturn(new ClaimEnrollmentResult.AuthorizationExpired());
-        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON).content(claimBody))
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("AUTHORIZATION_EXPIRED"));
         when(claimEnrollment.claim(any())).thenReturn(new ClaimEnrollmentResult.Trusted("eyJ.env", IDLE, ABSOLUTE));
-        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON).content(claimBody))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.tokenEnvelope").value("eyJ.env"))
                 .andExpect(jsonPath("$..token").doesNotExist());
-        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"authorizationToken\":\"\"}"))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    void trustedDeviceRoutesNeedARestrictedSessionAndMapTheirOutcomes() throws Exception {
-        String restrictedToken = "s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000003:" + "C".repeat(43);
-        when(current.resolve(new OpaqueToken(TOKEN))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
-                new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("dev-1"), Channel.MOBILE,
-                SessionStatus.ACTIVE, IDLE, ABSOLUTE)));
-        when(current.resolve(new OpaqueToken(restrictedToken))).thenReturn(Optional.of(new SessionSummary(SessionId.random(),
-                new CustomerId("90359"), new com.vpbank.dcp.auth.domain.model.DeviceId("tablet-2"), Channel.MOBILE,
-                SessionStatus.NEED_TRUSTED_DEVICE, IDLE, IDLE)));
+    void trustedDeviceRoutesNeedABffAdmittedSessionAndMapTheirOutcomes() throws Exception {
         String initBody = "{\"devicePublicJwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"abc\",\"y\":\"def\"},\"platform\":\"IOS\"}";
 
-        // No session at all: the filter answers before the controller.
+        // No BFF assertion at all: the filter answers before the controller.
         mvc.perform(post("/api/v1/trusted-device/init").contentType(MediaType.APPLICATION_JSON).content(initBody))
-                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("SESSION_REQUIRED"));
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"));
+        // The app's own session token is not an assertion: these routes are admitted by the BFF only.
+        mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content(initBody))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"));
         verifyNoInteractions(initEnrollment);
 
-        // A restricted session passes the filter; the use case answers.
+        // A BFF-admitted restricted session passes the filter; the use case answers.
         EnrollmentId enrollmentId = EnrollmentId.random();
         when(initEnrollment.init(any())).thenReturn(new InitEnrollmentResult.KeyExchange(enrollmentId,
                 "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"sx\",\"y\":\"sy\"}", "eyJ.challenge", IDLE));
-        mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON).content(initBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("KEY_EXCHANGE"))
@@ -250,28 +260,30 @@ class LoginRestTest {
                 .andExpect(jsonPath("$.data.challenge").value("eyJ.challenge"));
         var initCaptor = ArgumentCaptor.forClass(com.vpbank.dcp.auth.application.command.InitEnrollmentCommand.class);
         verify(initEnrollment).init(initCaptor.capture());
-        org.assertj.core.api.Assertions.assertThat(initCaptor.getValue().token().value()).isEqualTo(restrictedToken);
+        org.assertj.core.api.Assertions.assertThat(initCaptor.getValue().admitted().status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
+        org.assertj.core.api.Assertions.assertThat(initCaptor.getValue().admitted().deviceId().value()).isEqualTo("tablet-2");
+        org.assertj.core.api.Assertions.assertThat(initCaptor.getValue().admitted().customerId().value()).isEqualTo("90359");
         org.assertj.core.api.Assertions.assertThat(initCaptor.getValue().platform()).isEqualTo(DevicePlatform.IOS);
 
-        // An ACTIVE session reaches the use case, which refuses: 409.
+        // An admitted ACTIVE session reaches the use case, which refuses: 409.
         when(initEnrollment.init(any())).thenReturn(new InitEnrollmentResult.Conflict());
-        mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + TOKEN)
+        mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + activeAssertion())
                         .header("Accept-Language", "en").contentType(MediaType.APPLICATION_JSON).content(initBody))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("STATE_CONFLICT"))
                 .andExpect(jsonPath("$.error.message").value("This step is not valid in the current state"));
 
         when(verifyEnrollment.verify(any())).thenReturn(new VerifyEnrollmentResult.WrongChallenge(1));
-        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"challengeResponse\":\"eyJ.response\"}"))
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("WRONG_CHALLENGE"))
                 .andExpect(jsonPath("$.error.details[0].field").value("attemptsLeft"))
                 .andExpect(jsonPath("$.error.details[0].message").value("1"));
-        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.details[0].field").value("challengeResponse"));
 
         when(confirmEnrollment.confirm(any())).thenReturn(new ConfirmEnrollmentResult.Trusted("eyJ.env", IDLE, ABSOLUTE));
-        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tokenEncryptionKey\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"abc\",\"y\":\"def\"}}"))
                 .andExpect(status().isCreated())
@@ -279,7 +291,7 @@ class LoginRestTest {
                 .andExpect(jsonPath("$.data.tokenEnvelope").value("eyJ.env"))
                 .andExpect(jsonPath("$..token").doesNotExist());
         when(confirmEnrollment.confirm(any())).thenReturn(new ConfirmEnrollmentResult.MfaPending());
-        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedAssertion())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tokenEncryptionKey\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"abc\",\"y\":\"def\"}}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MFA_NOT_PASSED"));

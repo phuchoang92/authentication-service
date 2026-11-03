@@ -1,12 +1,12 @@
 package com.vpbank.dcp.auth.application.command;
 
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import java.util.Objects;
 
 /** Step 2: the challenge, decrypted by the device and re-encrypted to Ksrv (compact JWE text). */
-public record VerifyEnrollmentCommand(OpaqueToken token, String challengeResponse) {
+public record VerifyEnrollmentCommand(AdmittedSession admitted, String challengeResponse) {
     public VerifyEnrollmentCommand {
-        Objects.requireNonNull(token, "token");
+        Objects.requireNonNull(admitted, "admitted");
         Objects.requireNonNull(challengeResponse, "challengeResponse");
     }
 

@@ -1,12 +1,12 @@
 package com.vpbank.dcp.auth.application.command;
 
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import java.util.Objects;
 
 /** Slice 6: the requesting device polls where its approval stands (restricted session). */
-public record ApprovalStatusCommand(OpaqueToken token) {
+public record ApprovalStatusCommand(AdmittedSession admitted) {
     public ApprovalStatusCommand {
-        Objects.requireNonNull(token, "token");
+        Objects.requireNonNull(admitted, "admitted");
     }
 
     @Override

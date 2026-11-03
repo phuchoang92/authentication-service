@@ -35,6 +35,7 @@ import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
@@ -61,6 +62,9 @@ class DeviceEnrollmentServiceTest {
     private static final DeviceId PHONE = new DeviceId("phone-1");
     private static final DeviceId TABLET = new DeviceId("tablet-2");
     private static final OpaqueToken RESTRICTED = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000002:" + "B".repeat(43));
+    /** The tablet's restricted session as the BFF admits it (slice 11): same session ID as the token above. */
+    private static final AdmittedSession TABLET_SESSION = new AdmittedSession(RESTRICTED.sessionId(), ALICE,
+            Channel.MOBILE, TABLET, SessionStatus.NEED_TRUSTED_DEVICE);
     private static final OpaqueToken NEW_TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000003:" + "C".repeat(43));
     private static final EnrollmentId ENROLLMENT = EnrollmentId.random();
     private static final byte[] CHALLENGE = "0123456789abcdef0123456789abcdef".getBytes();
@@ -89,8 +93,8 @@ class DeviceEnrollmentServiceTest {
                 DevicePlatform.ANDROID, null, NOW.minusSeconds(3600), DevicePolicy.standard());
         devices.rows.put(phone.id(), phone);
         devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), phone.id());
-        sessions.create(Session.startRestricted(SessionId.random(), ALICE, TABLET, Channel.MOBILE, NOW, DevicePolicy.standard()),
-                RESTRICTED);
+        sessions.create(Session.startRestricted(RESTRICTED.sessionId(), ALICE, TABLET, Channel.MOBILE, NOW,
+                DevicePolicy.standard()), RESTRICTED);
         when(serverKeys.next()).thenReturn(new ServerKeyPair("{srv-pub}", "{srv-priv}"));
         when(challenges.newChallenge()).thenReturn(CHALLENGE);
         when(challenges.sealChallenge(eq(DEVICE_KEY), eq(ENROLLMENT), eq(CHALLENGE))).thenReturn("jwe.challenge");
@@ -102,7 +106,7 @@ class DeviceEnrollmentServiceTest {
 
     @Test
     void initHandsOutKsrvAndASealedChallengeAndRemembersTheContextInTheSession() {
-        InitEnrollmentResult result = service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
+        InitEnrollmentResult result = service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
 
         assertThat(result).isInstanceOf(InitEnrollmentResult.KeyExchange.class);
         InitEnrollmentResult.KeyExchange exchange = (InitEnrollmentResult.KeyExchange) result;
@@ -116,16 +120,16 @@ class DeviceEnrollmentServiceTest {
         assertThat(session.enrollment().keyProven()).isFalse();
         assertThat(session.enrollment().platform()).isEqualTo(DevicePlatform.IOS);
 
-        assertThat(service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS)))
+        assertThat(service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS)))
                 .isInstanceOf(InitEnrollmentResult.Conflict.class); // init runs once
     }
 
     @Test
     void anUnknownDeviceMustSendAUsableKeyAndPlatformWhileAKnownDeviceReusesItsStoredKey() {
-        assertThat(service.init(new InitEnrollmentCommand(RESTRICTED, null, null)))
+        assertThat(service.init(new InitEnrollmentCommand(TABLET_SESSION, null, null)))
                 .isInstanceOf(InitEnrollmentResult.DeviceKeyRequired.class);
         when(challenges.sealChallenge(eq("bad"), any(), any())).thenThrow(new InvalidEncryptionKeyException("not P-256"));
-        assertThat(service.init(new InitEnrollmentCommand(RESTRICTED, "bad", DevicePlatform.IOS)))
+        assertThat(service.init(new InitEnrollmentCommand(TABLET_SESSION, "bad", DevicePlatform.IOS)))
                 .isInstanceOf(InitEnrollmentResult.DeviceKeyRequired.class);
         assertThat(enrollments.rows).isEmpty();
 
@@ -135,21 +139,21 @@ class DeviceEnrollmentServiceTest {
                 DevicePlatform.IOS, "{stored-key}", NOW.minusSeconds(60), DevicePolicy.standard());
         devices.rows.put(knownTablet.id(), knownTablet);
         when(challenges.sealChallenge(eq("{stored-key}"), eq(ENROLLMENT), eq(CHALLENGE))).thenReturn("jwe.stored");
-        InitEnrollmentResult result = service.init(new InitEnrollmentCommand(RESTRICTED, null, null));
+        InitEnrollmentResult result = service.init(new InitEnrollmentCommand(TABLET_SESSION, null, null));
         assertThat(((InitEnrollmentResult.KeyExchange) result).challenge()).isEqualTo("jwe.stored");
         assertThat(enrollments.only().targetDeviceId()).isEqualTo(knownTablet.id());
     }
 
     @Test
     void verifyCountsTheAttemptOpensTheMfaTransactionOnlyAfterTheKeyIsProven() {
-        service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
+        service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
 
-        VerifyEnrollmentResult wrong = service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.garbage"));
+        VerifyEnrollmentResult wrong = service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.garbage"));
         assertThat(wrong).isEqualTo(new VerifyEnrollmentResult.WrongChallenge(2));
         verifyNoInteractions(mfa);
         assertThat(enrollments.only().verifyAttempts()).isEqualTo(1);
 
-        VerifyEnrollmentResult ok = service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer"));
+        VerifyEnrollmentResult ok = service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
         assertThat(ok).isEqualTo(new VerifyEnrollmentResult.MfaRequired("mfa-1", NOW.plus(Duration.ofMinutes(5))));
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
         assertThat(sessions.findByToken(RESTRICTED).orElseThrow().session().enrollment().keyProven()).isTrue();
@@ -159,33 +163,33 @@ class DeviceEnrollmentServiceTest {
         assertThat(request.getValue().authOperationId()).isEqualTo(ENROLLMENT);
         assertThat(request.getValue().contextDigest()).isEqualTo(EnrollmentDigests.contextDigest(enrollments.only()));
 
-        assertThat(service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer")))
+        assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer")))
                 .isInstanceOf(VerifyEnrollmentResult.Conflict.class); // verify runs once
     }
 
     @Test
     void theThirdWrongAnswerEndsTheEnrollmentAndTheRestrictedSession() {
-        service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
-        assertThat(service.verify(new VerifyEnrollmentCommand(RESTRICTED, "x"))).isEqualTo(new VerifyEnrollmentResult.WrongChallenge(2));
-        assertThat(service.verify(new VerifyEnrollmentCommand(RESTRICTED, "x"))).isEqualTo(new VerifyEnrollmentResult.WrongChallenge(1));
-        assertThat(service.verify(new VerifyEnrollmentCommand(RESTRICTED, "x"))).isEqualTo(new VerifyEnrollmentResult.WrongChallenge(0));
+        service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "x"))).isEqualTo(new VerifyEnrollmentResult.WrongChallenge(2));
+        assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "x"))).isEqualTo(new VerifyEnrollmentResult.WrongChallenge(1));
+        assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "x"))).isEqualTo(new VerifyEnrollmentResult.WrongChallenge(0));
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.FAILED);
         assertThat(sessions.findByToken(RESTRICTED)).isEmpty();
-        assertThat(service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer")))
+        assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer")))
                 .isInstanceOf(VerifyEnrollmentResult.SessionGone.class);
     }
 
     @Test
     void noUsableFactorEndsEverythingAndAnMfaOutageChangesNothing() {
-        service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
+        service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
         doThrow(new PartnerUnavailableException("MFA")).when(mfa).create(any());
-        assertThat(service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer")))
+        assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer")))
                 .isInstanceOf(VerifyEnrollmentResult.Unavailable.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.KEY_EXCHANGE); // the attempt is counted, nothing else
         assertThat(enrollments.only().verifyAttempts()).isEqualTo(1);
 
         doReturn(new CreateResult.NoUsableFactor()).when(mfa).create(any());
-        assertThat(service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer")))
+        assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer")))
                 .isInstanceOf(VerifyEnrollmentResult.NoUsableFactor.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.FAILED);
         assertThat(sessions.findByToken(RESTRICTED)).isEmpty();
@@ -193,11 +197,11 @@ class DeviceEnrollmentServiceTest {
 
     @Test
     void confirmPassedCommitsTrustMakesTheTabletPrimaryEndsTheRestrictedSessionAndIssuesAnActiveOne() {
-        service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
-        service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer"));
+        service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
         when(mfa.check(argThat(check -> check.mfaTransactionId().equals("mfa-1") && check.authOperationId().equals(ENROLLMENT)))).thenReturn(new CheckResult.Passed("receipt-sha"));
 
-        ConfirmEnrollmentResult result = service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"));
+        ConfirmEnrollmentResult result = service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"));
 
         assertThat(result).isInstanceOf(ConfirmEnrollmentResult.Trusted.class);
         ConfirmEnrollmentResult.Trusted trusted = (ConfirmEnrollmentResult.Trusted) result;
@@ -216,7 +220,7 @@ class DeviceEnrollmentServiceTest {
         assertThat(devices.confirmations.getFirst().receiptDigest()).isEqualTo("receipt-sha");
         assertThat(devices.confirmations.getFirst().replaced()).isNull();
 
-        assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}")))
+        assertThat(service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}")))
                 .isInstanceOf(ConfirmEnrollmentResult.SessionGone.class);
     }
 
@@ -225,11 +229,11 @@ class DeviceEnrollmentServiceTest {
         TrustedDevice oldTablet = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
                 DevicePlatform.IOS, "{old-key}", NOW.minusSeconds(60), DevicePolicy.standard());
         devices.rows.put(oldTablet.id(), oldTablet);
-        service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS)); // a new key: reinstall
-        service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer"));
+        service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS)); // a new key: reinstall
+        service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
         when(mfa.check(any())).thenReturn(new CheckResult.Passed("r"));
 
-        service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"));
+        service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"));
 
         assertThat(devices.rows.get(oldTablet.id()).status()).isEqualTo(DeviceStatus.EXPIRED);
         assertThat(devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow().publicKey()).isEqualTo(DEVICE_KEY);
@@ -238,21 +242,21 @@ class DeviceEnrollmentServiceTest {
 
     @Test
     void confirmMapsPendingFailedExpiredRejectedAndOutage() {
-        service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
-        service.verify(new VerifyEnrollmentCommand(RESTRICTED, "jwe.answer"));
+        service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
 
         when(mfa.check(any())).thenReturn(new CheckResult.Pending());
-        assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.MfaPending.class);
+        assertThat(service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.MfaPending.class);
         when(mfa.check(any())).thenReturn(new CheckResult.Rejected());
-        assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Rejected.class);
+        assertThat(service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Rejected.class);
         doThrow(new PartnerUnavailableException("MFA")).when(mfa).check(any());
-        assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Unavailable.class);
+        assertThat(service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Unavailable.class);
         assertThat(sessions.findByToken(RESTRICTED)).isPresent();
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
         verify(tokens, never()).next(any(), any());
 
         doReturn(new CheckResult.Failed()).when(mfa).check(any());
-        assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.MfaFailed.class);
+        assertThat(service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.MfaFailed.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.FAILED);
         assertThat(sessions.findByToken(RESTRICTED)).isEmpty();
         assertThat(devices.findLive(ALICE, Channel.MOBILE, TABLET)).isEmpty();
@@ -260,13 +264,39 @@ class DeviceEnrollmentServiceTest {
 
     @Test
     void confirmBeforeVerifyAndAnActiveSessionAreConflicts() {
-        service.init(new InitEnrollmentCommand(RESTRICTED, DEVICE_KEY, DevicePlatform.IOS));
-        assertThat(service.confirm(new ConfirmEnrollmentCommand(RESTRICTED, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Conflict.class);
+        service.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        assertThat(service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Conflict.class);
         verifyNoInteractions(mfa);
 
-        OpaqueToken active = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000004:" + "D".repeat(43));
-        sessions.create(Session.start(SessionId.random(), ALICE, PHONE, Channel.MOBILE, NOW,
-                new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30))), active);
-        assertThat(service.init(new InitEnrollmentCommand(active, DEVICE_KEY, DevicePlatform.ANDROID))).isInstanceOf(InitEnrollmentResult.SessionGone.class);
+        // The BFF admitted an ACTIVE session: the route is for restricted ones, so nothing is read or written.
+        AdmittedSession activePhone = new AdmittedSession(SessionId.random(), ALICE, Channel.MOBILE, PHONE, SessionStatus.ACTIVE);
+        assertThat(service.init(new InitEnrollmentCommand(activePhone, DEVICE_KEY, DevicePlatform.ANDROID)))
+                .isInstanceOf(InitEnrollmentResult.Conflict.class);
+        assertThat(service.verify(new VerifyEnrollmentCommand(activePhone, "jwe.answer")))
+                .isInstanceOf(VerifyEnrollmentResult.Conflict.class);
+        assertThat(service.confirm(new ConfirmEnrollmentCommand(activePhone, "{app-kenc}")))
+                .isInstanceOf(ConfirmEnrollmentResult.Conflict.class);
+        assertThat(enrollments.rows).hasSize(1);
+    }
+
+    @Test
+    void theEnrollmentContextIsReadOnlyFromTheAssertedSessionOfTheSameCustomerAndDevice() {
+        // The asserted session ID has no session behind it (ended after the BFF admitted the request).
+        AdmittedSession endedSession = new AdmittedSession(SessionId.random(), ALICE, Channel.MOBILE, TABLET,
+                SessionStatus.NEED_TRUSTED_DEVICE);
+        assertThat(service.init(new InitEnrollmentCommand(endedSession, DEVICE_KEY, DevicePlatform.IOS)))
+                .isInstanceOf(InitEnrollmentResult.SessionGone.class);
+
+        // The tablet's session ID, but another device or another customer: not that session.
+        AdmittedSession otherDevice = new AdmittedSession(RESTRICTED.sessionId(), ALICE, Channel.MOBILE, PHONE,
+                SessionStatus.NEED_TRUSTED_DEVICE);
+        AdmittedSession otherCustomer = new AdmittedSession(RESTRICTED.sessionId(), new CustomerId("77777"),
+                Channel.MOBILE, TABLET, SessionStatus.NEED_TRUSTED_DEVICE);
+        assertThat(service.init(new InitEnrollmentCommand(otherDevice, DEVICE_KEY, DevicePlatform.IOS)))
+                .isInstanceOf(InitEnrollmentResult.SessionGone.class);
+        assertThat(service.init(new InitEnrollmentCommand(otherCustomer, DEVICE_KEY, DevicePlatform.IOS)))
+                .isInstanceOf(InitEnrollmentResult.SessionGone.class);
+        assertThat(enrollments.rows).isEmpty();
+        assertThat(sessions.findByToken(RESTRICTED).orElseThrow().session().enrollment()).isNull();
     }
 }

@@ -3,6 +3,8 @@ package com.vpbank.dcp.auth.domain.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import org.junit.jupiter.api.Test;
 
 class ValueObjectsTest {
@@ -23,6 +25,25 @@ class ValueObjectsTest {
         assertThatThrownBy(() -> new PhoneNumber("0901234567")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new Email("not-an-email")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new CustomerId(null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void anAdmittedSessionIsLiveAndSaysWhichKindOfRouteItMayUse() {
+        SessionId sessionId = SessionId.random();
+        CustomerId alice = new CustomerId("90359");
+        DeviceId phone = new DeviceId("phone-1");
+
+        AdmittedSession restricted = new AdmittedSession(sessionId, alice, Channel.MOBILE, phone, SessionStatus.NEED_TRUSTED_DEVICE);
+        AdmittedSession full = new AdmittedSession(sessionId, alice, Channel.MOBILE, phone, SessionStatus.ACTIVE);
+        assertThat(restricted.restricted()).isTrue();
+        assertThat(restricted.full()).isFalse();
+        assertThat(full.full()).isTrue();
+        assertThat(full.restricted()).isFalse();
+
+        assertThatThrownBy(() -> new AdmittedSession(sessionId, alice, Channel.MOBILE, phone, SessionStatus.ENDED))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AdmittedSession(sessionId, alice, Channel.MOBILE, null, SessionStatus.ACTIVE))
+                .isInstanceOf(NullPointerException.class);
     }
 
     @Test

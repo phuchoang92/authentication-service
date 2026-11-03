@@ -9,8 +9,8 @@ import com.vpbank.dcp.auth.application.result.VerifyEnrollmentResult;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAdmission;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.FieldDetail;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
@@ -30,8 +30,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 /**
- * Trusted-device enrollment wire ↔ use cases (DD 20 §4, slice 5). The restricted token arrives as
- * text from the session filter; JWKs cross as JSON objects. The status/code table lives here, so
+ * Trusted-device enrollment wire ↔ use cases (DD 20 §4, slice 5). The admitted session arrives from
+ * the BFF assertion filter; JWKs cross as JSON objects. The status/code table lives here, so
  * the controller decides nothing.
  */
 @RequiredArgsConstructor
@@ -41,30 +41,30 @@ public final class TrustedDeviceRestMapper {
 
     @NonNull private final ErrorMessages errorMessages;
 
-    public InitEnrollmentCommand toInitCommand(String token, InitEnrollmentRequest request) {
+    public InitEnrollmentCommand toInitCommand(BffAdmission admission, InitEnrollmentRequest request) {
         try {
             // Both are optional: a known device keeps the key and platform Auth already stores.
             String devicePublicJwk = request.devicePublicJwk() == null ? null : JwkJson.toJson(request.devicePublicJwk());
             DevicePlatform platform = request.platform() == null ? null : DevicePlatform.valueOf(request.platform());
 
-            return new InitEnrollmentCommand(new OpaqueToken(token), devicePublicJwk, platform);
+            return new InitEnrollmentCommand(admission.admittedSession(), devicePublicJwk, platform);
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }
     }
 
-    public VerifyEnrollmentCommand toVerifyCommand(String token, VerifyEnrollmentRequest request) {
+    public VerifyEnrollmentCommand toVerifyCommand(BffAdmission admission, VerifyEnrollmentRequest request) {
         try {
-            return new VerifyEnrollmentCommand(new OpaqueToken(token), request.challengeResponse());
+            return new VerifyEnrollmentCommand(admission.admittedSession(), request.challengeResponse());
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }
     }
 
-    public ConfirmEnrollmentCommand toConfirmCommand(String token, ConfirmEnrollmentRequest request) {
+    public ConfirmEnrollmentCommand toConfirmCommand(BffAdmission admission, ConfirmEnrollmentRequest request) {
         try {
             String tokenEncryptionKey = JwkJson.toJson(request.tokenEncryptionKey());
-            return new ConfirmEnrollmentCommand(new OpaqueToken(token), tokenEncryptionKey);
+            return new ConfirmEnrollmentCommand(admission.admittedSession(), tokenEncryptionKey);
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
         }

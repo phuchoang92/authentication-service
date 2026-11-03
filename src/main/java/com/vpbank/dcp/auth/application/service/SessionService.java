@@ -6,7 +6,6 @@ import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.domain.enums.Channel;
-import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
@@ -76,18 +75,14 @@ public final class SessionService {
                 .filter(stored -> stored.session().isLive(now));
     }
 
-    /** A live NEED_TRUSTED_DEVICE session with a device: what the trust flows run on. */
-    public Optional<StoredSession> findRestricted(OpaqueToken token) {
-        return findLive(token)
-                .filter(stored -> stored.session().status() == SessionStatus.NEED_TRUSTED_DEVICE)
-                .filter(stored -> stored.session().deviceId() != null);
-    }
-
-    /** A live ACTIVE session with a device: what device management runs on. */
-    public Optional<StoredSession> findActive(OpaqueToken token) {
-        return findLive(token)
-                .filter(stored -> stored.session().status() == SessionStatus.ACTIVE)
-                .filter(stored -> stored.session().deviceId() != null);
+    /**
+     * The same read by the session's address, for callers the BFF already admitted (slice 11): they know the
+     * channel and session ID from the assertion and never see the token.
+     */
+    public Optional<StoredSession> findLive(SessionLookup sessionLookup) {
+        Instant now = clock.instant();
+        return sessionStore.findByLookup(sessionLookup)
+                .filter(stored -> stored.session().isLive(now));
     }
 
     // ---- issue ----
@@ -170,12 +165,12 @@ public final class SessionService {
      * One-shot consumption: of two racing callers exactly one gets {@code true}, because the delete is
      * atomic. Used before a trust commit so only one confirm or claim may proceed.
      */
-    public boolean consume(StoredSession storedSession) {
-        return sessionStore.delete(storedSession.lookup());
+    public boolean consume(SessionLookup sessionLookup) {
+        return sessionStore.delete(sessionLookup);
     }
 
     /** Remove the session; nothing to decide from the answer (logout, failed enrollment). */
-    public void end(StoredSession storedSession) {
-        sessionStore.delete(storedSession.lookup());
+    public void end(SessionLookup sessionLookup) {
+        sessionStore.delete(sessionLookup);
     }
 }

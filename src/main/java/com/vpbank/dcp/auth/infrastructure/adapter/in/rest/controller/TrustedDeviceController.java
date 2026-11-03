@@ -10,7 +10,8 @@ import com.vpbank.dcp.auth.application.result.ConfirmEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.InitEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.VerifyEnrollmentResult;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAdmission;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAssertionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.ConfirmEnrollmentRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.InitEnrollmentRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.VerifyEnrollmentRequest;
@@ -31,8 +32,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * App → Auth from a restricted NEED_TRUSTED_DEVICE session ({@code /api}, DD 20 §4): init → verify →
- * confirm. The session filter admits restricted sessions on this prefix; an ACTIVE session reaches
- * the use case and is answered 409 STATE_CONFLICT.
+ * confirm. The BFF admits the session ({@link BffAssertionFilter}); an ACTIVE one reaches the use case and
+ * is answered 409 STATE_CONFLICT.
  */
 @RestController
 @ConditionalOnProperty(prefix = "auth.login", name = "enabled", havingValue = "true")
@@ -50,9 +51,9 @@ public class TrustedDeviceController {
     @PostMapping(path = "/api/v1/trusted-device/init", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<InitEnrollmentResponse>> init(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token,
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission,
             @Valid @RequestBody InitEnrollmentRequest body) {
-        InitEnrollmentCommand command = trustedDeviceRestMapper.toInitCommand(token, body);
+        InitEnrollmentCommand command = trustedDeviceRestMapper.toInitCommand(admission, body);
         InitEnrollmentResult result = initEnrollmentUseCase.init(command);
         return trustedDeviceRestMapper.toResponse(result);
     }
@@ -60,9 +61,9 @@ public class TrustedDeviceController {
     @PostMapping(path = "/api/v1/trusted-device/verify", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<VerifyEnrollmentResponse>> verify(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token,
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission,
             @Valid @RequestBody VerifyEnrollmentRequest body) {
-        VerifyEnrollmentCommand command = trustedDeviceRestMapper.toVerifyCommand(token, body);
+        VerifyEnrollmentCommand command = trustedDeviceRestMapper.toVerifyCommand(admission, body);
         VerifyEnrollmentResult result = verifyEnrollmentUseCase.verify(command);
         return trustedDeviceRestMapper.toResponse(result);
     }
@@ -70,9 +71,9 @@ public class TrustedDeviceController {
     @PostMapping(path = "/api/v1/trusted-device/confirm", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<ConfirmEnrollmentResponse>> confirm(
-            @RequestAttribute(SessionFilter.TOKEN_ATTRIBUTE) String token,
+            @RequestAttribute(BffAssertionFilter.ADMISSION_ATTRIBUTE) BffAdmission admission,
             @Valid @RequestBody ConfirmEnrollmentRequest body) {
-        ConfirmEnrollmentCommand command = trustedDeviceRestMapper.toConfirmCommand(token, body);
+        ConfirmEnrollmentCommand command = trustedDeviceRestMapper.toConfirmCommand(admission, body);
         ConfirmEnrollmentResult result = confirmEnrollmentUseCase.confirm(command);
         return trustedDeviceRestMapper.toResponse(result);
     }

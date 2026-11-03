@@ -64,7 +64,7 @@ public final class SessionManagementService implements CurrentSessionUseCase, Ex
         try {
             Optional<StoredSession> liveSession = sessionService.findLive(command.token());
             if (liveSession.isPresent()) {
-                sessionService.end(liveSession.get());
+                sessionService.end(liveSession.get().lookup());
             }
             return new LogoutResult.Ended();
         } catch (RepositoryUnavailableException failure) {

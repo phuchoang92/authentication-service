@@ -16,6 +16,7 @@ import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.OpenedChallenge;
 import com.vpbank.dcp.auth.application.port.out.model.ServerKeyPair;
+import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
 import com.vpbank.dcp.auth.application.result.ConfirmEnrollmentResult;
@@ -26,6 +27,7 @@ import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.MfaFactor;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.*;
 import java.time.Clock;
 import java.time.Instant;
@@ -41,6 +43,10 @@ import lombok.RequiredArgsConstructor;
  * MFA outcome and, on PASSED, lets {@link TrustedDeviceService} commit the trust, ends the restricted
  * session and issues a full ACTIVE one. Steps run once each, in order; the restricted session
  * carries the context (Ksrv private key, challenge digest), never SQL.
+ *
+ * <p>Slice 11: the caller is the session the BFF admitted ({@link AdmittedSession}); only a restricted
+ * one may run these steps. The restricted session is still read, by its asserted address, but only for
+ * the enrollment context it holds.
  */
 @RequiredArgsConstructor
 public final class DeviceEnrollmentService
@@ -74,7 +80,11 @@ public final class DeviceEnrollmentService
     @Override
     public InitEnrollmentResult init(InitEnrollmentCommand command) {
         try {
-            Optional<StoredSession> restrictedSession = findRestrictedSession(command.token());
+            AdmittedSession caller = command.admitted();
+            if (!caller.restricted()) {
+                return new InitEnrollmentResult.Conflict();
+            }
+            Optional<StoredSession> restrictedSession = findEnrollmentHolder(caller);
             if (restrictedSession.isEmpty()) {
                 return new InitEnrollmentResult.SessionGone();
             }
@@ -160,7 +170,11 @@ public final class DeviceEnrollmentService
     @Override
     public VerifyEnrollmentResult verify(VerifyEnrollmentCommand command) {
         try {
-            Optional<StoredSession> restrictedSession = findRestrictedSession(command.token());
+            AdmittedSession caller = command.admitted();
+            if (!caller.restricted()) {
+                return new VerifyEnrollmentResult.Conflict();
+            }
+            Optional<StoredSession> restrictedSession = findEnrollmentHolder(caller);
             if (restrictedSession.isEmpty()) {
                 return new VerifyEnrollmentResult.SessionGone();
             }
@@ -258,7 +272,11 @@ public final class DeviceEnrollmentService
     @Override
     public ConfirmEnrollmentResult confirm(ConfirmEnrollmentCommand command) {
         try {
-            Optional<StoredSession> restrictedSession = findRestrictedSession(command.token());
+            AdmittedSession caller = command.admitted();
+            if (!caller.restricted()) {
+                return new ConfirmEnrollmentResult.Conflict();
+            }
+            Optional<StoredSession> restrictedSession = findEnrollmentHolder(caller);
             if (restrictedSession.isEmpty()) {
                 return new ConfirmEnrollmentResult.SessionGone();
             }
@@ -315,7 +333,7 @@ public final class DeviceEnrollmentService
         Session restrictedSession = storedSession.session();
 
         // Only one confirm may commit: the restricted session is consumed first.
-        boolean sessionConsumed = sessionService.consume(storedSession);
+        boolean sessionConsumed = sessionService.consume(storedSession.lookup());
         if (!sessionConsumed) {
             return new ConfirmEnrollmentResult.Conflict();
         }
@@ -341,8 +359,17 @@ public final class DeviceEnrollmentService
                 activeSession.session().absoluteExpiresAt());
     }
 
-    private Optional<StoredSession> findRestrictedSession(OpaqueToken token) {
-        return sessionService.findRestricted(token);
+    /**
+     * The restricted session's HASH still holds the init → verify → confirm context (Ksrv, challenge
+     * digest) until slice 11 moves it into its own cache record. It is read by the address the BFF asserted
+     * and must belong to the same customer and device; it no longer says who is calling.
+     */
+    private Optional<StoredSession> findEnrollmentHolder(AdmittedSession caller) {
+        SessionLookup restrictedSessionLookup = new SessionLookup(caller.channel(), caller.sessionId());
+        return sessionService.findLive(restrictedSessionLookup)
+                .filter(stored -> stored.session().status() == SessionStatus.NEED_TRUSTED_DEVICE)
+                .filter(stored -> stored.session().customerId().equals(caller.customerId()))
+                .filter(stored -> caller.deviceId().equals(stored.session().deviceId()));
     }
 
     private Optional<DeviceEnrollment> findOpenEnrollment(EnrollmentId enrollmentId, Session session,
@@ -359,7 +386,7 @@ public final class DeviceEnrollmentService
      */
     private void endRestrictedSession(StoredSession storedSession, DeviceEnrollment terminalEnrollment) {
         enrollmentRepository.saveIfCurrent(terminalEnrollment);
-        sessionService.end(storedSession);
+        sessionService.end(storedSession.lookup());
     }
 
     /**

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.domain.enums.Channel;
@@ -26,13 +27,14 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** The common session actions the flows compose: issue, find by kind, consume once, end. */
+/** The common session actions the flows compose: issue, find by token or address, consume once, end. */
 class SessionServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-30T10:00:00Z");
     private static final CustomerId ALICE = new CustomerId("90359");
     private static final DeviceId PHONE = new DeviceId("phone-1");
     private static final SessionId SESSION = new SessionId(UUID.fromString("00000000-0000-4000-8000-000000000001"));
     private static final OpaqueToken TOKEN = OpaqueToken.of(Channel.MOBILE, SESSION, "A".repeat(43));
+    private static final SessionLookup LOOKUP = new SessionLookup(Channel.MOBILE, SESSION);
     private static final String KENC = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"..\",\"y\":\"..\"}";
 
     private final InMemorySessionStore sessions = new InMemorySessionStore();
@@ -49,7 +51,7 @@ class SessionServiceTest {
     }
 
     @Test
-    void issuesAFullSessionSealedToTheAppKeyAndFindsItAsActiveOnly() {
+    void issuesAFullSessionSealedToTheAppKey() {
         IssuedSession issued = service.issueActive(service.newSessionId(), ALICE, PHONE, Channel.MOBILE, KENC);
 
         assertThat(issued.tokenEnvelope()).isEqualTo("jwe.compact");
@@ -58,32 +60,30 @@ class SessionServiceTest {
         assertThat(issued.session().absoluteExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(20)));
         assertThat(issued.toString()).doesNotContain("jwe");
         assertThat(service.findLive(TOKEN)).map(StoredSession::session).contains(sessions.only());
-        assertThat(service.findActive(TOKEN)).isPresent();
-        assertThat(service.findRestricted(TOKEN)).isEmpty();
     }
 
     @Test
-    void issuesARestrictedSessionWithTheFixedDeadlineAndFindsItAsRestrictedOnly() {
+    void issuesARestrictedSessionWithTheFixedDeadlineAndFindsItByItsAddress() {
         IssuedSession issued = service.issueRestricted(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
 
         assertThat(issued.session().status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
         assertThat(issued.session().idleExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
         assertThat(issued.session().absoluteExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
-        assertThat(service.findRestricted(TOKEN)).isPresent();
-        assertThat(service.findActive(TOKEN)).isEmpty();
+        // The BFF-admitted trust flows know only the channel and session ID (slice 11).
+        assertThat(service.findLive(LOOKUP)).map(StoredSession::session).contains(sessions.only());
+        assertThat(service.findLive(new SessionLookup(Channel.WEB, SESSION))).isEmpty();
     }
 
     @Test
     void consumeWinsOnceAndEndRemovesWithoutAnAnswer() {
         service.issueRestricted(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
-        StoredSession stored = service.findRestricted(TOKEN).orElseThrow();
 
-        assertThat(service.consume(stored)).isTrue();
-        assertThat(service.consume(stored)).isFalse(); // the second claimant loses
+        assertThat(service.consume(LOOKUP)).isTrue();
+        assertThat(service.consume(LOOKUP)).isFalse(); // the second claimant loses
         assertThat(service.findLive(TOKEN)).isEmpty();
 
         service.issueActive(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
-        service.end(service.findLive(TOKEN).orElseThrow());
+        service.end(LOOKUP);
         assertThat(sessions.rows).isEmpty();
     }
 }

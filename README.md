@@ -21,22 +21,24 @@ FACE ([plan](docs/plans/slice-5-enrollment.md)) and approval of a new device by 
 device through a QR token ([plan](docs/plans/slice-6-device-approval.md)) and the self-describing session token
 ([plan](docs/plans/slice-7-session-token.md)) and the common session actions with one Valkey read per request
 ([plan](docs/plans/slice-8-session-actions.md)) and the asynchronous security activity audit of login outcomes
-([plan](docs/plans/slice-9-security-audit.md)), each off by default.
+([plan](docs/plans/slice-9-security-audit.md)), each off by default. Slice 11 turn 1 (2026-11-03): the
+trusted-device routes are admitted by a signed BFF assertion instead of the app's session token
+([plan](docs/plans/slice-11-bff-admitted-trust-flows.md)).
 
 | Path | Caller | Result |
 |---|---|---|
 | `POST /api/ns/v1/login` | app via BFF, no session | `201 {tokenEnvelope, status, idleExpiresAt, absoluteExpiresAt}`; `401 INVALID_CREDENTIALS`; `403 ACCOUNT_NOT_READY`; `423 ACCOUNT_LOCKED`; `428 CAPTCHA_REQUIRED`; `503 LOGIN_UNAVAILABLE` |
 | `POST /api/ns/v1/login/captcha` | app via BFF, no session | `200 {captchaId, image (base64 PNG), expiresAt}` — same shape for unknown names |
 | `POST /api/v1/logout` | app, `Authorization: Bearer s1:auth:session:<channel>:<sessionId>:<secret>` (ACTIVE or restricted) | `204`; `401 SESSION_REQUIRED` |
-| `POST /api/v1/trusted-device/init` | app, restricted session | `200 {status:"KEY_EXCHANGE", enrollmentId, serverPublicJwk, challenge (JWE to the device key), expiresAt}`; `400 DEVICE_KEY_REQUIRED`; `409 STATE_CONFLICT` (ACTIVE session or init already done) |
-| `POST /api/v1/trusted-device/verify` | app, restricted session | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}`; `401 WRONG_CHALLENGE` + detail `attemptsLeft`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT`; `503` |
-| `POST /api/v1/trusted-device/confirm` | app, restricted session | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at confirm; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT`; `503` |
-| `POST /api/v1/trusted-device/request` | new device, restricted session | `200 {status:"WAITING_APPROVAL", enrollmentId, expiresAt}` (same answer on repeat); `400 DEVICE_KEY_REQUIRED`; `409 TOO_MANY_PENDING_DEVICES`; `409 STATE_CONFLICT` |
-| `GET /api/v1/trusted-device/status` | new device, restricted session | `200 {status, enrollmentId, expiresAt}` — `WAITING_APPROVAL`, `WAITING_AUTHORIZATION`, `FAILED`, `EXPIRED`; `409 STATE_CONFLICT` without a request |
-| `GET /api/v1/trusted-device/pending` | primary device, ACTIVE session | `200 [{enrollmentId, deviceId (masked), platform, status, expiresAt}]`; `403 NOT_PRIMARY_DEVICE` |
-| `POST /api/v1/trusted-device/pending/{enrollmentId}/approve` | primary device | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}` (FACE + OTP at MFA); `403 NOT_PRIMARY_DEVICE`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT` |
-| `POST /api/v1/trusted-device/pending/{enrollmentId}/authorize` | primary device | `200 {status:"WAITING_AUTHORIZATION", enrollmentId, authorizationToken, expiresAt}` — the QR; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT` |
-| `POST /api/v1/trusted-device/claim` | new device, the same restricted session | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at claim; `401 WRONG_AUTHORIZATION` + detail `attemptsLeft`; `401 AUTHORIZATION_EXPIRED`; `409 STATE_CONFLICT` |
+| `POST /api/v1/trusted-device/init` | BFF for the app (restricted session) | `200 {status:"KEY_EXCHANGE", enrollmentId, serverPublicJwk, challenge (JWE to the device key), expiresAt}`; `400 DEVICE_KEY_REQUIRED`; `409 STATE_CONFLICT` (ACTIVE session or init already done) |
+| `POST /api/v1/trusted-device/verify` | BFF for the app (restricted session) | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}`; `401 WRONG_CHALLENGE` + detail `attemptsLeft`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT`; `503` |
+| `POST /api/v1/trusted-device/confirm` | BFF for the app (restricted session) | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at confirm; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT`; `503` |
+| `POST /api/v1/trusted-device/request` | BFF for the new device (restricted session) | `200 {status:"WAITING_APPROVAL", enrollmentId, expiresAt}` (same answer on repeat); `400 DEVICE_KEY_REQUIRED`; `409 TOO_MANY_PENDING_DEVICES`; `409 STATE_CONFLICT` |
+| `GET /api/v1/trusted-device/status` | BFF for the new device (restricted session) | `200 {status, enrollmentId, expiresAt}` — `WAITING_APPROVAL`, `WAITING_AUTHORIZATION`, `FAILED`, `EXPIRED`; `409 STATE_CONFLICT` without a request |
+| `GET /api/v1/trusted-device/pending` | BFF for the primary device (ACTIVE session) | `200 [{enrollmentId, deviceId (masked), platform, status, expiresAt}]`; `403 NOT_PRIMARY_DEVICE` |
+| `POST /api/v1/trusted-device/pending/{enrollmentId}/approve` | BFF for the primary device | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}` (FACE + OTP at MFA); `403 NOT_PRIMARY_DEVICE`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT` |
+| `POST /api/v1/trusted-device/pending/{enrollmentId}/authorize` | BFF for the primary device | `200 {status:"WAITING_AUTHORIZATION", enrollmentId, authorizationToken, expiresAt}` — the QR; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT` |
+| `POST /api/v1/trusted-device/claim` | BFF for the new device (the same restricted session) | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at claim; `401 WRONG_AUTHORIZATION` + detail `attemptsLeft`; `401 AUTHORIZATION_EXPIRED`; `409 STATE_CONFLICT` |
 | `GET /api/v1/devices` | app, ACTIVE session | `200 [{deviceId (masked), platform, status, trustLevel, primary, trustedAt, expiresAt, lastLoginAt}]`; `403 DEVICE_TRUST_REQUIRED` from a restricted session |
 | `POST /internal/v1/customers/{customerId}/password-unlock` | bank tooling | `204`; `404 CUSTOMER_UNKNOWN` |
 | `POST /internal/v1/sessions/extend` | BFF after admission (flow 16) | `200 {idleExpiresAt, absoluteExpiresAt}`; `400`; `410 SESSION_GONE`; `409 SESSION_CONFLICT`; `503` |
@@ -49,6 +51,17 @@ hashed or hidden yet, so the BFF reads the session by the token's channel and ID
 itself. Idle 15 min slides on extend (`sessionLookup{channel, sessionId}`), absolute 20 min never moves.
 The password is verified by Keycloak Direct Grant (client secret) and the KC-signed ID token is checked
 against the realm JWKS.
+
+**BFF admission of the trusted-device routes (slice 11):** `/api/v1/trusted-device/**` takes exactly one
+`Authorization: Bearer <assertion>` from the BFF, not the app token: ES256 from the pinned key in
+`auth.bff.assertion-public-jwk` (with `kid`), `typ=bff-assertion+jwt`, claims exactly `iss` (=
+`auth.bff.assertion-issuer`), `aud=authentication-service`, `sub` (customer), `sid` (session UUID), `channel`,
+`deviceId`, `sessionKind` (`ACTIVE` / `NEED_TRUSTED_DEVICE`), `iat`, `exp` (≤ 60 s later), `jti` (used once, kept
+in Valkey `bff-assertion:used:v1:<sha256>`). A bad or replayed assertion is `401 REQUEST_REJECTED`, a replay store
+that cannot answer `503`. The use cases read no session to learn the caller; they check the asserted kind per
+route (`409 STATE_CONFLICT` / `403 NOT_PRIMARY_DEVICE`). Until slice 11 turn 3 the primary enrollment still
+reads its transaction context from the restricted session's HASH, by the asserted address. The BFF does not
+mint these assertions yet.
 
 **One Valkey read per request (slice 8):** the session filter on `/api/**` only checks that the Bearer token has
 the right shape; it reads nothing. The use case behind the route reads the session once, decides whether that

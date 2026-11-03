@@ -1,13 +1,13 @@
 package com.vpbank.dcp.auth.application.command;
 
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import java.util.Objects;
 
 /** Slice 6: the primary device picks a waiting request; Auth opens the FACE + OTP transaction for it. */
-public record ApproveEnrollmentCommand(OpaqueToken token, EnrollmentId enrollmentId) {
+public record ApproveEnrollmentCommand(AdmittedSession admitted, EnrollmentId enrollmentId) {
     public ApproveEnrollmentCommand {
-        Objects.requireNonNull(token, "token");
+        Objects.requireNonNull(admitted, "admitted");
         Objects.requireNonNull(enrollmentId, "enrollmentId");
     }
 

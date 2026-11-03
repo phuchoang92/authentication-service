@@ -35,6 +35,7 @@ import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.UserName;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestBffAssertions;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.SecurityAuditEventEntity;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.SecurityAuditEventJpaRepository;
@@ -65,7 +66,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * customer is registered, fails twice (CAPTCHA now required), solves a CAPTCHA, logs in (token
  * envelope decrypted with the test's Kenc), extends the session the BFF way, logs out, then fails
  * until locked and is unlocked by the bank; finally a second device gets a restricted session that
- * can neither list devices nor extend, while the first device sees itself as the trusted primary.
+ * can neither list devices nor extend, while the first device sees itself as the trusted primary. The
+ * trusted-device routes are called the way the BFF calls them: with a signed assertion (slice 11).
  * Partner ports (Customer, Keycloak admin + Direct Grant, Notification) are mocked; the CAPTCHA
  * generator is replaced by a fixed answer. The security audit is on, so the first four login
  * attempts must show up in SECURITY_AUDIT_EVENT shortly after they were answered (slice 9).
@@ -111,6 +113,8 @@ class ApplicationBootIT {
         registry.add("auth.captcha.answer-hmac-key-base64", () -> Base64.getEncoder().encodeToString(new byte[32]));
         registry.add("auth.device.lookup-hmac-keys-base64.d1", () -> Base64.getEncoder().encodeToString(new byte[32]));
         registry.add("auth.device.encryption-keys-base64.e1", () -> Base64.getEncoder().encodeToString(new byte[32]));
+        registry.add("auth.bff.assertion-issuer", () -> TestBffAssertions.ISSUER);
+        registry.add("auth.bff.assertion-public-jwk", TestBffAssertions::publicJwk);
     }
 
     @Autowired MockMvc mvc;
@@ -239,7 +243,7 @@ class ApplicationBootIT {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
         String restrictedToken = tokenOf(tabletAgain, kenc);
         ECKey deviceKey = new ECKeyGenerator(Curve.P_256).generate();
-        MvcResult init = mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", "Bearer " + restrictedToken)
+        MvcResult init = mvc.perform(post("/api/v1/trusted-device/init").header("Authorization", bffAssertion(restrictedToken, "tablet-2", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"devicePublicJwk\":" + deviceKey.toPublicJWK().toJSONString() + ",\"platform\":\"IOS\"}"))
                 .andExpect(status().isOk())
@@ -251,7 +255,7 @@ class ApplicationBootIT {
         String challengeResponse = answerChallenge(initJson, deviceKey);
 
         when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-txn-1", java.time.Instant.now().plusSeconds(300)));
-        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/verify").header("Authorization", bffAssertion(restrictedToken, "tablet-2", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"challengeResponse\":\"" + challengeResponse + "\"}"))
                 .andExpect(status().isOk())
@@ -261,19 +265,20 @@ class ApplicationBootIT {
         when(mfa.check(any())).thenReturn(new CheckResult.Pending());
         ECKey tabletKenc = new ECKeyGenerator(Curve.P_256).generate();
         String confirmBody = "{\"tokenEncryptionKey\":" + tabletKenc.toPublicJWK().toJSONString() + "}";
-        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", bffAssertion(restrictedToken, "tablet-2", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON).content(confirmBody))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MFA_NOT_PASSED"));
         when(mfa.check(any())).thenReturn(new CheckResult.Passed("receipt-digest"));
-        MvcResult confirm = mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", "Bearer " + restrictedToken)
+        MvcResult confirm = mvc.perform(post("/api/v1/trusted-device/confirm").header("Authorization", bffAssertion(restrictedToken, "tablet-2", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON).content(confirmBody))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                 .andExpect(jsonPath("$..token").doesNotExist())
                 .andReturn();
 
-        // The restricted session is gone; the new ACTIVE token is sealed to the key sent at confirm and sees two devices.
-        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", "Bearer " + restrictedToken))
+        // The restricted session is gone (Valkey no longer has it, so the BFF would not admit it again); the new
+        // ACTIVE token is sealed to the key sent at confirm and sees two devices.
+        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + restrictedToken))
                 .andExpect(status().isUnauthorized());
         String tabletActiveToken = tokenOf(confirm, tabletKenc);
         mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + tabletActiveToken))
@@ -290,47 +295,47 @@ class ApplicationBootIT {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
         String watchRestrictedToken = tokenOf(watchLogin, kenc);
         ECKey watchKey = new ECKeyGenerator(Curve.P_256).generate();
-        MvcResult request = mvc.perform(post("/api/v1/trusted-device/request").header("Authorization", "Bearer " + watchRestrictedToken)
+        MvcResult request = mvc.perform(post("/api/v1/trusted-device/request").header("Authorization", bffAssertion(watchRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"devicePublicJwk\":" + watchKey.toPublicJWK().toJSONString() + ",\"platform\":\"IOS\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL")).andReturn();
         String approvalId = field(request.getResponse().getContentAsString(), "enrollmentId");
-        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", "Bearer " + watchRestrictedToken))
+        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", bffAssertion(watchRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
 
-        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", "Bearer " + phoneToken))
+        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", bffAssertion(phoneToken, "dev-1", "ACTIVE")))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.error.code").value("NOT_PRIMARY_DEVICE"));
-        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", "Bearer " + tabletActiveToken))
+        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", bffAssertion(tabletActiveToken, "tablet-2", "ACTIVE")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].enrollmentId").value(approvalId))
                 .andExpect(jsonPath("$.data[0].deviceId").value("…ch-3"))
                 .andExpect(jsonPath("$.data[0].platform").value("IOS"));
         when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-txn-2", java.time.Instant.now().plusSeconds(300)));
-        mvc.perform(post("/api/v1/trusted-device/pending/" + approvalId + "/approve").header("Authorization", "Bearer " + tabletActiveToken))
+        mvc.perform(post("/api/v1/trusted-device/pending/" + approvalId + "/approve").header("Authorization", bffAssertion(tabletActiveToken, "tablet-2", "ACTIVE")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("MFA_REQUIRED"))
                 .andExpect(jsonPath("$.data.mfaTransactionId").value("mfa-txn-2"));
         when(mfa.check(any())).thenReturn(new CheckResult.Passed("approval-receipt"));
         MvcResult authorize = mvc.perform(post("/api/v1/trusted-device/pending/" + approvalId + "/authorize")
-                        .header("Authorization", "Bearer " + tabletActiveToken))
+                        .header("Authorization", bffAssertion(tabletActiveToken, "tablet-2", "ACTIVE")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_AUTHORIZATION")).andReturn();
         String qrToken = field(authorize.getResponse().getContentAsString(), "authorizationToken");
-        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", "Bearer " + watchRestrictedToken))
+        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", bffAssertion(watchRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_AUTHORIZATION"));
 
         // The watch scans the QR: a wrong token costs an attempt, the right one makes it trusted and primary.
         ECKey watchKenc = new ECKeyGenerator(Curve.P_256).generate();
         String claimBody = "{\"authorizationToken\":\"" + qrToken + "\",\"tokenEncryptionKey\":" + watchKenc.toPublicJWK().toJSONString() + "}";
-        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + watchRestrictedToken)
+        mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", bffAssertion(watchRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON).content(claimBody.replace(qrToken, "not-the-qr-token")))
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("WRONG_AUTHORIZATION"))
                 .andExpect(jsonPath("$.error.details[0].message").value("4"));
-        MvcResult claim = mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", "Bearer " + watchRestrictedToken)
+        MvcResult claim = mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", bffAssertion(watchRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON).content(claimBody))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("ACTIVE"))
                 .andExpect(jsonPath("$..token").doesNotExist()).andReturn();
-        mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", "Bearer " + watchRestrictedToken))
-                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + watchRestrictedToken))
+                .andExpect(status().isUnauthorized()); // the restricted session was consumed by the claim
         String watchActiveToken = tokenOf(claim, watchKenc);
         mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + watchActiveToken))
                 .andExpect(status().isOk())
@@ -339,7 +344,7 @@ class ApplicationBootIT {
                 .andExpect(jsonPath("$.data[?(@.deviceId == '…ch-3')].trustLevel").value("TRUSTED"))
                 .andExpect(jsonPath("$.data[?(@.deviceId == '…et-2')].primary").value(false))
                 .andExpect(jsonPath("$.data[?(@.deviceId == '…et-2')].trustLevel").value("TRUSTED"));
-        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", "Bearer " + watchActiveToken))
+        mvc.perform(get("/api/v1/trusted-device/pending").header("Authorization", bffAssertion(watchActiveToken, "watch-3", "ACTIVE")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(0));
     }
 
@@ -370,6 +375,17 @@ class ApplicationBootIT {
             rows = auditRows.findByCustomerIdOrderByOccurredAtAscIdAsc(customerId);
         }
         return rows;
+    }
+
+    /**
+     * Plays the BFF (slice 11): it has admitted the app's token and calls a trusted-device route with a signed
+     * assertion naming that session. The session ID is the one the token carries in clear.
+     */
+    private static String bffAssertion(String token, String deviceId, String sessionKind) {
+        String[] parts = token.split(":");
+        String channel = parts[3];
+        String sessionId = parts[4];
+        return "Bearer " + TestBffAssertions.assertion(sessionId, "90359", channel, deviceId, sessionKind);
     }
 
     private static String tokenOf(MvcResult login, ECKey kenc) throws Exception {
