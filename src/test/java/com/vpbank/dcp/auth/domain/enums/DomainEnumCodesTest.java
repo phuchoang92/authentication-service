@@ -44,7 +44,7 @@ class DomainEnumCodesTest {
                         "SERVICE_TOKEN_ISSUED", "SERVICE_TOKEN_REFUSED");
         assertThat(names(SecurityEventReason.values()))
                 .containsExactly("FULL_SESSION", "RESTRICTED_SESSION", "UNKNOWN_USER", "WRONG_PASSWORD", "LOCKED",
-                        "CAPTCHA_REQUIRED", "NOT_READY", "DEVICE_PROOF_REJECTED", "REPOSITORY", "PARTNER",
+                        "CAPTCHA_REQUIRED", "NOT_READY", "REPOSITORY", "PARTNER",
                         "TOKEN_ISSUED", "SCOPE_NOT_GRANTED", "BUSINESS_REFERENCE_MISSING");
     }
 

@@ -25,13 +25,6 @@ public interface TrustedDeviceRepository {
     Optional<TrustedDeviceId> findPrimary(CustomerId customerId, Channel channel);
 
     /**
-     * The direct path: the device row, the primary assignment and the audit events (sequence 0..n
-     * under {@code correlationId}) in one transaction. {@code AlreadyHasDevice} when another login
-     * registered a device for this customer + channel first (unique keys).
-     */
-    TrustFirstResult trustFirstDevice(TrustedDevice device, String correlationId);
-
-    /**
      * The enrollment flow's commit (DD 20 §4, one transaction): replaced and capped rows become EXPIRED,
      * the new row is inserted, the primary row points at it (FACE_CONFIRMED, enrollment ID, face flag),
      * the enrollment is COMPLETED and the audit events are written with the enrollment ID.
@@ -57,9 +50,4 @@ public interface TrustedDeviceRepository {
         record InstallationAlreadyLive() implements RegisterPendingResult { }
     }
 
-    sealed interface TrustFirstResult {
-        record Trusted(TrustedDevice device) implements TrustFirstResult { }
-
-        record AlreadyHasDevice() implements TrustFirstResult { }
-    }
 }

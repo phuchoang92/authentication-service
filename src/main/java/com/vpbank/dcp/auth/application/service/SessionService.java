@@ -6,21 +6,15 @@ import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.domain.enums.Channel;
-import com.vpbank.dcp.auth.domain.model.CustomerId;
-import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DevicePolicy;
-import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
-import com.vpbank.dcp.auth.domain.model.Session;
-import com.vpbank.dcp.auth.domain.model.SessionId;
-import com.vpbank.dcp.auth.domain.model.SessionPolicy;
+import com.vpbank.dcp.auth.domain.model.*;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
 
 /**
  * The common session actions (ARCHITECTURE §6.1, slice 8): find a live, restricted or full session by
@@ -33,15 +27,24 @@ import lombok.RequiredArgsConstructor;
 public final class SessionService {
     static final int EXTEND_ATTEMPTS = 3;
 
-    @NonNull private final SessionStore sessionStore;
-    @NonNull private final TokenEnvelopeSealer tokenEnvelopeSealer;
-    @NonNull private final OpaqueTokenGenerator opaqueTokenGenerator;
-    @NonNull private final Supplier<SessionId> sessionIdGenerator;
-    @NonNull private final SessionPolicy sessionPolicy;
-    @NonNull private final DevicePolicy devicePolicy;
-    @NonNull private final Clock clock;
+    @NonNull
+    private final SessionStore sessionStore;
+    @NonNull
+    private final TokenEnvelopeSealer tokenEnvelopeSealer;
+    @NonNull
+    private final OpaqueTokenGenerator opaqueTokenGenerator;
+    @NonNull
+    private final Supplier<SessionId> sessionIdGenerator;
+    @NonNull
+    private final SessionPolicy sessionPolicy;
+    @NonNull
+    private final DevicePolicy devicePolicy;
+    @NonNull
+    private final Clock clock;
 
-    /** A new session with the compact JWE the app decrypts to learn its token. */
+    /**
+     * A new session with the compact JWE the app decrypts to learn its token.
+     */
     public record IssuedSession(Session session, String tokenEnvelope) {
         public IssuedSession {
             Objects.requireNonNull(session, "session");
@@ -54,18 +57,30 @@ public final class SessionService {
         }
     }
 
-    /** What an extend attempt ended with; the use case maps it to its result. */
+    /**
+     * What an extend attempt ended with; the use case maps it to its result.
+     */
     public sealed interface ExtendOutcome {
-        record Extended(Session session) implements ExtendOutcome { }
+        record Extended(Session session) implements ExtendOutcome {
+        }
 
-        /** No full ACTIVE session under that lookup (unknown, expired, ended or restricted). */
-        record Gone() implements ExtendOutcome { }
+        /**
+         * No full ACTIVE session under that lookup (unknown, expired, ended or restricted).
+         */
+        record Gone() implements ExtendOutcome {
+        }
 
-        /** The admission time is outside the accepted skew. */
-        record Rejected() implements ExtendOutcome { }
+        /**
+         * The admission time is outside the accepted skew.
+         */
+        record Rejected() implements ExtendOutcome {
+        }
 
-        /** Every attempt lost its compare-and-set race. */
-        record Conflict() implements ExtendOutcome { }
+        /**
+         * Every attempt lost its compare-and-set race.
+         */
+        record Conflict() implements ExtendOutcome {
+        }
     }
 
     // ---- reads: one store read each ----
@@ -82,7 +97,9 @@ public final class SessionService {
         return sessionIdGenerator.get();
     }
 
-    /** A full ACTIVE session: start, token, envelope sealed to the app's key, stored. */
+    /**
+     * A full ACTIVE session: start, token, envelope sealed to the app's key, stored.
+     */
     public IssuedSession issueActive(SessionId sessionId, CustomerId customerId, DeviceId deviceId, Channel channel,
                                      String tokenEncryptionKey) {
         Session session = Session.start(
@@ -95,26 +112,18 @@ public final class SessionService {
         return store(session, tokenEncryptionKey);
     }
 
-    /** A restricted NEED_TRUSTED_DEVICE session with the device policy's fixed deadline (DD 20 §3). */
-    public IssuedSession issueRestricted(SessionId sessionId, CustomerId customerId, DeviceId deviceId, Channel channel,
-                                         String tokenEncryptionKey) {
-        return issueRestricted(sessionId, customerId, deviceId, channel, tokenEncryptionKey, null);
-    }
-
     /**
-     * A restricted session that keeps the signing key the device proved at login (slice 13), so the trust
-     * flows it runs use that key; {@code deviceKey} is null while the login proof is not enforced.
+     * A restricted NEED_TRUSTED_DEVICE session with the device policy's fixed deadline (DD 20 §3).
      */
     public IssuedSession issueRestricted(SessionId sessionId, CustomerId customerId, DeviceId deviceId, Channel channel,
-                                         String tokenEncryptionKey, DeviceSigningKey deviceKey) {
+                                         String tokenEncryptionKey) {
         Session session = Session.startRestricted(
                 sessionId,
                 customerId,
                 deviceId,
                 channel,
                 clock.instant(),
-                devicePolicy,
-                deviceKey);
+                devicePolicy);
         return store(session, tokenEncryptionKey);
     }
 
@@ -127,7 +136,9 @@ public final class SessionService {
 
     // ---- writes ----
 
-    /** Compare-and-set on the stored version; empty when another writer moved the session first. */
+    /**
+     * Compare-and-set on the stored version; empty when another writer moved the session first.
+     */
     public Optional<Session> saveIfCurrent(StoredSession storedSession, Session changedSession) {
         return sessionStore.saveIfCurrent(storedSession.lookup(), changedSession);
     }
@@ -170,7 +181,9 @@ public final class SessionService {
         return sessionStore.delete(sessionLookup);
     }
 
-    /** Remove the session; nothing to decide from the answer (logout, failed enrollment). */
+    /**
+     * Remove the session; nothing to decide from the answer (logout, failed enrollment).
+     */
     public void end(SessionLookup sessionLookup) {
         sessionStore.delete(sessionLookup);
     }

@@ -136,8 +136,10 @@ class DeviceEnrollmentPersistenceAdapterIT {
     @Test
     void confirmedTrustWritesDeviceReplacementPrimaryEnrollmentAndAuditTogether() {
         // Phone is the direct primary; an old tablet row exists (reinstall case).
-        devices.trustFirstDevice(TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, PHONE,
-                DevicePlatform.ANDROID, null, now, DevicePolicy.standard()), "corr-0");
+        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, PHONE,
+                DevicePlatform.ANDROID, null, now, DevicePolicy.standard());
+        deviceRows.saveAndFlush(com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper.toEntity(phone, protection()));
+        primaries.saveAndFlush(com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper.toPrimary(phone, now));
         TrustedDevice oldTablet = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
                 DevicePlatform.IOS, "{old}", now, DevicePolicy.standard());
         deviceRows.saveAndFlush(com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper
@@ -195,7 +197,8 @@ class DeviceEnrollmentPersistenceAdapterIT {
         // The phone is the direct primary; the watch registered a PENDING row and asked for approval.
         TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, PHONE,
                 DevicePlatform.ANDROID, null, now, DevicePolicy.standard());
-        devices.trustFirstDevice(phone, "corr-0");
+        deviceRows.saveAndFlush(com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper.toEntity(phone, protection()));
+        primaries.saveAndFlush(com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper.toPrimary(phone, now));
         DeviceId watchId = new DeviceId("watch-3");
         TrustedDevice watch = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE, watchId,
                 DevicePlatform.IOS, "{watch-key}", now, Duration.ofMinutes(10));

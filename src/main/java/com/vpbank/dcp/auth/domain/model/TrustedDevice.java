@@ -13,8 +13,8 @@ import lombok.Builder;
 /**
  * One app installation known for a customer on a channel (a TRUSTED_DEVICE row). Trust means
  * ACTIVE + TRUSTED + not expired; being primary is recorded on the customer, not here.
- * {@code publicKey} is the device's public signing JWK (canonical text): proven at login or at the
- * enrollment challenge once slice 13 is enabled; before that, whatever the app sent. {@code version} is the row version the repository must still see when saving.
+ * {@code publicKey} is the device's public signing JWK as the app sent it at enrollment (ML-DSA-65 from
+ * slice 13 on, P-256 before); a trusted device proves it at every login (slice 13). {@code version} is the row version the repository must still see when saving.
  */
 @Builder(toBuilder = true)
 public record TrustedDevice(TrustedDeviceId id, CustomerId customerId, Channel channel, DeviceId deviceId,
@@ -108,11 +108,6 @@ public record TrustedDevice(TrustedDeviceId id, CustomerId customerId, Channel c
                 .expiresAt(trustExpiresAt)
                 .lastLoginAt(now)
                 .build();
-    }
-
-    /** True when the key this row holds is exactly the key the login proved (slice 13); a row without a key never matches. */
-    public boolean hasKey(DeviceSigningKey key) {
-        return publicKey != null && publicKey.equals(key.publicJwk());
     }
 
     public boolean isPending() {

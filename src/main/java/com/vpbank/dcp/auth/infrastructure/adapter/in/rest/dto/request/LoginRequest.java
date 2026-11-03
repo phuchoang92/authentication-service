@@ -9,11 +9,10 @@ import jakarta.validation.constraints.Size;
 import java.util.Map;
 
 /**
- * {@code POST /api/ns/v1/login}. {@code tokenEncryptionKey} is the app's public P-256 JWK (DD 06);
- * {@code deviceId} and {@code platform} are required on MOBILE. {@code devicePublicKey} (the device's
- * ML-DSA-65 signing JWK) and {@code deviceProof} (the compact JWS it signed for this login, slice 13) are
- * required on MOBILE once the login proof is enforced; {@code captcha} is sent once a login answered
- * 428 CAPTCHA_REQUIRED.
+ * {@code POST /api/ns/v1/login}: the body carries the credentials and the app's public P-256 token key
+ * (DD 06); the channel, the installation and the device proof travel as headers
+ * ({@link com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.DeviceHeaders}). {@code captcha} is
+ * sent once a login answered 428 CAPTCHA_REQUIRED.
  */
 public record LoginRequest(
 
@@ -24,21 +23,6 @@ public record LoginRequest(
         @NotBlank(message = "{auth.required}")
         @Size(max = 128, message = "{auth.tooLong}")
         String password,
-
-        @NotBlank(message = "{auth.required}")
-        @Pattern(regexp = "MOBILE|WEB", message = "{auth.format}")
-        String channel,
-
-        @Pattern(regexp = "[A-Za-z0-9._-]{1,64}", message = "{auth.format}")
-        String deviceId,
-
-        @Pattern(regexp = "ANDROID|IOS", message = "{auth.format}")
-        String platform,
-
-        Map<String, Object> devicePublicKey,
-
-        @Size(max = 8192, message = "{auth.tooLong}")
-        String deviceProof,
 
         @NotNull(message = "{auth.required}")
         Map<String, Object> tokenEncryptionKey,
@@ -61,6 +45,6 @@ public record LoginRequest(
 
     @Override
     public String toString() {
-        return "LoginRequest[userName=" + userName + ", channel=" + channel + ", redacted]";
+        return "LoginRequest[userName=" + userName + ", redacted]";
     }
 }

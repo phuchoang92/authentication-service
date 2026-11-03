@@ -3,6 +3,7 @@ package com.vpbank.dcp.auth.application.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
+import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DevicePossession;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DeviceRouting;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
@@ -11,9 +12,7 @@ import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.TrustLevel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DeviceKeyClaim;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
-import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.time.Clock;
@@ -28,111 +27,76 @@ class TrustedDeviceServiceTest {
     private static final CustomerId ALICE = new CustomerId("90359");
     private static final DeviceId PHONE = new DeviceId("dev-1");
     private static final DeviceId TABLET = new DeviceId("dev-2");
-    private static final DeviceKeyClaim NO_KEY = new DeviceKeyClaim.None();
-    private static final DeviceSigningKey PHONE_KEY = new DeviceSigningKey(
-            "{\"alg\":\"ML-DSA-65\",\"kty\":\"AKP\",\"pub\":\"phone\"}", "a".repeat(43));
-    private static final DeviceSigningKey NEW_PHONE_KEY = new DeviceSigningKey(
-            "{\"alg\":\"ML-DSA-65\",\"kty\":\"AKP\",\"pub\":\"phone2\"}", "b".repeat(43));
+    /** The login holds the key of whatever row it is asked about / holds none. */
+    private static final DevicePossession ANY_KEY = device -> true;
+    private static final DevicePossession NO_KEY = device -> false;
 
     private final InMemoryTrustedDeviceRepository devices = new InMemoryTrustedDeviceRepository();
     private final TrustedDeviceService service = new TrustedDeviceService(devices, DevicePolicy.standard(),
             TrustedDeviceId::random, Clock.fixed(NOW, ZoneOffset.UTC));
 
+    /** A login never trusts: a new device, and a customer with no device at all, wait for the trust flow. */
     @Test
-    void theFirstDeviceIsTrustedAndMadePrimaryDirectlyWithAnAuditTrail() {
-        DeviceRouting routing = service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID,
-                new DeviceKeyClaim.Unproven("{\"kty\":\"EC\"}"), "corr-1");
+    void aNewDeviceNeedsTrustAndIsNeverRegisteredByALogin() {
+        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, ANY_KEY, "corr-1"))
+                .isInstanceOf(DeviceRouting.NeedTrust.class);
+        assertThat(devices.rows).isEmpty();
+        assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).isEmpty();
 
-        assertThat(routing).isInstanceOf(DeviceRouting.FullSession.class);
-        TrustedDevice device = devices.only();
-        assertThat(device.deviceId()).isEqualTo(PHONE);
-        assertThat(device.status()).isEqualTo(DeviceStatus.ACTIVE);
-        assertThat(device.trustLevel()).isEqualTo(TrustLevel.TRUSTED);
-        assertThat(device.publicKey()).isEqualTo("{\"kty\":\"EC\"}");
-        assertThat(device.expiresAt()).isEqualTo(NOW.plus(Duration.ofDays(180)));
-        assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).contains(device.id());
-        assertThat(devices.audit).containsExactly("corr-1:0:DEVICE_TRUSTED", "corr-1:1:PRIMARY_ASSIGNED");
-    }
-
-    @Test
-    void aSecondDeviceNeedsTrustAndIsNotRegisteredByTheDirectPath() {
-        service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, NO_KEY, "corr-1");
-
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, TABLET, DevicePlatform.IOS, NO_KEY, "corr-2"))
+        seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
+        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, TABLET, ANY_KEY, "corr-2"))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(devices.rows).hasSize(1);
-        assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).contains(devices.only().id());
     }
 
     @Test
-    void thePrimaryDeviceGetsAFullSessionAndItsLastLoginIsRecorded() {
-        service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, NO_KEY, "corr-1");
+    void thePrimaryDeviceThatProvesItsKeyGetsAFullSessionAndItsLastLoginIsRecorded() {
+        TrustedDevice phone = seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
         TrustedDeviceService later = new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random,
                 Clock.fixed(NOW.plusSeconds(600), ZoneOffset.UTC));
 
-        assertThat(later.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, NO_KEY, "corr-2"))
+        assertThat(later.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, device -> device.id().equals(phone.id()), "corr-2"))
                 .isInstanceOf(DeviceRouting.FullSession.class);
         assertThat(devices.only().lastLoginAt()).isEqualTo(NOW.plusSeconds(600));
         assertThat(devices.only().version()).isEqualTo(1);
-        assertThat(devices.audit).hasSize(2);
+    }
+
+    /** Slice 13: the primary device that cannot prove its key (reinstall, copied ID) is routed to the trust flow. */
+    @Test
+    void thePrimaryDeviceThatCannotProveItsKeyNeedsTrustAndNothingIsRecorded() {
+        seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
+
+        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, NO_KEY, "corr-2"))
+                .isInstanceOf(DeviceRouting.NeedTrust.class);
+        assertThat(devices.only().lastLoginAt()).isEqualTo(NOW);
+        assertThat(devices.only().version()).isZero();
     }
 
     @Test
-    void aTrustedButNotPrimaryOrExpiredDeviceNeedsTrust() {
-        service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, NO_KEY, "corr-1");
-        TrustedDevice phone = devices.only();
+    void aTrustedButNotPrimaryOrExpiredDeviceNeedsTrustBeforeTheKeyIsEvenAsked() {
+        TrustedDevice phone = seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
         TrustedDevice tablet = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
                 DevicePlatform.IOS, null, NOW, DevicePolicy.standard());
         devices.rows.put(tablet.id(), tablet); // trusted by a later flow, but the phone stays primary
+        List<TrustedDevice> asked = new java.util.ArrayList<>();
+        DevicePossession recording = device -> asked.add(device);
 
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, TABLET, DevicePlatform.IOS, NO_KEY, "corr-2"))
+        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, TABLET, recording, "corr-2"))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
 
         TrustedDeviceService muchLater = new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random,
                 Clock.fixed(NOW.plus(Duration.ofDays(181)), ZoneOffset.UTC));
-        assertThat(muchLater.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, NO_KEY, "corr-3"))
+        assertThat(muchLater.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, recording, "corr-3"))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
+        assertThat(asked).isEmpty();
         assertThat(devices.rows.get(phone.id()).status()).isEqualTo(DeviceStatus.ACTIVE); // expiry is judged, not written here
     }
 
-    /** Slice 13: a proven key is what the trusted row holds; another proven key means the installation must trust again. */
     @Test
-    void aProvenKeyIsStoredForTheFirstDeviceAndTheProvenKeyMustMatchTheRowAfterwards() {
-        DeviceRouting first = service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID,
-                new DeviceKeyClaim.Proven(PHONE_KEY), "corr-1");
-        assertThat(first).isInstanceOf(DeviceRouting.FullSession.class);
-        assertThat(devices.only().publicKey()).isEqualTo(PHONE_KEY.publicJwk());
-        assertThat(devices.only().hasKey(PHONE_KEY)).isTrue();
-
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID,
-                new DeviceKeyClaim.Proven(PHONE_KEY), "corr-2")).isInstanceOf(DeviceRouting.FullSession.class);
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID,
-                new DeviceKeyClaim.Proven(NEW_PHONE_KEY), "corr-3")).isInstanceOf(DeviceRouting.NeedTrust.class);
-        assertThat(devices.rows).hasSize(1); // the reinstalled app is not re-trusted by the direct path
-        assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).contains(devices.only().id());
-    }
-
-    /** A row trusted before the proof existed holds no key, so a proven key never matches it: trust again. */
-    @Test
-    void aRowWithoutAKeyNeverMatchesAProvenKeyButStillServesAnUnprovenLogin() {
-        service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, NO_KEY, "corr-1");
-        assertThat(devices.only().publicKey()).isNull();
-
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID,
-                new DeviceKeyClaim.Proven(PHONE_KEY), "corr-2")).isInstanceOf(DeviceRouting.NeedTrust.class);
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID,
-                new DeviceKeyClaim.Unproven(PHONE_KEY.publicJwk()), "corr-3")).isInstanceOf(DeviceRouting.FullSession.class);
-    }
-
-    @Test
-    void webHasNoDeviceTrustAndARaceOnTheFirstDeviceFallsBackToNeedTrust() {
-        assertThat(service.routeAfterPassword(ALICE, Channel.WEB, null, null, NO_KEY, "corr-1"))
+    void webHasNoDeviceTrust() {
+        assertThat(service.routeAfterPassword(ALICE, Channel.WEB, null, NO_KEY, "corr-1"))
                 .isInstanceOf(DeviceRouting.FullSession.class);
         assertThat(devices.rows).isEmpty();
-
-        devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), TrustedDeviceId.random());
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, NO_KEY, "corr-2"))
-                .isInstanceOf(DeviceRouting.NeedTrust.class);
     }
 
     @Test
@@ -188,11 +152,20 @@ class TrustedDeviceServiceTest {
 
     @Test
     void theDeviceListMarksThePrimary() {
-        service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID, NO_KEY, "corr-1");
+        seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
         List<DeviceSummary> list = service.listDevices(ALICE, Channel.MOBILE);
         assertThat(list).hasSize(1);
         assertThat(list.getFirst().primary()).isTrue();
         assertThat(list.getFirst().deviceId()).isEqualTo(PHONE);
         assertThat(service.listDevices(new CustomerId("77777"), Channel.MOBILE)).isEmpty();
+    }
+
+    /** A row trusted by an earlier enrollment, and the customer's primary on the channel. */
+    private TrustedDevice seedTrustedPrimary(DeviceId deviceId, DevicePlatform platform) {
+        TrustedDevice device = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, deviceId, platform,
+                "{\"alg\":\"ML-DSA-65\",\"kty\":\"AKP\",\"pub\":\"" + deviceId.value() + "\"}", NOW, DevicePolicy.standard());
+        devices.rows.put(device.id(), device);
+        devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), device.id());
+        return device;
     }
 }

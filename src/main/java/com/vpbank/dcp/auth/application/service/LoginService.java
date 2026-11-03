@@ -17,13 +17,12 @@ import com.vpbank.dcp.auth.application.port.out.repository.LoginProofReplayStore
 import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
+import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DevicePossession;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DeviceRouting;
-import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.SecurityEventReason;
 import com.vpbank.dcp.auth.domain.enums.SecurityEventType;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
-import com.vpbank.dcp.auth.domain.model.DeviceKeyClaim;
-import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
+import com.vpbank.dcp.auth.domain.model.DeviceProof;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.PasswordLockout;
 import com.vpbank.dcp.auth.domain.model.Session;
@@ -47,10 +46,10 @@ import lombok.RequiredArgsConstructor;
  * as the provider has answered. After the password, {@link TrustedDeviceService} decides whether this
  * device gets a full ACTIVE session or a restricted NEED_TRUSTED_DEVICE one (DD 20 §2).
  *
- * <p>Slice 13: when the device proof is enforced, a MOBILE login first proves its signing key — the app
- * signs a proof bound to this login with the key it sends — and the proof ID is used once. That check
- * comes before any lookup, so a bad proof costs no lockout attempt and no Keycloak call. The proven key
- * is what the routing compares with the trusted row, and what a restricted session remembers.
+ * <p>Slice 13: a login never trusts a device. With the device proof enforced, a trusted primary device
+ * gets a full session only when the proof it sent verifies under the key its row holds, is bound to this
+ * login and carries a nonce used for the first time; otherwise it gets the restricted session like any
+ * other device and must run the trust flow. A failed proof is never an error: the password was right.
  *
  * <p>Every attempt ends with one {@link SecurityAuditEvent} handed to the {@link SecurityAuditStore}
  * after the decision is made and the password is wiped (slice 9). The store never blocks or throws,
@@ -68,7 +67,7 @@ public final class LoginService implements LoginUseCase {
     @NonNull private final LoginProofReplayStore loginProofReplayStore;
     @NonNull private final SecurityAuditStore securityAuditStore;
     @NonNull private final LockoutPolicy lockoutPolicy;
-    /** Off until the apps sign the login proof; then every MOBILE login must carry one. */
+    /** Off until the apps sign the login proof; then a trusted device must prove its key for a full session. */
     private final boolean deviceProofRequired;
     @NonNull private final Clock clock;
 
@@ -98,12 +97,6 @@ public final class LoginService implements LoginUseCase {
     }
 
     private Decision decide(LoginCommand command) {
-        // The device proof is checked first: it is cheap, and a bad one costs no lookup and no lockout attempt.
-        Optional<DeviceKeyClaim> deviceKeyClaim = claimDeviceKey(command);
-        if (deviceKeyClaim.isEmpty()) {
-            return new Decision(new LoginResult.DeviceProofRejected(), SecurityEventReason.DEVICE_PROOF_REJECTED, null, null);
-        }
-
         Optional<CustomerAuthentication> foundIdentity =
                 customerAuthenticationRepository.findByUserName(command.userName());
 
@@ -148,8 +141,7 @@ public final class LoginService implements LoginUseCase {
                 identity.customerId(),
                 command.channel(),
                 command.deviceId(),
-                command.platform(),
-                deviceKeyClaim.get(),
+                devicePossession(command),
                 correlationId);
 
         IssuedSession issuedSession = switch (deviceRouting) {
@@ -164,8 +156,7 @@ public final class LoginService implements LoginUseCase {
                     identity.customerId(),
                     command.deviceId(),
                     command.channel(),
-                    command.tokenEncryptionKey(),
-                    provenKeyOf(deviceKeyClaim.get()));
+                    command.tokenEncryptionKey());
         };
         Session session = issuedSession.session();
 
@@ -182,47 +173,34 @@ public final class LoginService implements LoginUseCase {
     }
 
     /**
-     * What this login says about the device key (slice 13). With the proof enforced, a MOBILE login must
-     * send the key and a proof that verifies under it, is bound to this login and is used for the first
-     * time; anything else is empty, which refuses the login. Without enforcement, a key the app sends is
-     * taken as is (stored for a first device, never compared), as before slice 13.
+     * How the routing learns whether this login holds the trusted row's key (slice 13). Not enforced: every
+     * trusted primary device is taken at its word, as before this slice. Enforced: the proof must exist, verify
+     * under the row's key for exactly this login's fields, and carry a nonce not seen before. The replay store
+     * answering "not first" means a replay; the store not answering ends the login as unavailable.
      */
-    private Optional<DeviceKeyClaim> claimDeviceKey(LoginCommand command) {
-        if (command.channel() != Channel.MOBILE) {
-            return Optional.of(new DeviceKeyClaim.None());
-        }
+    private DevicePossession devicePossession(LoginCommand command) {
         if (!deviceProofRequired) {
-            DeviceKeyClaim unproven = command.devicePublicKey() == null
-                    ? new DeviceKeyClaim.None()
-                    : new DeviceKeyClaim.Unproven(command.devicePublicKey());
-            return Optional.of(unproven);
+            return device -> true;
         }
-        if (command.devicePublicKey() == null || command.deviceProof() == null) {
-            return Optional.empty();
-        }
+        return device -> {
+            DeviceProof proof = command.deviceProof();
+            if (proof == null || device.publicKey() == null) {
+                return false;
+            }
 
-        DeviceProofBindings bindings = new DeviceProofBindings(
-                command.userName(),
-                command.channel(),
-                command.deviceId(),
-                command.platform(),
-                command.tokenEncryptionKey());
-        DeviceProofVerifier.Outcome outcome =
-                deviceProofVerifier.verify(command.devicePublicKey(), command.deviceProof(), bindings);
-        if (!(outcome instanceof DeviceProofVerifier.Outcome.Proven(var key, var proofId, var rememberUntil))) {
-            return Optional.empty();
-        }
+            DeviceProofBindings bindings = new DeviceProofBindings(
+                    command.userName(),
+                    command.channel(),
+                    command.deviceId(),
+                    command.platform(),
+                    command.tokenEncryptionKey());
+            DeviceProofVerifier.Outcome outcome = deviceProofVerifier.verify(device.publicKey(), proof, bindings);
+            if (!(outcome instanceof DeviceProofVerifier.Outcome.Proven(var rememberUntil))) {
+                return false;
+            }
 
-        // Each proof is accepted once; the store answering "not first" means a replay.
-        boolean firstUse = loginProofReplayStore.firstUse(proofId, rememberUntil);
-        if (!firstUse) {
-            return Optional.empty();
-        }
-        return Optional.of(new DeviceKeyClaim.Proven(key));
-    }
-
-    private static DeviceSigningKey provenKeyOf(DeviceKeyClaim keyClaim) {
-        return keyClaim instanceof DeviceKeyClaim.Proven(DeviceSigningKey key) ? key : null;
+            return loginProofReplayStore.firstUse(proof.nonce(), rememberUntil);
+        };
     }
 
     /** A challenge is consumed on first use whether right or wrong, so a guess costs a new CAPTCHA. */

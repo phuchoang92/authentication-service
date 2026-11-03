@@ -2,7 +2,6 @@ package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.RegisterPendingResult;
-import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.TrustFirstResult;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
 import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
@@ -13,9 +12,7 @@ import com.vpbank.dcp.auth.domain.exception.DeviceStateException;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DeviceKeyClaim;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
-import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
@@ -32,8 +29,9 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Owns the device rules (ARCHITECTURE §6.1): which installation is trusted, which is primary, and
- * the direct trust of a customer's first device. {@link LoginService} calls it after the password
- * is verified and decides the session from the answer; it never touches device rows itself.
+ * whether a login proved the trusted key. {@link LoginService} calls it after the password is
+ * verified and decides the session from the answer; it never touches device rows itself. Trust is
+ * only ever granted by the enrollment and approval flows, never by a login (slice 13).
  */
 @RequiredArgsConstructor
 public final class TrustedDeviceService {
@@ -52,48 +50,50 @@ public final class TrustedDeviceService {
         record FullSession() implements DeviceRouting {
         }
 
-        /** New, not primary, expired or only registered: a restricted NEED_TRUSTED_DEVICE session. */
+        /** New, not primary, expired, only registered or key not proven: a restricted NEED_TRUSTED_DEVICE session. */
         record NeedTrust() implements DeviceRouting {
         }
     }
 
     /**
-     * DD 20 §2: trusted? → primary? WEB has no device trust. The first device of a customer on a
-     * channel is trusted and made primary directly (phase 3); every later device waits for the
-     * trust flow (phase 4). A primary device that proved a key other than the one its row holds (a
-     * reinstalled app, slice 13) waits for the trust flow too: the row's key is what trust means.
+     * Whether the login proved it holds the trusted row's key (slice 13). Login supplies it; it may read the
+     * replay store and throw {@code RepositoryUnavailableException}, which the login turns into "unavailable".
+     */
+    @FunctionalInterface
+    public interface DevicePossession {
+        boolean provenFor(TrustedDevice device);
+    }
+
+    /**
+     * DD 20 §2: trusted? → primary? → holds the key? WEB has no device trust. A login never trusts a
+     * device: a new one, a trusted one that is not primary, an expired one, and a primary device that
+     * cannot prove its key (a reinstalled app, or a copied device ID) all wait for the trust flow.
      */
     public DeviceRouting routeAfterPassword(CustomerId customerId, Channel channel, DeviceId deviceId,
-                                            DevicePlatform platform, DeviceKeyClaim keyClaim, String correlationId) {
+                                            DevicePossession possession, String correlationId) {
         if (channel != Channel.MOBILE) {
             return new DeviceRouting.FullSession();
         }
         Instant now = clock.instant();
 
-        List<TrustedDevice> liveTrustedDevices = trustedDeviceRepository.findLive(customerId, channel);
-        if (liveTrustedDevices.isEmpty()) {
-            String publicKeyToStore = keyClaim.publicJwkToStore();
-            return trustFirstDevice(customerId, channel, deviceId, platform, publicKeyToStore, now, correlationId);
-        }
-
-        Optional<TrustedDevice> thisDevice = findByDeviceId(liveTrustedDevices, deviceId);
-        Optional<TrustedDeviceId> primaryDeviceId = trustedDeviceRepository.findPrimary(customerId, channel);
-        if (thisDevice.isEmpty()) {
+        Optional<TrustedDevice> liveDevice = trustedDeviceRepository.findLive(customerId, channel, deviceId);
+        if (liveDevice.isEmpty()) {
             return new DeviceRouting.NeedTrust();
         }
-        TrustedDevice device = thisDevice.get();
+        TrustedDevice device = liveDevice.get();
 
         if (!device.isTrusted(now)) {
             return new DeviceRouting.NeedTrust();
         }
 
+        Optional<TrustedDeviceId> primaryDeviceId = trustedDeviceRepository.findPrimary(customerId, channel);
         boolean isPrimary = primaryDeviceId.isPresent() && primaryDeviceId.get().equals(device.id());
         if (!isPrimary) {
             return new DeviceRouting.NeedTrust();
         }
 
-        // A proven key that is not the row's key: the installation changed its key, so it must be trusted again.
-        if (keyClaim instanceof DeviceKeyClaim.Proven(DeviceSigningKey provenKey) && !device.hasKey(provenKey)) {
+        // The row's key is what trust means: a login that cannot prove it is not this installation.
+        if (!possession.provenFor(device)) {
             return new DeviceRouting.NeedTrust();
         }
 
@@ -104,30 +104,9 @@ public final class TrustedDeviceService {
         return new DeviceRouting.FullSession();
     }
 
-    private DeviceRouting trustFirstDevice(CustomerId customerId, Channel channel, DeviceId deviceId,
-                                           DevicePlatform platform, String devicePublicKey, Instant now,
-                                           String correlationId) {
-        TrustedDevice firstDevice = TrustedDevice.trustedNow(
-                trustedDeviceIdGenerator.get(),
-                customerId,
-                channel,
-                deviceId,
-                platform,
-                devicePublicKey,
-                now,
-                devicePolicy);
-
-        TrustFirstResult trustFirstResult = trustedDeviceRepository.trustFirstDevice(firstDevice, correlationId);
-        return switch (trustFirstResult) {
-            case TrustFirstResult.Trusted(TrustedDevice trustedDevice) -> new DeviceRouting.FullSession();
-            case TrustFirstResult.AlreadyHasDevice() -> new DeviceRouting.NeedTrust();
-        };
-    }
-
     /**
      * Keeps the live rows within {@code maxLiveDevices} before a new device is trusted: the oldest
-     * by last login are expired (DD 20 §7). Used by the trust flow of phase 4; with the direct path
-     * only the first device is ever trusted, so it cannot trigger yet.
+     * by last login are expired (DD 20 §7). Used by the trust flows.
      */
     public List<TrustedDevice> expireBeyondCap(List<TrustedDevice> liveTrustedDevices, String correlationId) {
         List<TrustedDevice> oldestBeyondCap = oldestBeyondCap(liveTrustedDevices);

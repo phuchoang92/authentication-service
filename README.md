@@ -25,7 +25,9 @@ device through a QR token ([plan](docs/plans/slice-6-device-approval.md)) and th
 trusted-device routes are admitted by a signed BFF assertion instead of the app's session token
 ([plan](docs/plans/slice-11-bff-admitted-trust-flows.md)). Slice 12 (2026-11-03): a scoped service token for flows
 without a customer session (onboarding), issued to an internal service that presents a client assertion
-([plan](docs/plans/slice-12-service-token.md)).
+([plan](docs/plans/slice-12-service-token.md)). Slice 13 turn 1 (2026-11-03): a trusted device proves its ML-DSA-65 key at login
+(`X-Device-Proof`, raw signature), a login never trusts a device; off by default (`auth.login.device-proof-required`)
+([plan](docs/plans/slice-13-device-proof.md)).
 
 | Path | Caller | Result |
 |---|---|---|
@@ -83,10 +85,12 @@ trust flows, a missing one `401 SESSION_REQUIRED`), and does its work. `SessionS
 actions (find by kind, issue, extend, consume, end) that login, the trust flows and the session use cases compose,
 the same way `TrustedDeviceService` holds the device actions. Removing a session is one atomic `DEL`.
 
-**Trusted device (phase 3):** a MOBILE login carries `deviceId` + `platform` (+ optional P-256
-`devicePublicKey`). The first device of a customer on a channel is trusted and made primary directly
-on its first successful login (180 days, max 5 live devices). Any other device — new, trusted but not
-primary, or expired — gets `status: NEED_TRUSTED_DEVICE`: a restricted Valkey session (10 min, no
+**Trusted device (phase 3, revised by slice 13):** a MOBILE login carries the channel, the installation and
+its OS as headers (`X-Channel`, `X-Device-Id`, `X-Device-OS`) and, for a trusted device, `X-Device-Proof`: a raw
+ML-DSA-65 signature over this login's fields under the key the device registered at enrollment. A login never
+trusts a device. The trusted primary device that proves its key gets a full session (180 days of trust, max 5
+live devices); any other device — new (the customer's first one included), trusted but not primary, expired, or a
+primary that cannot prove its key — gets `status: NEED_TRUSTED_DEVICE`: a restricted Valkey session (10 min, no
 absolute, never extended) that may only log out or run the trust flow below. WEB logins have
 no device trust. The device ID is stored only as an HMAC lookup and an AES-GCM ciphertext, each with
 its key ID (`auth.device.*`).

@@ -13,15 +13,13 @@ import java.util.Objects;
  * One login session. An ACTIVE session's idle expiry slides with eligible activity up to the
  * fixed absolute expiry (DD 06 / flow 16). A NEED_TRUSTED_DEVICE session is restricted: one fixed
  * TTL, never extended (DD 20 §3); the trust flow it runs keeps its own record (slice 11:
- * {@link EnrollmentTransaction}). A restricted session on a mobile device carries the signing key the device
- * proved at login ({@code deviceKey}, slice 13) so the trust flows can use that key and no other. {@code
- * sessionVersion} is the compare-and-set revision the store must still see when it saves a change; each saved
- * change increments it in the store.
+ * {@link EnrollmentTransaction}). {@code sessionVersion} is the compare-and-set revision the store must
+ * still see when it saves a change; each saved change increments it in the store.
  */
 @Builder(toBuilder = true)
 public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
                       SessionStatus status, Instant createdAt, Instant idleExpiresAt,
-                      Instant absoluteExpiresAt, long sessionVersion, DeviceSigningKey deviceKey) {
+                      Instant absoluteExpiresAt, long sessionVersion) {
     public Session {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(customerId, "customerId");
@@ -58,12 +56,6 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
      */
     public static Session startRestricted(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
                                           Instant now, DevicePolicy policy) {
-        return startRestricted(id, customerId, deviceId, channel, now, policy, null);
-    }
-
-    /** A restricted session that remembers the signing key the device proved at login (null when none was). */
-    public static Session startRestricted(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
-                                          Instant now, DevicePolicy policy, DeviceSigningKey deviceKey) {
         // A restricted session has one fixed deadline: idle and absolute expiry are the same instant.
         Instant restrictedExpiresAt = now.plus(policy.restrictedSessionTtl());
         return Session.builder()
@@ -76,7 +68,6 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
                 .idleExpiresAt(restrictedExpiresAt)
                 .absoluteExpiresAt(restrictedExpiresAt)
                 .sessionVersion(0)
-                .deviceKey(deviceKey)
                 .build();
     }
 

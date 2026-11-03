@@ -24,60 +24,64 @@ environment changes behaviour until it is switched on.
 | 1 | **One key, two uses** (P-256 signs ES256 at login and receives the ECDH-ES challenge at enrollment, as the current contracts imply) **or one signing key** (Kdev ES256; the enrollment challenge is answered by a JWS, not by decrypting a JWE) | **One signing key.** A key used for both signing and key agreement is a hygiene exception we would carry for years; a signing-only Kdev also survives the later move of encryption to X-Wing untouched. |
 | 2 | Enrollment `init`/`verify` shape under decision 1 | Keep the three steps and Ksrv (Ksrv is **[ĐÃ CHỐT]** for Smart OTP; still dropped at confirm until phase 5). `init` returns `serverPublicJwk` and a plain `challenge` (32 random bytes, base64url); `verify` takes `challengeProof`: compact JWS by Kdev, `typ=trusted-device-challenge-proof+jwt`, claims `{enrollmentId, challenge, serverKeyJkt, iat, exp}`. Removes `NimbusChallengeSealer.sealChallenge/openResponse`. **Changes DD 20 §4/§6a and the App doc §3** — needs the owner's sign-off. |
 | 3 | Where the login proof is verified relative to the password | Signature, time window and `jti` **before** Keycloak (cheap, no lockout count: `400 REQUEST_REJECTED`); key-vs-stored-key **after** the password, inside routing. An invalid proof never degrades to "new device" (DD reference README). |
-| 4 | Key type | **ML-DSA-65** (FIPS 204), decided 2026-11-03: signed and verified with the JDK 25 `Signature` API (no library); CryptoKit `MLDSA65` (iOS 26) and Bouncy Castle 1.86 `MLDSASigner` on the apps. Checked on JDK 25.0.2 before coding: keygen/sign/verify work, public key 1952 bytes (SPKI 1974), signature 3309 bytes, verify ≈0.4 ms; the FIPS 204 context string is not exposed, so both sides sign with an empty context. Nimbus has no ML-DSA, so the JWS is parsed by Auth itself. Not yet cross-checked with CryptoKit or BC (turn 2). |
+| 4 | Key type | **ML-DSA-65** (FIPS 204), decided 2026-11-03: signed and verified with the JDK 25 `Signature` API (no library); CryptoKit `MLDSA65` (iOS 26) and Bouncy Castle 1.86 `MLDSASigner` on the apps. Checked on JDK 25.0.2 before coding: keygen/sign/verify work, public key 1952 bytes (SPKI 1974), signature 3309 bytes, verify ≈0.4 ms; the FIPS 204 context string is not exposed, so both sides sign with an empty context. Raw signature, no JOSE (decided the same day: Nimbus and CryptoKit have no ML-DSA JWS, and `alg` on the wire is a liability). Not yet cross-checked with CryptoKit or BC (turn 2). |
 
-## Contract (proposed, mirrors the DD reference README one-shot Kdev proof)
+## Contract (decided 2026-11-03 after turn 1; supersedes the first draft)
 
-Login, MOBILE channel, both fields required (WEB sends neither):
+Three further decisions by the owner, taken the same day: **a login never trusts a device** (the first device
+goes through enrollment like any other; `trustFirstDevice` and the slice-4 direct path are gone), **the device
+key never travels at login** (it is sent once, at `init` of the enrollment API, and verified from the stored
+row), and **the proof is a raw signature, not a JWS** (no `alg`/`kid`/`typ` on the wire; the stored key's suite
+decides). The channel, installation and proof travel as **headers**, the body keeps the credentials and the
+token key:
 
-```json
-{ "userName": "...", "password": "...", "channel": "MOBILE", "deviceId": "...", "platform": "ANDROID",
-  "devicePublicKey": { "kty": "EC", "crv": "P-256", "x": "...", "y": "..." },
-  "deviceProof": "<compact JWS>",
-  "tokenEncryptionKey": { ... } }
+```http
+POST /api/ns/v1/login
+X-Channel: MOBILE
+X-Device-Id: <installation id>
+X-Device-OS: ANDROID | IOS
+X-Device-Proof: <issuedAt epoch seconds>.<nonce 16–64 base64url>.<signature base64url>
+Content-Type: application/json
+
+{ "userName": "...", "password": "...", "tokenEncryptionKey": { ... }, "captcha": { ... }? }
 ```
 
-`devicePublicKey`: `{"alg":"ML-DSA-65","kty":"AKP","pub":"<1952 bytes base64url>"}` (JOSE form of
-draft-ietf-cose-dilithium); Auth keeps its canonical text (exactly those three members, in that order) and its
-thumbprint = base64url(SHA-256(canonical text)), ≈2.7 KB, hence migration V6 (`PRIMARY_PUBLIC_KEY` → 4096).
+Signed bytes (both sides): each field as 4-byte big-endian length + UTF-8, in order
+`DCP-LOGIN-DEVICE-PROOF-V1`, userName, channel, deviceId, platform, RFC 7638 thumbprint of `tokenEncryptionKey`,
+`issuedAt` (decimal), nonce. Algorithm ML-DSA-65 (FIPS 204), empty context; the stored key is the JWK
+`{"alg":"ML-DSA-65","kty":"AKP","pub":<1952 bytes base64url>}` the app sent at enrollment `init`. `issuedAt` at most
+120 s old, 5 s skew; nonce used once (`login-proof:used:v1:<SHA-256(nonce)>` until `issuedAt + 125 s`). Header
+budget: `server.max-http-request-header-size: 16KB` (the signature alone is 4.4 KB base64url; BFF/gateway limits
+must allow it too). A malformed header is `400 REQUEST_REJECTED`; a proof that does not verify is **not** an error.
 
-`deviceProof`: compact JWS ≈7.3 KB; header exactly `{alg:"ML-DSA-65", typ:"bank-login-device-proof+jwt", kid:<thumbprint>}`;
-claims exactly `{v:1, purpose:"LOGIN_DEVICE_PROOF", userName, channel, deviceId, platform, tokenKeyJkt, iat, exp, jti}`
-(`tokenKeyJkt` = RFC 7638 thumbprint of `tokenEncryptionKey`); signature over the ASCII signing input with an empty
-FIPS 204 context; `exp − iat ≤ 120 s`, 5 s skew; `jti` ≤ 128 chars, used once: Valkey `login-proof:used:v1:<SHA-256(jti)>`
-until `exp + skew` (`ValkeyAssertionReplayStore` with `LoginProofKeys`). The signature is checked against the **sent**
-key; the sent key is then compared with the stored one.
-
-| Device state after the password | Sent key vs stored key | Routing |
+| Device state after the password | Proof (when enforced) | Routing |
 |---|---|---|
-| No live device for the customer on the channel | — | trust first device **with this proven key** (as today, but the key is now required and proven) |
-| Known live device, trusted, primary | equal | FULL session |
-| Known live device, trusted, primary | different | NEED_TRUSTED_DEVICE (reinstall: DD 20 "key khác → trust lại"); the restricted session records the new key's thumbprint |
-| Known device, not primary / expired / PENDING | any | NEED_TRUSTED_DEVICE (as today) |
-| Unknown device | — | NEED_TRUSTED_DEVICE (as today) |
+| WEB | — | FULL session |
+| No live row, PENDING, trusted but not primary, expired | not asked | NEED_TRUSTED_DEVICE (as before) |
+| Trusted primary | verifies under the row's key, bound to this login, nonce first use | FULL session, last login recorded |
+| Trusted primary | missing, wrong, replayed, or the row has no key | NEED_TRUSTED_DEVICE (reinstall / copied device ID: trust again with FACE) |
 
-The restricted session carries `deviceKeyJkt` of the key proven at login. `init` (primary enrollment) and
-`request` (approval) no longer take a key: they use the key the session proved, and the trust commit stores it.
-A known device "keeping its old key" therefore means: it logged in with that key.
+With `device-proof-required=false` a trusted primary is taken at its word (the pre-slice behaviour).
 
 ## Turns
 
-1. **Done 2026-11-03.** Domain: `DeviceSigningKey` (canonical JWK + thumbprint), `DeviceKeyClaim`
-   (Proven / Unproven / None — what a login says about the key), `Session.deviceKey` on restricted sessions,
-   `TrustedDevice.hasKey`. Application: ports `DeviceProofVerifier` (pure) and `LoginProofReplayStore`,
-   `DeviceProofBindings`; `LoginCommand.deviceProof`; `LoginResult.DeviceProofRejected`;
-   `SecurityEventReason.DEVICE_PROOF_REJECTED` (LOGIN_REFUSED); `LoginService` checks the proof before any lookup
-   and only when `deviceProofRequired`; `TrustedDeviceService.routeAfterPassword(…, DeviceKeyClaim, …)` with the
-   routing table above (a row without a key never matches a proven key); `SessionService.issueRestricted(…, key)`.
-   Adapters, so the build stays green with the proof wired: `MlDsaDeviceProofVerifier` (JDK `Signature`, strict
-   JWS/JWK parsing), `LoginProofKeys` + the existing `ValkeyAssertionReplayStore`, `LoginRequest.deviceProof`
-   (≤ 8192), `400 DEVICE_PROOF_REJECTED`, `LoginProperties.deviceProofRequired` (default false), `SessionHashCodec`
-   fields `deviceKeyJwk`/`deviceKeyJkt` (both or neither), V6. Tests: `LoginServiceTest` (+5: proven first device,
-   missing/forged/other-key/replayed proof refused before Keycloak with no lockout count and an audit row, primary with
-   another key → restricted session carrying the new key, replay store down → unavailable, enforcement off keeps the
-   old behaviour), `TrustedDeviceServiceTest` (+2), `SessionHashCodecTest` (+1), `MlDsaDeviceProofVerifierTest`
-   (5: real ML-DSA-65 keys signed with the JDK; canonical key; other key / other login / tampered; exact header and
-   claim set; lifetime; key shape). `TrustedDevice.publicKey` stays nullable: rows written before this slice.
+1. **Done 2026-11-03 (revised the same day to the contract above).** Domain: `DeviceProof` (issuedAt, nonce,
+   signature). Application: ports `DeviceProofVerifier` (`verify(storedPublicJwk, proof, bindings)`, pure) and
+   `LoginProofReplayStore`; `DeviceProofBindings`; `LoginCommand.deviceProof`; `TrustedDeviceService.routeAfterPassword(…,
+   DevicePossession, …)` with the routing table above and **no first-device trust** (`TrustedDeviceRepository.trustFirstDevice`
+   and `TrustFirstResult` removed from the port, the JPA adapter and the in-memory double); `LoginService` builds the
+   possession check (enforced: verifier under the row's key + nonce first use; replay store down → unavailable).
+   Adapters: `MlDsaDeviceProofVerifier` (JDK `Signature`, length-prefixed signing input, strict stored-JWK parsing),
+   `LoginProofKeys` + `ValkeyAssertionReplayStore`, `DeviceHeaders` + `LoginRestMapper.toCommand(HttpHeaders, body)`
+   (channel/device/OS/proof from headers, shape-checked → `400`), `LoginRequest` without device fields,
+   `LoginProperties.deviceProofRequired` (default false), `server.max-http-request-header-size=16KB`, V7
+   (`PRIMARY_PUBLIC_KEY` → 4096). Tests: `LoginServiceTest` (5 proof tests: full with a proof used once / replay →
+   restricted; missing or forged proof → restricted with no lockout count; row without key; replay store down →
+   unavailable; enforcement off / WEB), `TrustedDeviceServiceTest` (routing rewritten: a login never registers; primary
+   proves or waits; non-primary is not asked), `MlDsaDeviceProofVerifierTest` (5, real ML-DSA-65 keys signed with the
+   JDK; signing-input layout pinned), `LoginRestTest` (headers; proof header parsed; bad header → 400), boot and
+   persistence ITs seed the trusted primary row directly. The earlier turn-1 pieces this replaced (`DeviceSigningKey`,
+   `DeviceKeyClaim`, `Session.deviceKey`, `LoginResult.DeviceProofRejected`, the JWS verifier) are deleted.
 2. **Enforcement and interop.** Switch `device-proof-required` on in the login ITs: login with a correct proof →
    ACTIVE; replayed `jti` → 400; primary device with another key → NEED_TRUSTED_DEVICE; the proof-size request still
    fits the body limit. Cross-check the JWS profile with CryptoKit `MLDSA65` (macOS 26 tool next to `dcp_hpke`) and

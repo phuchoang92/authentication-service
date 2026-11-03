@@ -71,6 +71,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.hamcrest.Matchers;
+import com.vpbank.dcp.auth.domain.model.DeviceProof;
+import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.DeviceHeaders;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -93,7 +97,7 @@ class LoginRestTest {
     private static final Instant IDLE = Instant.parse("2026-10-25T10:15:00Z");
     private static final Instant ABSOLUTE = Instant.parse("2026-10-25T10:20:00Z");
     private static final String LOGIN_BODY = """
-            {"userName":"alice","password":"Secret123","channel":"MOBILE","deviceId":"dev-1","platform":"ANDROID",
+            {"userName":"alice","password":"Secret123",
              "tokenEncryptionKey":{"kty":"EC","crv":"P-256","x":"abc","y":"def"}}""";
     private static final String EXTEND_BODY = """
             {"sessionLookup":{"channel":"MOBILE","sessionId":"00000000-0000-4000-8000-000000000001"},
@@ -302,7 +306,7 @@ class LoginRestTest {
         when(login.login(any())).thenReturn(new LoginResult.Authenticated("eyJ.compact.jwe", new CustomerId("90359"),
                 SessionStatus.ACTIVE, IDLE, ABSOLUTE));
 
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+        mvc.perform(mobileLogin(LOGIN_BODY))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.data.tokenEnvelope").value("eyJ.compact.jwe"))
@@ -319,26 +323,24 @@ class LoginRestTest {
     @Test
     void loginRefusalsHaveTheirStatusCodeAndLocalizedText() throws Exception {
         when(login.login(any())).thenReturn(new LoginResult.InvalidCredentials());
-        mvc.perform(post("/api/ns/v1/login").header("Accept-Language", "en")
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+        mvc.perform(mobileLogin(LOGIN_BODY).header("Accept-Language", "en"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"))
                 .andExpect(jsonPath("$.error.message").value("The user name or password is incorrect"));
         when(login.login(any())).thenReturn(new LoginResult.AccountNotReady());
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+        mvc.perform(mobileLogin(LOGIN_BODY))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.error.code").value("ACCOUNT_NOT_READY"))
                 .andExpect(jsonPath("$.error.message").value(Matchers.startsWith("Tài khoản")));
         when(login.login(any())).thenReturn(new LoginResult.Unavailable());
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+        mvc.perform(mobileLogin(LOGIN_BODY))
                 .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.error.code").value("LOGIN_UNAVAILABLE"));
         when(login.login(any())).thenReturn(new LoginResult.AccountLocked());
-        mvc.perform(post("/api/ns/v1/login").header("Accept-Language", "en")
-                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+        mvc.perform(mobileLogin(LOGIN_BODY).header("Accept-Language", "en"))
                 .andExpect(status().isLocked()).andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"))
                 .andExpect(jsonPath("$.error.message").value("The account is locked after too many failed logins"))
                 .andExpect(jsonPath("$.error.lockedUntil").doesNotExist());
         when(login.login(any())).thenReturn(new LoginResult.CaptchaRequired());
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+        mvc.perform(mobileLogin(LOGIN_BODY))
                 .andExpect(status().isPreconditionRequired()).andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"));
     }
 
@@ -356,17 +358,16 @@ class LoginRestTest {
         verifyNoInteractions(current);
 
         when(login.login(any())).thenReturn(new LoginResult.InvalidCredentials());
-        String withCaptcha = LOGIN_BODY.replace("\"deviceId\":\"dev-1\",",
-                "\"deviceId\":\"dev-1\",\"captcha\":{\"captchaId\":\"" + id + "\",\"answer\":\"ab3cd\"},");
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(withCaptcha))
+        String withCaptcha = LOGIN_BODY.replace("\"userName\":\"alice\",",
+                "\"userName\":\"alice\",\"captcha\":{\"captchaId\":\"" + id + "\",\"answer\":\"ab3cd\"},");
+        mvc.perform(mobileLogin(withCaptcha))
                 .andExpect(status().isUnauthorized());
         var captor = ArgumentCaptor.forClass(com.vpbank.dcp.auth.application.command.LoginCommand.class);
         verify(login).login(captor.capture());
         org.assertj.core.api.Assertions.assertThat(captor.getValue().captcha().captchaId()).isEqualTo(id);
         org.assertj.core.api.Assertions.assertThat(captor.getValue().captcha().answer().normalized()).isEqualTo("AB3CD");
 
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON)
-                        .content(withCaptcha.replace("ab3cd", "a!")))
+        mvc.perform(mobileLogin(withCaptcha.replace("ab3cd", "a!")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.details[0].field").value("captcha.answer"));
     }
@@ -423,14 +424,48 @@ class LoginRestTest {
     }
 
     @Test
-    void aBadLoginBodyIs400WithoutEchoingThePassword() throws Exception {
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON)
-                        .content(LOGIN_BODY.replace("MOBILE", "FAX")))
+    void aBadLoginBodyOrHeaderIs400WithoutEchoingThePassword() throws Exception {
+        mvc.perform(mobileLogin(LOGIN_BODY.replace("\"password\":\"Secret123\",", "")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"))
-                .andExpect(jsonPath("$.error.details[0].field").value("channel"))
+                .andExpect(jsonPath("$.error.details[0].field").value("password"))
                 .andExpect(jsonPath("$..value").doesNotExist());
+        mvc.perform(post("/api/ns/v1/login").header(DeviceHeaders.CHANNEL, "FAX").contentType(MediaType.APPLICATION_JSON)
+                        .content(LOGIN_BODY))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"))
+                .andExpect(jsonPath("$..Secret123").doesNotExist());
+        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"));
+        mvc.perform(mobileLogin(LOGIN_BODY).header(DeviceHeaders.DEVICE_PROOF, "not.a.proof.at.all"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"));
         verifyNoInteractions(login);
+    }
+
+    /** Slice 13: the proof header is split into its three parts and handed to the use case as bytes. */
+    @Test
+    void theDeviceProofHeaderReachesTheUseCaseParsed() throws Exception {
+        when(login.login(any())).thenReturn(new LoginResult.Authenticated("eyJ.compact.jwe", new CustomerId("90359"),
+                SessionStatus.NEED_TRUSTED_DEVICE, IDLE, ABSOLUTE));
+        String signature = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[] {1, 2, 3});
+
+        mvc.perform(mobileLogin(LOGIN_BODY).header(DeviceHeaders.DEVICE_PROOF, "1762164000.nonce-nonce-nonce-1." + signature))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE"));
+        var captor = ArgumentCaptor.forClass(com.vpbank.dcp.auth.application.command.LoginCommand.class);
+        verify(login).login(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().deviceProof()).isEqualTo(new DeviceProof(
+                java.time.Instant.ofEpochSecond(1762164000L), "nonce-nonce-nonce-1", new byte[] {1, 2, 3}));
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().deviceId()).isEqualTo(new DeviceId("dev-1"));
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().platform()).isEqualTo(DevicePlatform.ANDROID);
+    }
+
+    /** A MOBILE login as the app sends it: channel, installation and OS as headers, credentials in the body. */
+    private static MockHttpServletRequestBuilder mobileLogin(String body) {
+        return post("/api/ns/v1/login")
+                .header(DeviceHeaders.CHANNEL, "MOBILE")
+                .header(DeviceHeaders.DEVICE_ID, "dev-1")
+                .header(DeviceHeaders.DEVICE_OS, "ANDROID")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
     }
 
     @Test

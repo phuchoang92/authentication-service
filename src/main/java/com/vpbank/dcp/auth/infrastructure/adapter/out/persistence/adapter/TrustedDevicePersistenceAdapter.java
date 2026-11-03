@@ -38,7 +38,7 @@ import org.springframework.transaction.interceptor.TransactionAspectSupport;
 /**
  * {@link TrustedDeviceRepository} over Spring Data JPA. The database only stops races (one live
  * row per installation, one primary per customer + channel); the aggregate decided every rule.
- * {@link #trustFirstDevice} and {@link #trustConfirmed} are the multi-table transactions: device
+ * {@link #trustConfirmed} is the multi-table transaction: device
  * rows, primary row, enrollment and audit events together, or nothing. Spring exceptions never
  * leave this class.
  */
@@ -48,7 +48,6 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
     private static final Byte LIVE = 1;
 
     static final String EVENT_TRUSTED = "DEVICE_TRUSTED";
-    static final String EVENT_PRIMARY = "PRIMARY_ASSIGNED";
     static final String EVENT_LOGIN = "DEVICE_LOGIN";
     static final String EVENT_EXPIRED = "DEVICE_EXPIRED";
     static final String EVENT_REPLACED = "DEVICE_REPLACED";
@@ -57,7 +56,6 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
 
     private static final String AUDIT_CAUSE_LOGIN = "LOGIN";
     private static final String AUDIT_CAUSE_POLICY = "POLICY";
-    private static final String AUDIT_REASON_FIRST_DEVICE = "FIRST_DEVICE";
     private static final String AUDIT_REASON_REINSTALL = "REINSTALL";
     private static final String AUDIT_REASON_DEVICE_CAP = "DEVICE_CAP";
     private static final String AUDIT_REASON_MFA_FACE = "MFA_FACE";
@@ -99,62 +97,6 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
         return translate(() -> primaryTrustedDeviceJpaRepository.findById(primaryKey)
                 .map(PrimaryTrustedDeviceEntity::getPrimaryDeviceId)
                 .map(TrustedDeviceId::new));
-    }
-
-    /**
-     * Device row, primary row and audit 0..1 together. A lost race on a unique key marks the
-     * transaction rollback-only and answers {@code AlreadyHasDevice}: nothing of this attempt stays.
-     */
-    @Override
-    @Transactional
-    public TrustFirstResult trustFirstDevice(TrustedDevice device, String correlationId) {
-        Instant now = clock.instant();
-        PrimaryTrustedDeviceEntity.Key primaryKey =
-                new PrimaryTrustedDeviceEntity.Key(device.customerId().value(), device.channel().name());
-        try {
-            boolean customerAlreadyHasPrimary = primaryTrustedDeviceJpaRepository.existsById(primaryKey);
-            if (customerAlreadyHasPrimary) {
-                return new TrustFirstResult.AlreadyHasDevice();
-            }
-
-            TrustedDeviceEntity newDeviceEntity = TrustedDevicePersistenceMapper.toEntity(device, deviceIdProtection);
-            TrustedDeviceEntity savedDeviceEntity = trustedDeviceJpaRepository.saveAndFlush(newDeviceEntity);
-
-            PrimaryTrustedDeviceEntity primaryEntity = TrustedDevicePersistenceMapper.toPrimary(device, now);
-            primaryTrustedDeviceJpaRepository.saveAndFlush(primaryEntity);
-
-            int sequence = 0;
-            TrustedDeviceAuditEntity trustedAudit = TrustedDevicePersistenceMapper.toAudit(
-                    device,
-                    correlationId,
-                    sequence,
-                    EVENT_TRUSTED,
-                    AUDIT_CAUSE_LOGIN,
-                    AUDIT_REASON_FIRST_DEVICE,
-                    now);
-            trustedDeviceAuditJpaRepository.save(trustedAudit);
-            sequence++;
-
-            TrustedDeviceAuditEntity primaryAudit = TrustedDevicePersistenceMapper.toAudit(
-                    device,
-                    correlationId,
-                    sequence,
-                    EVENT_PRIMARY,
-                    AUDIT_CAUSE_LOGIN,
-                    AUDIT_REASON_FIRST_DEVICE,
-                    now);
-            trustedDeviceAuditJpaRepository.saveAndFlush(primaryAudit);
-
-            TrustedDevice trustedDevice = TrustedDevicePersistenceMapper.toDomain(savedDeviceEntity, deviceIdProtection)
-                    .orElseThrow();
-            return new TrustFirstResult.Trusted(trustedDevice);
-        } catch (DataIntegrityViolationException raced) {
-            // UQ_TD_LIVE_INSTALLATION or the primary's primary key: another login got there first.
-            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            return new TrustFirstResult.AlreadyHasDevice();
-        } catch (DataAccessException failure) {
-            throw new RepositoryUnavailableException(failure);
-        }
     }
 
     /**

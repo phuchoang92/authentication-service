@@ -40,6 +40,18 @@ import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.UserName;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestBffAssertions;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestServiceClientAssertions;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
+import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.TrustedDevice;
+import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.DeviceHeaders;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.PrimaryTrustedDeviceJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
+import java.time.Instant;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.SecurityAuditEventEntity;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.SecurityAuditEventJpaRepository;
@@ -131,6 +143,9 @@ class ApplicationBootIT {
     @Autowired MockMvc mvc;
     @Autowired CustomerAuthenticationJpaRepository identities;
     @Autowired SecurityAuditEventJpaRepository auditRows;
+    @Autowired TrustedDeviceJpaRepository deviceRows;
+    @Autowired PrimaryTrustedDeviceJpaRepository primaryRows;
+    @Autowired DeviceIdProtection deviceIdProtection;
     @MockitoBean CustomerDirectoryPort customers;
     @MockitoBean IdentityProviderPort keycloakAdmin;
     @MockitoBean SmsSenderPort sms;
@@ -151,23 +166,28 @@ class ApplicationBootIT {
 
         // Two wrong passwords (same answer as an unknown user); the third attempt needs a CAPTCHA.
         ECKey kenc = new ECKeyGenerator(Curve.P_256).generate();
-        String loginBody = "{\"userName\":\"alice\",\"password\":\"Secret123\",\"channel\":\"MOBILE\","
-                + "\"deviceId\":\"dev-1\",\"platform\":\"ANDROID\",\"tokenEncryptionKey\":" + kenc.toPublicJWK().toJSONString() + "}";
+        String loginBody = "{\"userName\":\"alice\",\"password\":\"Secret123\","
+                + "\"tokenEncryptionKey\":" + kenc.toPublicJWK().toJSONString() + "}";
+        // dev-1 was trusted by an earlier enrollment and is the primary device (a login never trusts, slice 13).
+        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), new CustomerId("90359"), Channel.MOBILE,
+                new DeviceId("dev-1"), DevicePlatform.ANDROID, null, Instant.now(), DevicePolicy.standard());
+        deviceRows.saveAndFlush(TrustedDevicePersistenceMapper.toEntity(phone, deviceIdProtection));
+        primaryRows.saveAndFlush(TrustedDevicePersistenceMapper.toPrimary(phone, Instant.now()));
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Rejected());
         for (int i = 0; i < 2; i++) {
-            mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+            mvc.perform(login(loginBody, "dev-1", "ANDROID"))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"));
         }
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Verified(ISSUER, "sub-1"));
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+        mvc.perform(login(loginBody, "dev-1", "ANDROID"))
                 .andExpect(status().isPreconditionRequired()).andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"));
         MvcResult captcha = mvc.perform(post("/api/ns/v1/login/captcha").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"userName\":\"alice\"}"))
                 .andExpect(status().isOk()).andReturn();
         String captchaId = field(captcha.getResponse().getContentAsString(), "captchaId");
-        String solved = loginBody.replace("\"deviceId\":\"dev-1\",",
-                "\"deviceId\":\"dev-1\",\"captcha\":{\"captchaId\":\"" + captchaId + "\",\"answer\":\"ab3cd\"},");
-        MvcResult login = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(solved))
+        String solved = loginBody.replace("\"userName\":\"alice\",",
+                "\"userName\":\"alice\",\"captcha\":{\"captchaId\":\"" + captchaId + "\",\"answer\":\"ab3cd\"},");
+        MvcResult login = mvc.perform(login(solved, "dev-1", "ANDROID"))
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("X-Correlation-Id"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
@@ -208,14 +228,14 @@ class ApplicationBootIT {
         // The success reset the counter: two failures, then CAPTCHA + a third failure locks for 15 minutes.
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Rejected());
         for (int i = 0; i < 2; i++) {
-            mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+            mvc.perform(login(loginBody, "dev-1", "ANDROID"))
                     .andExpect(status().isUnauthorized());
         }
         MvcResult again = mvc.perform(post("/api/ns/v1/login/captcha").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userName\":\"alice\"}")).andReturn();
-        String third = loginBody.replace("\"deviceId\":\"dev-1\",", "\"deviceId\":\"dev-1\",\"captcha\":{\"captchaId\":\""
+        String third = loginBody.replace("\"userName\":\"alice\",", "\"userName\":\"alice\",\"captcha\":{\"captchaId\":\""
                 + field(again.getResponse().getContentAsString(), "captchaId") + "\",\"answer\":\"AB3CD\"},");
-        mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(third))
+        mvc.perform(login(third, "dev-1", "ANDROID"))
                 .andExpect(status().isLocked()).andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
         assertThat(identities.findById("90359").orElseThrow().getPasswordFailedCount()).isEqualTo(3);
         assertThat(identities.findById("90359").orElseThrow().getPasswordLockoutTime()).isNotNull();
@@ -223,14 +243,12 @@ class ApplicationBootIT {
         // The bank unlocks; the next correct login works without a CAPTCHA and is ACTIVE on the trusted primary.
         mvc.perform(post("/internal/v1/customers/90359/password-unlock")).andExpect(status().isNoContent());
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Verified(ISSUER, "sub-1"));
-        MvcResult phoneLogin = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(loginBody))
+        MvcResult phoneLogin = mvc.perform(login(loginBody, "dev-1", "ANDROID"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("ACTIVE")).andReturn();
         String phoneToken = tokenOf(phoneLogin, kenc);
 
         // A second installation: right password, but NEED_TRUSTED_DEVICE with a 10-minute restricted session.
-        String tabletBody = loginBody.replace("\"deviceId\":\"dev-1\",\"platform\":\"ANDROID\"",
-                "\"deviceId\":\"tablet-2\",\"platform\":\"IOS\"");
-        MvcResult tabletLogin = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(tabletBody))
+        MvcResult tabletLogin = mvc.perform(login(loginBody, "tablet-2", "IOS"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
         String tabletToken = tokenOf(tabletLogin, kenc);
@@ -250,7 +268,7 @@ class ApplicationBootIT {
                 .andExpect(jsonPath("$.data[0].trustLevel").value("TRUSTED"));
 
         // The tablet logs in again and enrolls: init (challenge to its key) → verify (FACE at MFA) → confirm.
-        MvcResult tabletAgain = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(tabletBody))
+        MvcResult tabletAgain = mvc.perform(login(loginBody, "tablet-2", "IOS"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
         String restrictedToken = tokenOf(tabletAgain, kenc);
         ECKey deviceKey = new ECKeyGenerator(Curve.P_256).generate();
@@ -302,7 +320,7 @@ class ApplicationBootIT {
         // Slice 6: a watch asks to be approved; the tablet (current primary) approves with FACE + OTP and shows a QR.
         String watchBody = loginBody.replace("\"deviceId\":\"dev-1\",\"platform\":\"ANDROID\"",
                 "\"deviceId\":\"watch-3\",\"platform\":\"IOS\"");
-        MvcResult watchLogin = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(watchBody))
+        MvcResult watchLogin = mvc.perform(login(watchBody, "dev-1", "ANDROID"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
         String watchRestrictedToken = tokenOf(watchLogin, kenc);
         ECKey watchKey = new ECKeyGenerator(Curve.P_256).generate();
@@ -344,7 +362,7 @@ class ApplicationBootIT {
 
         // The request belongs to the watch, not to that login (slice 11): the customer logs in on the watch again,
         // still sees the request and claims it from the new restricted session.
-        MvcResult watchLoginAgain = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(watchBody))
+        MvcResult watchLoginAgain = mvc.perform(login(watchBody, "dev-1", "ANDROID"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
         String watchSecondRestrictedToken = tokenOf(watchLoginAgain, kenc);
         mvc.perform(get("/api/v1/trusted-device/status")
@@ -500,5 +518,15 @@ class ApplicationBootIT {
         Matcher m = Pattern.compile("\"" + name + "\":\"([^\"]+)\"").matcher(json);
         assertThat(m.find()).as(name + " in " + json).isTrue();
         return m.group(1);
+    }
+
+    /** A login as the app sends it: channel, installation and OS as headers, credentials in the body. */
+    private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder login(String body, String deviceId, String os) {
+        return post("/api/ns/v1/login")
+                .header(DeviceHeaders.CHANNEL, "MOBILE")
+                .header(DeviceHeaders.DEVICE_ID, deviceId)
+                .header(DeviceHeaders.DEVICE_OS, os)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
     }
 }

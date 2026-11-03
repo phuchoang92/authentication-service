@@ -14,7 +14,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -32,8 +34,9 @@ public class LoginController {
     @PostMapping(path = "/api/ns/v1/login",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ApiEnvelope<LoginResponse>> login(@Valid @RequestBody LoginRequest body) {
-        LoginCommand command = loginRestMapper.toCommand(body);
+    public ResponseEntity<ApiEnvelope<LoginResponse>> login(@RequestHeader HttpHeaders headers,
+                                                            @Valid @RequestBody LoginRequest body) {
+        LoginCommand command = loginRestMapper.toCommand(headers, body);
         LoginResult result = loginUseCase.login(command);
         return loginRestMapper.toResponse(result);
     }

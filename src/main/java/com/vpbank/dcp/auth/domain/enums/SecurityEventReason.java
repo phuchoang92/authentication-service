@@ -19,8 +19,6 @@ public enum SecurityEventReason {
     CAPTCHA_REQUIRED(SecurityEventType.LOGIN_REFUSED),
     /** The password was right but the identity is not ACTIVE in Auth. */
     NOT_READY(SecurityEventType.LOGIN_REFUSED),
-    /** The device proof was missing, invalid or replayed; refused before the password was checked (slice 13). */
-    DEVICE_PROOF_REJECTED(SecurityEventType.LOGIN_REFUSED),
     /** The database or the session store did not answer. */
     REPOSITORY(SecurityEventType.LOGIN_UNAVAILABLE),
     /** Keycloak did not answer. */

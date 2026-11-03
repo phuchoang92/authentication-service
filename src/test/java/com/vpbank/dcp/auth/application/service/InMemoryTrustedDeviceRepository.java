@@ -41,20 +41,6 @@ final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
         return Optional.ofNullable(primaries.get(new Key(customerId, channel)));
     }
 
-    @Override
-    public TrustFirstResult trustFirstDevice(TrustedDevice device, String correlationId) {
-        check();
-        Key key = new Key(device.customerId(), device.channel());
-        if (primaries.containsKey(key) || findLive(device.customerId(), device.channel(), device.deviceId()).isPresent()) {
-            return new TrustFirstResult.AlreadyHasDevice();
-        }
-        rows.put(device.id(), device);
-        primaries.put(key, device.id());
-        audit.add(correlationId + ":0:DEVICE_TRUSTED");
-        audit.add(correlationId + ":1:PRIMARY_ASSIGNED");
-        return new TrustFirstResult.Trusted(device);
-    }
-
     final java.util.List<TrustConfirmation> confirmations = new ArrayList<>();
 
     @Override

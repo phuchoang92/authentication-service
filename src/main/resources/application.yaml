@@ -1,3 +1,7 @@
+server:
+  # X-Device-Proof carries an ML-DSA-65 signature (3309 bytes, ~4.4 KB base64url); Tomcat's 8 KB default is too tight.
+  max-http-request-header-size: 16KB
+
 spring:
   application:
     name: authentication-service
@@ -45,6 +49,9 @@ auth:
       realm: ${AUTH_KC_REALM:}
       client-id: ${AUTH_KC_LOGIN_CLIENT_ID:authentication-service}
       client-secret: ${AUTH_KC_LOGIN_CLIENT_SECRET:}
+    # Slice 13: a trusted device must prove its ML-DSA-65 key at login (X-Device-Proof) to get a full session;
+    # without a proof it gets NEED_TRUSTED_DEVICE. Off until the apps sign the proof; switch on per environment.
+    device-proof-required: ${AUTH_LOGIN_DEVICE_PROOF_REQUIRED:false}
   session:
     idle: PT15M
     absolute: PT20M
