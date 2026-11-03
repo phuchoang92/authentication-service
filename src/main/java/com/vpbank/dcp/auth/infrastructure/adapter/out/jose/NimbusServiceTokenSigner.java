@@ -11,6 +11,7 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.auth.application.port.out.gateway.ServiceTokenSigner;
 import com.vpbank.dcp.auth.domain.model.ServiceTokenClaims;
+
 import java.util.Date;
 import java.util.Objects;
 
@@ -27,7 +28,9 @@ public final class NimbusServiceTokenSigner implements ServiceTokenSigner {
 
     private final ECKey signingKey;
 
-    /** {@code signingKey} is the private P-256 key; it must carry the key ID the header names. */
+    /**
+     * {@code signingKey} is the private P-256 key; it must carry the key ID the header names.
+     */
     public NimbusServiceTokenSigner(ECKey signingKey) {
         this.signingKey = Objects.requireNonNull(signingKey, "signingKey");
         if (!signingKey.isPrivate() || !Curve.P_256.equals(signingKey.getCurve()) || signingKey.getKeyID() == null) {

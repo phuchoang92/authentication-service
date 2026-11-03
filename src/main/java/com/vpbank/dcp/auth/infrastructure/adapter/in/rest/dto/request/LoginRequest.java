@@ -10,8 +10,10 @@ import java.util.Map;
 
 /**
  * {@code POST /api/ns/v1/login}. {@code tokenEncryptionKey} is the app's public P-256 JWK (DD 06);
- * {@code deviceId} and {@code platform} are required on MOBILE, {@code devicePublicKey} (P-256 JWK)
- * is optional; {@code captcha} is sent once a login answered 428 CAPTCHA_REQUIRED.
+ * {@code deviceId} and {@code platform} are required on MOBILE. {@code devicePublicKey} (the device's
+ * ML-DSA-65 signing JWK) and {@code deviceProof} (the compact JWS it signed for this login, slice 13) are
+ * required on MOBILE once the login proof is enforced; {@code captcha} is sent once a login answered
+ * 428 CAPTCHA_REQUIRED.
  */
 public record LoginRequest(
 
@@ -34,6 +36,9 @@ public record LoginRequest(
         String platform,
 
         Map<String, Object> devicePublicKey,
+
+        @Size(max = 8192, message = "{auth.tooLong}")
+        String deviceProof,
 
         @NotNull(message = "{auth.required}")
         Map<String, Object> tokenEncryptionKey,

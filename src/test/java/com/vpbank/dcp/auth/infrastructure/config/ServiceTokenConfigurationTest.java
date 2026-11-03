@@ -32,7 +32,7 @@ class ServiceTokenConfigurationTest {
             "auth.service-token.callers.onboarding-service.scopes[0]=onboarding"};
 
     private final WebApplicationContextRunner runner = new WebApplicationContextRunner()
-            .withUserConfiguration(RestConfiguration.class, ServiceTokenConfiguration.class,
+            .withUserConfiguration(RestConfiguration.class, AuditConfiguration.class, ServiceTokenConfiguration.class,
                     ServiceTokenController.class, ServiceTokenJwksController.class)
             .withBean(StringRedisTemplate.class, () -> Mockito.mock(StringRedisTemplate.class));
 

@@ -9,6 +9,7 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
@@ -97,13 +98,23 @@ public final class SessionService {
     /** A restricted NEED_TRUSTED_DEVICE session with the device policy's fixed deadline (DD 20 §3). */
     public IssuedSession issueRestricted(SessionId sessionId, CustomerId customerId, DeviceId deviceId, Channel channel,
                                          String tokenEncryptionKey) {
+        return issueRestricted(sessionId, customerId, deviceId, channel, tokenEncryptionKey, null);
+    }
+
+    /**
+     * A restricted session that keeps the signing key the device proved at login (slice 13), so the trust
+     * flows it runs use that key; {@code deviceKey} is null while the login proof is not enforced.
+     */
+    public IssuedSession issueRestricted(SessionId sessionId, CustomerId customerId, DeviceId deviceId, Channel channel,
+                                         String tokenEncryptionKey, DeviceSigningKey deviceKey) {
         Session session = Session.startRestricted(
                 sessionId,
                 customerId,
                 deviceId,
                 channel,
                 clock.instant(),
-                devicePolicy);
+                devicePolicy,
+                deviceKey);
         return store(session, tokenEncryptionKey);
     }
 

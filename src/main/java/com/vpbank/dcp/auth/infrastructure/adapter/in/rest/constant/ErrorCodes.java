@@ -17,6 +17,7 @@ public final class ErrorCodes {
     public static final String SESSION_REQUIRED = "SESSION_REQUIRED";
     public static final String DEVICE_TRUST_REQUIRED = "DEVICE_TRUST_REQUIRED";
     public static final String DEVICE_KEY_REQUIRED = "DEVICE_KEY_REQUIRED";
+    public static final String DEVICE_PROOF_REJECTED = "DEVICE_PROOF_REJECTED";
     public static final String STATE_CONFLICT = "STATE_CONFLICT";
     public static final String WRONG_CHALLENGE = "WRONG_CHALLENGE";
     public static final String NO_USABLE_FACTOR = "NO_USABLE_FACTOR";

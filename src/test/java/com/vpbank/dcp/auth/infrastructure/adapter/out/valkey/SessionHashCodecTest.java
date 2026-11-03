@@ -6,6 +6,7 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
@@ -44,6 +45,21 @@ class SessionHashCodecTest {
         assertThat(SessionHashCodec.decode(fields)).contains(restricted);
         // A session written by slice 5 with its enrollment context is not a session of this schema (slice 11).
         assertThat(SessionHashCodec.decode(with(fields, "serverPrivateJwk", "{priv}"))).isEmpty();
+    }
+
+    /** Slice 13: a restricted session carries the public signing key the device proved, both fields or neither. */
+    @Test
+    void aRestrictedSessionCarriesTheProvenDeviceKey() {
+        DeviceSigningKey deviceKey = new DeviceSigningKey("{\"alg\":\"ML-DSA-65\",\"kty\":\"AKP\",\"pub\":\"p\"}", "k".repeat(43));
+        Session restricted = Session.startRestricted(SessionId.random(), new CustomerId("90359"), new DeviceId("tablet-2"),
+                Channel.MOBILE, Instant.parse("2026-11-03T10:00:00Z"), DevicePolicy.standard(), deviceKey);
+
+        Map<String, String> fields = SessionHashCodec.encode(restricted);
+        assertThat(fields).containsEntry("deviceKeyJkt", "k".repeat(43)).containsKey("deviceKeyJwk");
+        assertThat(SessionHashCodec.decode(fields)).contains(restricted);
+        assertThat(SessionHashCodec.decode(without(fields, "deviceKeyJkt"))).isEmpty();
+        assertThat(SessionHashCodec.decode(without(fields, "deviceKeyJwk"))).isEmpty();
+        assertThat(SessionHashCodec.decode(with(fields, "deviceKeyJkt", "short"))).isEmpty();
     }
 
     @Test

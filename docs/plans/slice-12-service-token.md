@@ -1,7 +1,8 @@
 # Slice 12 — scoped service token for flows without a customer session
 
-Status: **turns 1–2 implemented 2026-11-03** (turn 1: domain + application; turn 2: signer, client-assertion verifier and
-filter, replay key factory; `mvn -o verify`: 310 unit tests, 37 ITs); turns 3–4 pending. Nothing committed.
+Status: **implemented 2026-11-03, turns 1–4** (turn 1: domain + application; turn 2: signer, client-assertion verifier and
+filter, replay key factory; turn 3: routes, configuration, boot scenario, docs; turn 4: audit events + V6;
+`mvn -o clean verify` after turn 4: 323 unit tests, 39 ITs). Turns 1–3 were committed from outside this session ("refine"); turn 4 is uncommitted.
 
 Some flows have no customer login and no Valkey session, onboarding first of all. The owning service asks Auth for a
 short-lived JWT whose `scope` names the flow; the BFF verifies the token and forwards only the routes of that scope.
@@ -77,14 +78,37 @@ Turn 2 (done):
   mirrored, plus `iss` ≠ `sub`, unknown service, the BFF's `typ`), `ServiceClientAssertionFilterTest`,
   `UsedAssertionKeysTest` (frozen vectors for both prefixes); `TestServiceClientAssertions` plays the onboarding service.
 
-Turn 3: `ServiceTokenController`, `ServiceTokenJwksController` (public-key document prepared in `rest.common`, no use
-case), request/response DTOs, `ServiceTokenRestMapper`; `ServiceTokenConfiguration` / `ServiceTokenProperties`
-(flag, issuer, audience, lifetime bounds, signing key with `kid`, callers map); `ErrorCodes.SCOPE_NOT_ALLOWED` +
-messages; `application.yaml`; `ApplicationBootIT` scenario (mint an assertion with a test key, get a token, verify it
-against the JWKS route, `403` for an ungranted scope, `401` for a replayed assertion); README and ARCHITECTURE notes.
+Turn 3 (done):
+- `rest.controller.ServiceTokenController` (`POST /internal/v1/service-tokens`, caller from the filter's request
+  attribute) and `ServiceTokenJwksController` (`GET …/jwks`, bare RFC 7517 document from `rest.common.ServiceTokenPublicKeys`,
+  prepared at startup; the one route without the envelope). `IssueServiceTokenRequest` / `ServiceTokenResponse`
+  (token redacted in `toString`), `ServiceTokenRestMapper` (`Issued` → 200, `ScopeNotAllowed` → 403 `SCOPE_NOT_ALLOWED`,
+  `BusinessReferenceRequired` → 400 `REQUEST_REJECTED`, unknown scope code → 400).
+- `ServiceTokenProperties` (`enabled`, `issuer`, `audience`, `lifetime` required and 1–30 min, `signing-private-jwk`,
+  `callers.<service>.{public-jwk, scopes}`) and `ServiceTokenConfiguration` (settings, grants, signer, JWKS document,
+  verifier, filter with its own `ValkeyAssertionReplayStore` on `ServiceClientAssertionKeys`, use case, mapper; a bad key,
+  an unknown scope or a malformed service ID stops startup naming the setting). `application.yaml` block,
+  `ErrorCodes.SCOPE_NOT_ALLOWED` with vi/en messages.
+- Tests: `ServiceTokenRestMapperTest`, `ServiceTokenControllerTest` (`@WebMvcTest`: envelope, status table, body
+  validation, bare JWKS), `ServiceTokenConfigurationTest` (flag off = no beans; lifetime required and bounded; bad signing
+  key, bad caller key, missing `kid`, unknown scope, malformed service ID each fail naming the setting);
+  `ApplicationBootIT` gains a scenario: assertion → token, token verifies against the JWKS route with the expected claims,
+  the same assertion is `401` on reuse, no assertion is `401`, scope without reference is `400`.
+- README (route table, slice paragraph, configuration rows, known-gaps line) and ARCHITECTURE decisions log.
 
-Turn 4 (after slice 9 is committed): `SecurityEventType.SERVICE_TOKEN_ISSUED` / `SERVICE_TOKEN_REFUSED`, V6 additive
-migration (nullable `CHANNEL`, `SERVICE_ID`, `SCOPE`, `TOKEN_ID`), one `record` call per branch in the service.
+Turn 4 (done):
+- `SecurityEventType.SERVICE_TOKEN_ISSUED` / `SERVICE_TOKEN_REFUSED` with `aboutAService()`; reasons `TOKEN_ISSUED`,
+  `SCOPE_NOT_GRANTED`, `BUSINESS_REFERENCE_MISSING` (names frozen in `DomainEnumCodesTest`).
+- `SecurityAuditEvent` carries two shapes on one row: a login event needs `channel`, a service-token event needs
+  `serviceId` + `scope` (+ `tokenId` when issued); the compact constructor enforces whichever the reason's type asks for.
+  Never the token or the business reference.
+- `V6__audit_service_token.sql` (source `authentication-service-src/docs/db-phases/phase-audit-service-token.sql`):
+  `CHANNEL` nullable, `SERVICE_ID`, `SCOPE` (wire code), `TOKEN_ID`, `IX_SAE_SERVICE_TIME`. Entity and mapper follow.
+- `IssueServiceTokenService` hands each decision to `SecurityAuditStore` after deciding (six dependencies now: four
+  collaborators plus the token-ID supplier and the clock). Config injects the store, which always exists (disabled = forgets).
+- Tests: `SecurityAuditEventTest` (shape rule), `IssueServiceTokenServiceTest` (an event per branch),
+  `SecurityAuditEventPersistenceAdapterIT` (service-token rows on V6), `ServiceTokenConfigurationTest` (audit wiring),
+  `ApplicationBootIT` (issued and refused decisions land in `SECURITY_AUDIT_EVENT` with the token's `jti`).
 
 ## Not in this slice
 

@@ -7,7 +7,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.Securit
 import java.time.Instant;
 import java.util.UUID;
 
-/** Event → SECURITY_AUDIT_EVENT row. Enums are stored by name; the row ID is minted here. */
+/** Event → SECURITY_AUDIT_EVENT row. Enums are stored by name (the scope by its wire code); the row ID is minted here. */
 public final class SecurityAuditPersistenceMapper {
     private SecurityAuditPersistenceMapper() {
     }
@@ -20,10 +20,13 @@ public final class SecurityAuditPersistenceMapper {
                 .eventType(event.eventType().name())
                 .reasonCode(event.reason().name())
                 .customerId(customerId == null ? null : customerId.value())
-                .channel(event.channel().name())
+                .channel(event.channel() == null ? null : event.channel().name())
                 .platform(event.platform() == null ? null : event.platform().name())
                 .sessionId(sessionId == null ? null : sessionId.value())
                 .failedCount(event.failedCount())
+                .serviceId(event.serviceId() == null ? null : event.serviceId().value())
+                .scope(event.scope() == null ? null : event.scope().code())
+                .tokenId(event.tokenId())
                 .occurredAt(event.occurredAt())
                 .recordedAt(recordedAt)
                 .build();

@@ -4,6 +4,7 @@ import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.vpbank.dcp.auth.application.port.in.IssueServiceTokenUseCase;
 import com.vpbank.dcp.auth.application.port.out.gateway.ServiceTokenSigner;
+import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
 import com.vpbank.dcp.auth.application.service.IssueServiceTokenService;
 import com.vpbank.dcp.auth.application.service.ServiceTokenSettings;
 import com.vpbank.dcp.auth.domain.enums.ServiceScope;
@@ -80,8 +81,10 @@ public class ServiceTokenConfiguration {
     IssueServiceTokenUseCase issueServiceTokenUseCase(ServiceScopeGrants serviceScopeGrants,
                                                       ServiceTokenSigner serviceTokenSigner,
                                                       ServiceTokenSettings serviceTokenSettings,
+                                                      SecurityAuditStore securityAuditStore,
                                                       Clock clock) {
-        return new IssueServiceTokenService(serviceScopeGrants, serviceTokenSigner, UUID::randomUUID, serviceTokenSettings, clock);
+        return new IssueServiceTokenService(serviceScopeGrants, serviceTokenSigner, UUID::randomUUID, serviceTokenSettings,
+                securityAuditStore, clock);
     }
 
     /** What the JWKS route publishes: the public half of the signing key. */

@@ -14,7 +14,8 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.domain.Persistable;
 
 /**
- * Row of SECURITY_AUDIT_EVENT: append-only activity, inserted by the background writer; never updated.
+ * Row of SECURITY_AUDIT_EVENT (V5 + V6): append-only activity, inserted by the background writer; never updated.
+ * Login rows fill CHANNEL; service-token rows (slice 12) fill SERVICE_ID, SCOPE and, when issued, TOKEN_ID.
  *
  * <p>The ID is assigned here, so Spring Data would otherwise SELECT each row before INSERT to learn
  * whether it exists. {@link Persistable#isNew()} answers "always new": a row is written once and never
@@ -41,7 +42,7 @@ public class SecurityAuditEventEntity implements Persistable<UUID> {
     @Column(name = "CUSTOMER_ID", length = 16)
     private String customerId;
 
-    @Column(name = "CHANNEL", length = 64, nullable = false)
+    @Column(name = "CHANNEL", length = 64)
     private String channel;
 
     @Column(name = "PLATFORM", length = 24)
@@ -52,6 +53,15 @@ public class SecurityAuditEventEntity implements Persistable<UUID> {
 
     @Column(name = "FAILED_COUNT")
     private Integer failedCount;
+
+    @Column(name = "SERVICE_ID", length = 64)
+    private String serviceId;
+
+    @Column(name = "SCOPE", length = 32)
+    private String scope;
+
+    @Column(name = "TOKEN_ID", columnDefinition = "BINARY(16)")
+    private UUID tokenId;
 
     @Column(name = "OCCURRED_AT", nullable = false)
     private Instant occurredAt;

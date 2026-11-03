@@ -13,7 +13,9 @@ import com.vpbank.dcp.auth.domain.exception.DeviceStateException;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceKeyClaim;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
@@ -58,10 +60,11 @@ public final class TrustedDeviceService {
     /**
      * DD 20 §2: trusted? → primary? WEB has no device trust. The first device of a customer on a
      * channel is trusted and made primary directly (phase 3); every later device waits for the
-     * trust flow (phase 4).
+     * trust flow (phase 4). A primary device that proved a key other than the one its row holds (a
+     * reinstalled app, slice 13) waits for the trust flow too: the row's key is what trust means.
      */
     public DeviceRouting routeAfterPassword(CustomerId customerId, Channel channel, DeviceId deviceId,
-                                            DevicePlatform platform, String devicePublicKey, String correlationId) {
+                                            DevicePlatform platform, DeviceKeyClaim keyClaim, String correlationId) {
         if (channel != Channel.MOBILE) {
             return new DeviceRouting.FullSession();
         }
@@ -69,7 +72,8 @@ public final class TrustedDeviceService {
 
         List<TrustedDevice> liveTrustedDevices = trustedDeviceRepository.findLive(customerId, channel);
         if (liveTrustedDevices.isEmpty()) {
-            return trustFirstDevice(customerId, channel, deviceId, platform, devicePublicKey, now, correlationId);
+            String publicKeyToStore = keyClaim.publicJwkToStore();
+            return trustFirstDevice(customerId, channel, deviceId, platform, publicKeyToStore, now, correlationId);
         }
 
         Optional<TrustedDevice> thisDevice = findByDeviceId(liveTrustedDevices, deviceId);
@@ -85,6 +89,11 @@ public final class TrustedDeviceService {
 
         boolean isPrimary = primaryDeviceId.isPresent() && primaryDeviceId.get().equals(device.id());
         if (!isPrimary) {
+            return new DeviceRouting.NeedTrust();
+        }
+
+        // A proven key that is not the row's key: the installation changed its key, so it must be trusted again.
+        if (keyClaim instanceof DeviceKeyClaim.Proven(DeviceSigningKey provenKey) && !device.hasKey(provenKey)) {
             return new DeviceRouting.NeedTrust();
         }
 

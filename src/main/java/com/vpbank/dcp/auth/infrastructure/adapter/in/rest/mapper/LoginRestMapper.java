@@ -43,6 +43,7 @@ public final class LoginRestMapper {
                     .deviceId(deviceId)
                     .platform(platform)
                     .devicePublicKey(devicePublicKey)
+                    .deviceProof(request.deviceProof())
                     .tokenEncryptionKey(JwkJson.toJson(request.tokenEncryptionKey()))
                     .captcha(captchaSolution)
                     .build();
@@ -62,6 +63,8 @@ public final class LoginRestMapper {
                     errorMessages.failure(HttpStatus.LOCKED, ErrorCodes.ACCOUNT_LOCKED);
             case LoginResult.CaptchaRequired() ->
                     errorMessages.failure(HttpStatus.PRECONDITION_REQUIRED, ErrorCodes.CAPTCHA_REQUIRED);
+            case LoginResult.DeviceProofRejected() ->
+                    errorMessages.failure(HttpStatus.BAD_REQUEST, ErrorCodes.DEVICE_PROOF_REJECTED);
             case LoginResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.LOGIN_UNAVAILABLE);
         };

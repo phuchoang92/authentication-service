@@ -9,6 +9,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.AuthorizationTokenGenera
 import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.ChallengeSealer;
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
+import com.vpbank.dcp.auth.application.port.out.gateway.DeviceProofVerifier;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.ServerKeyPairGenerator;
@@ -18,6 +19,7 @@ import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticatio
 import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore;
+import com.vpbank.dcp.auth.application.port.out.repository.LoginProofReplayStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.service.CaptchaService;
@@ -48,6 +50,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.PasswordUnlockR
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.SessionRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.TrustedDeviceRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.captcha.AwtCaptchaGenerator;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.jose.MlDsaDeviceProofVerifier;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.jose.NimbusChallengeSealer;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.jose.NimbusServerKeyPairGenerator;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.jose.NimbusTokenEnvelopeSealer;
@@ -58,6 +61,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.mfa.MfaReceiptVerifier;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.CustomerAuthenticationPersistenceAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.token.RandomAuthorizationTokenGenerator;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.LoginProofKeys;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyAssertionReplayStore;
 import java.security.SecureRandom;
 import java.text.ParseException;
@@ -69,6 +73,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.servlet.LocaleResolver;
 
@@ -91,8 +96,11 @@ public class LoginConfiguration {
                               CaptchaStore captchaStore,
                               SessionService sessionService,
                               TrustedDeviceService trustedDeviceService,
+                              DeviceProofVerifier deviceProofVerifier,
+                              LoginProofReplayStore loginProofReplayStore,
                               SecurityAuditStore securityAuditStore,
                               LockoutPolicy lockoutPolicy,
+                              LoginProperties properties,
                               Clock clock) {
         return new LoginService(
                 customerAuthenticationRepository,
@@ -100,9 +108,25 @@ public class LoginConfiguration {
                 captchaStore,
                 sessionService,
                 trustedDeviceService,
+                deviceProofVerifier,
+                loginProofReplayStore,
                 securityAuditStore,
                 lockoutPolicy,
+                properties.deviceProofRequired(),
                 clock);
+    }
+
+    /** The login device proof (slice 13): ML-DSA-65 under the key the app sends, verified by the JDK. */
+    @Bean
+    DeviceProofVerifier deviceProofVerifier(Clock clock) {
+        return new MlDsaDeviceProofVerifier(clock);
+    }
+
+    /** Used login proof IDs: one SET NX per enforced MOBILE login, in their own key space. */
+    @Bean
+    LoginProofReplayStore loginProofReplayStore(StringRedisTemplate stringRedisTemplate, Clock clock) {
+        ValkeyAssertionReplayStore usedProofIds = new ValkeyAssertionReplayStore(stringRedisTemplate, new LoginProofKeys(), clock);
+        return usedProofIds::firstUse;
     }
 
     /**

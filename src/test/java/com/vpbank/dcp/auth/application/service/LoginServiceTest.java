@@ -18,6 +18,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
+import com.vpbank.dcp.auth.application.port.out.model.DeviceProofBindings;
 import com.vpbank.dcp.auth.application.port.out.model.SecurityAuditEvent;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.domain.enums.Channel;
@@ -31,6 +32,7 @@ import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Password;
@@ -70,8 +72,13 @@ class LoginServiceTest {
             DevicePolicy.standard(), clock);
     private final TrustedDeviceService trustedDeviceService =
             new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random, clock);
+    private final FakeDeviceProofVerifier proofs = new FakeDeviceProofVerifier();
+    private final InMemoryLoginProofReplayStore usedProofs = new InMemoryLoginProofReplayStore();
     private final LoginService service = new LoginService(identities, credentials, captchas, sessionService,
-            trustedDeviceService, audit, LockoutPolicy.standard(), clock);
+            trustedDeviceService, proofs, usedProofs, audit, LockoutPolicy.standard(), false, clock);
+    /** The same service with the device proof enforced (slice 13). */
+    private final LoginService enforcing = new LoginService(identities, credentials, captchas, sessionService,
+            trustedDeviceService, proofs, usedProofs, audit, LockoutPolicy.standard(), true, clock);
 
     @BeforeEach
     void happyPath() {
@@ -361,8 +368,9 @@ class LoginServiceTest {
         Password password = new Password("Secret123".toCharArray());
         List<Boolean> passwordWipedWhenRecorded = new ArrayList<>();
         LoginService observed = new LoginService(identities, credentials, captchas, sessionService, trustedDeviceService,
+                proofs, usedProofs,
                 event -> passwordWipedWhenRecorded.add(new String(password.value()).chars().allMatch(c -> c == '\0')),
-                LockoutPolicy.standard(), clock);
+                LockoutPolicy.standard(), false, clock);
 
         observed.login(command(password));
 
@@ -371,6 +379,92 @@ class LoginServiceTest {
 
     private static LoginCommand command() {
         return command(new Password("Secret123".toCharArray()));
+    }
+
+    // ---- slice 13: the device proof ----
+
+    private static final String DEVICE_JWK = "{\"alg\":\"ML-DSA-65\",\"kty\":\"AKP\",\"pub\":\"phone\"}";
+    private static final DeviceSigningKey DEVICE_KEY = new DeviceSigningKey(DEVICE_JWK, "k".repeat(43));
+    private static final DeviceProofBindings THIS_LOGIN = new DeviceProofBindings(ALICE, Channel.MOBILE,
+            new DeviceId("dev-1"), DevicePlatform.ANDROID, KENC);
+
+    @Test
+    void anEnforcedLoginProvesTheKeyBeforeAnythingElseAndTrustsTheFirstDeviceWithIt() {
+        proofs.accept("proof-1", DEVICE_JWK, THIS_LOGIN, DEVICE_KEY, "jti-1", NOW.plusSeconds(65));
+
+        LoginResult result = enforcing.login(withProof(command(), DEVICE_JWK, "proof-1"));
+
+        assertThat(((LoginResult.Authenticated) result).status()).isEqualTo(SessionStatus.ACTIVE);
+        assertThat(proofs.seen).containsExactly(THIS_LOGIN);
+        assertThat(usedProofs.used).containsEntry("jti-1", NOW.plusSeconds(65));
+        assertThat(devices.only().publicKey()).isEqualTo(DEVICE_JWK);
+        assertThat(audit.events).extracting(SecurityAuditEvent::reason).containsExactly(SecurityEventReason.FULL_SESSION);
+    }
+
+    @Test
+    void aMissingWrongOrReplayedProofIsRefusedBeforeKeycloakAndCostsNoAttempt() {
+        proofs.accept("proof-1", DEVICE_JWK, THIS_LOGIN, DEVICE_KEY, "jti-1", NOW.plusSeconds(65));
+
+        assertThat(enforcing.login(command())).isInstanceOf(LoginResult.DeviceProofRejected.class);
+        assertThat(enforcing.login(withProof(command(), DEVICE_JWK, null))).isInstanceOf(LoginResult.DeviceProofRejected.class);
+        assertThat(enforcing.login(withProof(command(), DEVICE_JWK, "forged"))).isInstanceOf(LoginResult.DeviceProofRejected.class);
+        assertThat(enforcing.login(withProof(command(), "{\"other\":\"key\"}", "proof-1")))
+                .isInstanceOf(LoginResult.DeviceProofRejected.class);
+        assertThat(enforcing.login(withProof(command(), DEVICE_JWK, "proof-1"))).isInstanceOf(LoginResult.Authenticated.class);
+        assertThat(enforcing.login(withProof(command(), DEVICE_JWK, "proof-1")))
+                .as("replayed").isInstanceOf(LoginResult.DeviceProofRejected.class);
+
+        verify(credentials, org.mockito.Mockito.times(1)).verify(eq(ALICE), any());
+        assertThat(identities.only().lockout().failedCount()).isZero();
+        assertThat(audit.events).extracting(SecurityAuditEvent::reason).containsExactly(
+                SecurityEventReason.DEVICE_PROOF_REJECTED, SecurityEventReason.DEVICE_PROOF_REJECTED,
+                SecurityEventReason.DEVICE_PROOF_REJECTED, SecurityEventReason.DEVICE_PROOF_REJECTED,
+                SecurityEventReason.FULL_SESSION, SecurityEventReason.DEVICE_PROOF_REJECTED);
+        assertThat(audit.events.getFirst().customerId()).isNull();
+    }
+
+    @Test
+    void aPrimaryDeviceWithAnotherProvenKeyGetsARestrictedSessionThatRemembersTheNewKey() {
+        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), CUSTOMER, Channel.MOBILE,
+                new DeviceId("dev-1"), DevicePlatform.ANDROID, "{\"alg\":\"ML-DSA-65\",\"kty\":\"AKP\",\"pub\":\"old\"}",
+                NOW, DevicePolicy.standard());
+        devices.rows.put(phone.id(), phone);
+        devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(CUSTOMER, Channel.MOBILE), phone.id());
+        proofs.accept("proof-1", DEVICE_JWK, THIS_LOGIN, DEVICE_KEY, "jti-1", NOW.plusSeconds(65));
+
+        LoginResult result = enforcing.login(withProof(command(), DEVICE_JWK, "proof-1"));
+
+        assertThat(((LoginResult.Authenticated) result).status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
+        assertThat(sessions.only().deviceKey()).isEqualTo(DEVICE_KEY);
+        assertThat(devices.rows.get(phone.id()).publicKey()).contains("old"); // the row changes only through the trust flow
+    }
+
+    @Test
+    void aReplayStoreThatCannotAnswerMakesTheLoginUnavailable() {
+        proofs.accept("proof-1", DEVICE_JWK, THIS_LOGIN, DEVICE_KEY, "jti-1", NOW.plusSeconds(65));
+        usedProofs.unavailable = true;
+
+        assertThat(enforcing.login(withProof(command(), DEVICE_JWK, "proof-1"))).isInstanceOf(LoginResult.Unavailable.class);
+        verify(credentials, never()).verify(any(), any());
+    }
+
+    @Test
+    void withoutEnforcementAKeyIsTakenAsSentAndAWebLoginNeedsNoProofEither() {
+        LoginResult result = service.login(withProof(command(), DEVICE_JWK, null));
+
+        assertThat(((LoginResult.Authenticated) result).status()).isEqualTo(SessionStatus.ACTIVE);
+        assertThat(devices.only().publicKey()).isEqualTo(DEVICE_JWK);
+        assertThat(proofs.seen).isEmpty();
+
+        LoginCommand web = LoginCommand.builder().userName(ALICE).password(new Password("Secret123".toCharArray()))
+                .channel(Channel.WEB).tokenEncryptionKey(KENC).build();
+        assertThat(((LoginResult.Authenticated) enforcing.login(web)).status()).isEqualTo(SessionStatus.ACTIVE);
+    }
+
+    private static LoginCommand withProof(LoginCommand command, String devicePublicKey, String deviceProof) {
+        return LoginCommand.builder().userName(command.userName()).password(command.password()).channel(command.channel())
+                .deviceId(command.deviceId()).platform(command.platform()).tokenEncryptionKey(command.tokenEncryptionKey())
+                .devicePublicKey(devicePublicKey).deviceProof(deviceProof).build();
     }
 
     /** A freshly issued, correct CAPTCHA for the customer. */

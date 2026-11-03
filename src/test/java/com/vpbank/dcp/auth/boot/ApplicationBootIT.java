@@ -430,6 +430,26 @@ class ApplicationBootIT {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"scope\":\"onboarding\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"));
+
+        // Both decisions reach SECURITY_AUDIT_EVENT shortly after they were answered (slice 12 on slice 9).
+        List<SecurityAuditEventEntity> serviceRows = serviceAuditRowsOf("onboarding-service", 2);
+        assertThat(serviceRows).extracting(SecurityAuditEventEntity::getEventType)
+                .containsExactlyInAnyOrder("SERVICE_TOKEN_ISSUED", "SERVICE_TOKEN_REFUSED");
+        assertThat(serviceRows).extracting(SecurityAuditEventEntity::getScope).containsOnly("onboarding");
+        assertThat(serviceRows).extracting(SecurityAuditEventEntity::getChannel).containsOnlyNulls();
+        assertThat(serviceRows.stream().filter(row -> row.getEventType().equals("SERVICE_TOKEN_ISSUED")).findFirst().orElseThrow()
+                .getTokenId()).isEqualTo(java.util.UUID.fromString(serviceToken.getJWTClaimsSet().getJWTID()));
+    }
+
+    /** The service's audit rows once at least {@code atLeast} have landed; the writer is asynchronous, so poll briefly. */
+    private List<SecurityAuditEventEntity> serviceAuditRowsOf(String serviceId, int atLeast) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        List<SecurityAuditEventEntity> rows = auditRows.findAll().stream().filter(row -> serviceId.equals(row.getServiceId())).toList();
+        while (rows.size() < atLeast && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+            rows = auditRows.findAll().stream().filter(row -> serviceId.equals(row.getServiceId())).toList();
+        }
+        return rows;
     }
 
     /** The customer's audit rows once at least {@code atLeast} have landed; the writer is asynchronous, so poll briefly. */

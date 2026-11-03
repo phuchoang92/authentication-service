@@ -39,6 +39,13 @@ class DomainEnumCodesTest {
                 .containsExactly("DIRECT_PRIMARY", "FACE_CONFIRMED", "OLD_DEVICE_APPROVAL");
         assertThat(names(ServiceScope.values()))
                 .containsExactly("ONBOARDING");
+        assertThat(names(SecurityEventType.values()))
+                .containsExactly("LOGIN_SUCCEEDED", "LOGIN_FAILED", "LOGIN_REFUSED", "LOGIN_UNAVAILABLE",
+                        "SERVICE_TOKEN_ISSUED", "SERVICE_TOKEN_REFUSED");
+        assertThat(names(SecurityEventReason.values()))
+                .containsExactly("FULL_SESSION", "RESTRICTED_SESSION", "UNKNOWN_USER", "WRONG_PASSWORD", "LOCKED",
+                        "CAPTCHA_REQUIRED", "NOT_READY", "DEVICE_PROOF_REJECTED", "REPOSITORY", "PARTNER",
+                        "TOKEN_ISSUED", "SCOPE_NOT_GRANTED", "BUSINESS_REFERENCE_MISSING");
     }
 
     @Test
@@ -52,6 +59,8 @@ class DomainEnumCodesTest {
                 .containsExactly(SessionStatus.ACTIVE, SessionStatus.NEED_TRUSTED_DEVICE);
         assertThat(Arrays.stream(RegistrationState.values()).filter(RegistrationState::finished))
                 .containsExactly(RegistrationState.READY, RegistrationState.FAILED);
+        assertThat(Arrays.stream(SecurityEventType.values()).filter(SecurityEventType::aboutAService))
+                .containsExactly(SecurityEventType.SERVICE_TOKEN_ISSUED, SecurityEventType.SERVICE_TOKEN_REFUSED);
     }
 
     private static String[] names(Enum<?>[] values) {

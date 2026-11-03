@@ -83,7 +83,7 @@ public class TrustedDeviceEntity extends AuditedEntity {
     @Column(name = "PRIMARY_CRYPTO_SUITE", length = 96)
     private String primaryCryptoSuite;
 
-    @Column(name = "PRIMARY_PUBLIC_KEY", length = 2048)
+    @Column(name = "PRIMARY_PUBLIC_KEY", length = 4096)
     private String primaryPublicKey;
 
     @Column(name = "PRIMARY_KEY_ID", length = 128)

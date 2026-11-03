@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vpbank.dcp.auth.application.command.IssueServiceTokenCommand;
 import com.vpbank.dcp.auth.application.port.out.gateway.ServiceTokenSigner;
 import com.vpbank.dcp.auth.application.result.IssueServiceTokenResult;
+import com.vpbank.dcp.auth.domain.enums.SecurityEventReason;
 import com.vpbank.dcp.auth.domain.enums.ServiceScope;
 import com.vpbank.dcp.auth.domain.model.BusinessReference;
 import com.vpbank.dcp.auth.domain.model.ServiceId;
@@ -39,6 +40,7 @@ class IssueServiceTokenServiceTest {
     }
 
     private final RecordingSigner signer = new RecordingSigner();
+    private final RecordingSecurityAuditStore audit = new RecordingSecurityAuditStore();
     private final ServiceTokenSettings settings = new ServiceTokenSettings("authentication-service", "mobile-bff",
             Duration.ofMinutes(15));
     private final IssueServiceTokenService service = new IssueServiceTokenService(
@@ -46,6 +48,7 @@ class IssueServiceTokenServiceTest {
             signer,
             () -> TOKEN_ID,
             settings,
+            audit,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     @Test
@@ -66,6 +69,12 @@ class IssueServiceTokenServiceTest {
                 .tokenId(TOKEN_ID)
                 .build());
         assertThat(result.toString()).doesNotContain("signed:");
+        assertThat(audit.only().reason()).isEqualTo(SecurityEventReason.TOKEN_ISSUED);
+        assertThat(audit.only().serviceId()).isEqualTo(ONBOARDING_SERVICE);
+        assertThat(audit.only().scope()).isEqualTo(ServiceScope.ONBOARDING);
+        assertThat(audit.only().tokenId()).isEqualTo(TOKEN_ID);
+        assertThat(audit.only().occurredAt()).isEqualTo(NOW);
+        assertThat(audit.only().channel()).isNull();
     }
 
     @Test
@@ -75,6 +84,9 @@ class IssueServiceTokenServiceTest {
 
         assertThat(result).isInstanceOf(IssueServiceTokenResult.ScopeNotAllowed.class);
         assertThat(signer.signed).isEmpty();
+        assertThat(audit.only().reason()).isEqualTo(SecurityEventReason.SCOPE_NOT_GRANTED);
+        assertThat(audit.only().serviceId()).isEqualTo(ACCOUNT_SERVICE);
+        assertThat(audit.only().tokenId()).isNull();
     }
 
     @Test
@@ -84,5 +96,6 @@ class IssueServiceTokenServiceTest {
 
         assertThat(result).isInstanceOf(IssueServiceTokenResult.BusinessReferenceRequired.class);
         assertThat(signer.signed).isEmpty();
+        assertThat(audit.only().reason()).isEqualTo(SecurityEventReason.BUSINESS_REFERENCE_MISSING);
     }
 }

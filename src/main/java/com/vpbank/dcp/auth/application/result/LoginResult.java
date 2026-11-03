@@ -37,6 +37,12 @@ public sealed interface LoginResult {
     /** Two or more failures: this attempt needs a solved CAPTCHA bound to the customer first. */
     record CaptchaRequired() implements LoginResult { }
 
+    /**
+     * The device proof is missing, not signed by the key the app sent, bound to another login, expired or
+     * already used (slice 13). Refused before the password is checked, so it costs no lockout attempt.
+     */
+    record DeviceProofRejected() implements LoginResult { }
+
     /** Keycloak, the database or the session store did not answer; nothing was issued. */
     record Unavailable() implements LoginResult { }
 }

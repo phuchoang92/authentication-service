@@ -4,6 +4,7 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceSigningKey;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import java.time.Instant;
@@ -17,7 +18,8 @@ import java.util.UUID;
  * Session ↔ Valkey HASH fields (contract 16 style: every field a UTF-8 string, integers as
  * base-10 ms, booleans absent here, {@code schemaVersion=1}). Decoding is strict: a missing or
  * unknown field, or a value that does not parse, means "no session" — never a guessed default.
- * No token, password or key material is ever stored.
+ * No token, password or private key material is ever stored; a restricted session carries the public signing
+ * key the device proved at login (slice 13), both of its fields or neither.
  */
 public final class SessionHashCodec {
     static final String SCHEMA_VERSION = "1";
@@ -33,11 +35,14 @@ public final class SessionHashCodec {
     static final String F_SESSION_VERSION = "sessionVersion";
     /** The token's secret, written by the adapter at create and compared on every read by token (slice 7). */
     static final String F_SECRET = "secret";
+    static final String F_DEVICE_KEY_JWK = "deviceKeyJwk";
+    static final String F_DEVICE_KEY_JKT = "deviceKeyJkt";
     private static final Set<String> REQUIRED = Set.of(F_SCHEMA, F_SESSION_ID, F_CUSTOMER_ID, F_CHANNEL, F_STATUS,
             F_CREATED_AT, F_IDLE_EXPIRES_AT, F_ABSOLUTE_EXPIRES_AT, F_SESSION_VERSION);
     /** The enrollment context of slice 5 left the session for its own cache record in slice 11. */
     private static final Set<String> KNOWN = Set.of(F_SCHEMA, F_SESSION_ID, F_CUSTOMER_ID, F_DEVICE_ID, F_CHANNEL,
-            F_STATUS, F_CREATED_AT, F_IDLE_EXPIRES_AT, F_ABSOLUTE_EXPIRES_AT, F_SESSION_VERSION, F_SECRET);
+            F_STATUS, F_CREATED_AT, F_IDLE_EXPIRES_AT, F_ABSOLUTE_EXPIRES_AT, F_SESSION_VERSION, F_SECRET,
+            F_DEVICE_KEY_JWK, F_DEVICE_KEY_JKT);
 
     private SessionHashCodec() {
     }
@@ -56,6 +61,10 @@ public final class SessionHashCodec {
         fields.put(F_IDLE_EXPIRES_AT, millis(session.idleExpiresAt()));
         fields.put(F_ABSOLUTE_EXPIRES_AT, millis(session.absoluteExpiresAt()));
         fields.put(F_SESSION_VERSION, Long.toString(session.sessionVersion()));
+        if (session.deviceKey() != null) {
+            fields.put(F_DEVICE_KEY_JWK, session.deviceKey().publicJwk());
+            fields.put(F_DEVICE_KEY_JKT, session.deviceKey().thumbprint());
+        }
         return fields;
     }
 
@@ -66,12 +75,17 @@ public final class SessionHashCodec {
         boolean hasEveryRequiredField = fields.keySet().containsAll(REQUIRED);
         boolean hasOnlyKnownFields = KNOWN.containsAll(fields.keySet());
         boolean isCurrentSchema = SCHEMA_VERSION.equals(fields.get(F_SCHEMA));
-        if (!hasEveryRequiredField || !hasOnlyKnownFields || !isCurrentSchema) {
+        boolean deviceKeyIsWhole = fields.containsKey(F_DEVICE_KEY_JWK) == fields.containsKey(F_DEVICE_KEY_JKT);
+        if (!hasEveryRequiredField || !hasOnlyKnownFields || !isCurrentSchema || !deviceKeyIsWhole) {
             return Optional.empty();
         }
 
         try {
             String deviceId = fields.get(F_DEVICE_ID);
+            String deviceKeyJwk = fields.get(F_DEVICE_KEY_JWK);
+            DeviceSigningKey deviceKey = deviceKeyJwk == null
+                    ? null
+                    : new DeviceSigningKey(deviceKeyJwk, fields.get(F_DEVICE_KEY_JKT));
 
             Session session = Session.builder()
                     .id(new SessionId(UUID.fromString(fields.get(F_SESSION_ID))))
@@ -83,6 +97,7 @@ public final class SessionHashCodec {
                     .idleExpiresAt(instant(fields.get(F_IDLE_EXPIRES_AT)))
                     .absoluteExpiresAt(instant(fields.get(F_ABSOLUTE_EXPIRES_AT)))
                     .sessionVersion(Long.parseLong(fields.get(F_SESSION_VERSION)))
+                    .deviceKey(deviceKey)
                     .build();
             return Optional.of(session);
         } catch (IllegalArgumentException malformed) {

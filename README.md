@@ -11,7 +11,7 @@ Development rules: [architecture and package boundaries](ARCHITECTURE.md),
 hexagonal under `domain` / `application` / `infrastructure`, business enums in `domain.enums`,
 Spring Data JPA, Valkey sessions, localized errors). Schema phases 1–4 plus the audit table (Flyway
 `V1__identity.sql`, `V2__password_lockout.sql`, `V3__trusted_device.sql`, `V4__enrollment.sql`,
-`V5__security_audit.sql`), the registration API
+`V5__security_audit.sql`, `V6__audit_service_token.sql`), the registration API
 `POST /internal/v1/callback/authentication-creation` (contract §1 of
 `new-customer-onboarding-api-plan.md`), password login / session / logout / extend
 ([plan](docs/plans/slice-2-login-session.md)), password lockout with CAPTCHA
@@ -144,7 +144,7 @@ A retry with the same data returns the same `requestId`; an unfinished earlier a
   the Keycloak user stays enabled without an Auth identity (reported as conflict; needs cleanup).
 - Security audit (slice 9) is best-effort by design: a full queue or a database outage drops events (counted,
   logged by type). No retention/purge (open policy gate), no metric for the drop counter (no actuator yet),
-  no export to a broker/SIEM (no broker selected), and only login outcomes so far — lockout, session and
+  no export to a broker/SIEM (no broker selected), and only login outcomes and service-token decisions (slice 12) so far — lockout, session and
   enrollment activity are later slices on the same table. Device-trust transitions stay in
   `TRUSTED_DEVICE_AUDIT`, written synchronously; a proposal to copy them into the activity table (slice 10)
   was reviewed and folded back on 2026-10-31, see [its note](docs/plans/slice-10-shared-activity-audit.md).
@@ -198,6 +198,6 @@ three devices). No real Customer, Keycloak, Notification or MFA service was call
 | `AUTH_DEVICE_LOOKUP_HMAC_KEY_D1_BASE64`, `AUTH_DEVICE_ENCRYPTION_KEY_E1_BASE64` | ≥32-byte keys protecting the stored device ID (`d1` lookup HMAC, `e1` AES-256-GCM) |
 | `AUTH_SERVICE_TOKEN_ENABLED` | `true` to expose the service-token routes (default `false`); `AUTH_SERVICE_TOKEN_LIFETIME` (required, `PT1M`–`PT30M`), `AUTH_SERVICE_TOKEN_ISSUER` (`authentication-service`), `AUTH_SERVICE_TOKEN_AUDIENCE` (`mobile-bff`) |
 | `AUTH_SERVICE_TOKEN_SIGNING_PRIVATE_JWK`, `AUTH_SERVICE_TOKEN_ONBOARDING_PUBLIC_JWK` | private P-256 JWK (with `kid`) that signs service tokens; the onboarding service's pinned public JWK (with `kid`); more callers under `auth.service-token.callers.<service>` |
-| `AUTH_AUDIT_ENABLED` | `true` to write login outcomes and completed device trust to `SECURITY_AUDIT_EVENT` from a background thread (default `false`); `auth.audit.queue-capacity` 10000, `batch-size` 100, `shutdown-drain` PT2S |
+| `AUTH_AUDIT_ENABLED` | `true` to write login outcomes, service-token decisions and completed device trust to `SECURITY_AUDIT_EVENT` from a background thread (default `false`); `auth.audit.queue-capacity` 10000, `batch-size` 100, `shutdown-drain` PT2S |
 
 Timeouts default to 3 s per partner; no call is retried.

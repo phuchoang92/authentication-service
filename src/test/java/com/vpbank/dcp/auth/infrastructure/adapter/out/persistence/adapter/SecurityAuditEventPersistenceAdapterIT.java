@@ -7,7 +7,9 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.SecurityEventReason;
 import com.vpbank.dcp.auth.domain.enums.SecurityEventType;
+import com.vpbank.dcp.auth.domain.enums.ServiceScope;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.ServiceId;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.SecurityAuditEventEntity;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.SecurityAuditEventJpaRepository;
@@ -16,6 +18,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,7 +36,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** SECURITY_AUDIT_EVENT (V5) on real MySQL: the entity matches the table, a batch is one transaction, nullable columns stay null. */
+/** SECURITY_AUDIT_EVENT (V5 + V6) on real MySQL: the entity matches the table, a batch is one transaction, nullable columns stay null. */
 @Testcontainers
 @DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.flyway.enabled=true"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -95,6 +98,35 @@ class SecurityAuditEventPersistenceAdapterIT {
         Integer unknownUserRows = jdbc.sql("SELECT COUNT(*) FROM SECURITY_AUDIT_EVENT WHERE CUSTOMER_ID IS NULL AND SESSION_ID IS NULL")
                 .query(Integer.class).single();
         assertThat(unknownUserRows).isEqualTo(1);
+    }
+
+    /** Slice 12: a service-token row fills SERVICE_ID, SCOPE and TOKEN_ID and leaves CHANNEL null. */
+    @Test
+    void aServiceTokenEventLandsWithoutAChannel() {
+        UUID tokenId = UUID.randomUUID();
+        writer.writeBatch(List.of(
+                SecurityAuditEvent.builder().reason(SecurityEventReason.TOKEN_ISSUED)
+                        .serviceId(new ServiceId("onboarding-service")).scope(ServiceScope.ONBOARDING).tokenId(tokenId)
+                        .occurredAt(DECIDED_AT).build(),
+                SecurityAuditEvent.builder().reason(SecurityEventReason.SCOPE_NOT_GRANTED)
+                        .serviceId(new ServiceId("account-service")).scope(ServiceScope.ONBOARDING)
+                        .occurredAt(DECIDED_AT).build()));
+
+        List<SecurityAuditEventEntity> all = rows.findAll();
+        assertThat(all).hasSize(2);
+        SecurityAuditEventEntity issued = all.stream().filter(row -> row.getTokenId() != null).findFirst().orElseThrow();
+        assertThat(issued.getEventType()).isEqualTo("SERVICE_TOKEN_ISSUED");
+        assertThat(issued.getReasonCode()).isEqualTo("TOKEN_ISSUED");
+        assertThat(issued.getServiceId()).isEqualTo("onboarding-service");
+        assertThat(issued.getScope()).isEqualTo("onboarding");
+        assertThat(issued.getTokenId()).isEqualTo(tokenId);
+        assertThat(issued.getChannel()).isNull();
+        assertThat(issued.getCustomerId()).isNull();
+
+        Integer refused = jdbc.sql("SELECT COUNT(*) FROM SECURITY_AUDIT_EVENT WHERE EVENT_TYPE = 'SERVICE_TOKEN_REFUSED'"
+                        + " AND SERVICE_ID = 'account-service' AND TOKEN_ID IS NULL AND CHANNEL IS NULL")
+                .query(Integer.class).single();
+        assertThat(refused).isEqualTo(1);
     }
 
     @Test

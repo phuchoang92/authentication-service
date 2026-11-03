@@ -12,5 +12,14 @@ public enum SecurityEventType {
     /** The attempt was turned away before the password was checked, or the account is not ready. */
     LOGIN_REFUSED,
     /** The database or a partner did not answer. */
-    LOGIN_UNAVAILABLE
+    LOGIN_UNAVAILABLE,
+    /** A scoped service token was issued to an internal service (slice 12). */
+    SERVICE_TOKEN_ISSUED,
+    /** An internal service asked for a token it may not have, or asked incompletely. */
+    SERVICE_TOKEN_REFUSED;
+
+    /** An event about an internal service, not a customer login: it names a service and a scope, no channel. */
+    public boolean aboutAService() {
+        return this == SERVICE_TOKEN_ISSUED || this == SERVICE_TOKEN_REFUSED;
+    }
 }

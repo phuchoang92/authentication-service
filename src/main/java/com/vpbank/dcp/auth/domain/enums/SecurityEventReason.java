@@ -1,7 +1,7 @@
 package com.vpbank.dcp.auth.domain.enums;
 
 /**
- * Why a login attempt ended the way it did (SECURITY_AUDIT_EVENT.REASON_CODE). Each reason belongs to
+ * Why a login attempt or a service-token request ended the way it did (SECURITY_AUDIT_EVENT.REASON_CODE). Each reason belongs to
  * exactly one {@link SecurityEventType}, so a service names the reason and the type follows.
  */
 public enum SecurityEventReason {
@@ -19,10 +19,18 @@ public enum SecurityEventReason {
     CAPTCHA_REQUIRED(SecurityEventType.LOGIN_REFUSED),
     /** The password was right but the identity is not ACTIVE in Auth. */
     NOT_READY(SecurityEventType.LOGIN_REFUSED),
+    /** The device proof was missing, invalid or replayed; refused before the password was checked (slice 13). */
+    DEVICE_PROOF_REJECTED(SecurityEventType.LOGIN_REFUSED),
     /** The database or the session store did not answer. */
     REPOSITORY(SecurityEventType.LOGIN_UNAVAILABLE),
     /** Keycloak did not answer. */
-    PARTNER(SecurityEventType.LOGIN_UNAVAILABLE);
+    PARTNER(SecurityEventType.LOGIN_UNAVAILABLE),
+    /** A scoped service token was signed and handed to the calling service (slice 12). */
+    TOKEN_ISSUED(SecurityEventType.SERVICE_TOKEN_ISSUED),
+    /** The calling service is not granted the scope it asked for. */
+    SCOPE_NOT_GRANTED(SecurityEventType.SERVICE_TOKEN_REFUSED),
+    /** The scope binds the token to a business journey and the request named none. */
+    BUSINESS_REFERENCE_MISSING(SecurityEventType.SERVICE_TOKEN_REFUSED);
 
     private final SecurityEventType type;
 

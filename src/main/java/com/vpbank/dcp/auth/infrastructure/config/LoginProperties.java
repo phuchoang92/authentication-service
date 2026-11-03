@@ -10,13 +10,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
-/** Login settings; read only when {@code auth.login.enabled=true}. */
+/**
+ * Login settings; read only when {@code auth.login.enabled=true}. {@code deviceProofRequired} (slice 13) makes
+ * every MOBILE login carry the device key and its signed proof; off until the apps sign one.
+ */
 @Validated
 @ConfigurationProperties(prefix = "auth.login")
 public record LoginProperties(boolean enabled, @Valid @NotNull Keycloak keycloak,
                               @Valid @NotNull @DefaultValue Lockout lockout,
                               @Min(1) @DefaultValue("3") int enrollmentMaxVerifyAttempts,
-                              @Valid @NotNull @DefaultValue Approval approval) {
+                              @Valid @NotNull @DefaultValue Approval approval,
+                              @DefaultValue("false") boolean deviceProofRequired) {
 
     /**
      * Slice 6: approval of a new device by the current primary device (QR authorization token). A request belongs
