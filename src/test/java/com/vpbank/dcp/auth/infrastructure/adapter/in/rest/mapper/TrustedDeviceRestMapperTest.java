@@ -89,7 +89,6 @@ class TrustedDeviceRestMapperTest {
         LocaleContextHolder.setLocale(Locale.ENGLISH);
         assertFailure(mapper.toResponse(new InitEnrollmentResult.DeviceKeyRequired()), HttpStatus.BAD_REQUEST, "DEVICE_KEY_REQUIRED");
         assertFailure(mapper.toResponse(new InitEnrollmentResult.Conflict()), HttpStatus.CONFLICT, "STATE_CONFLICT");
-        assertFailure(mapper.toResponse(new InitEnrollmentResult.SessionGone()), HttpStatus.UNAUTHORIZED, "SESSION_REQUIRED");
         assertFailure(mapper.toResponse(new InitEnrollmentResult.Unavailable()), HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
 
         var mfaRequired = mapper.toResponse(new VerifyEnrollmentResult.MfaRequired("mfa-1", EXPIRES));
@@ -104,7 +103,6 @@ class TrustedDeviceRestMapperTest {
         assertThat(wrong.getBody().error().message()).isEqualTo("Device verification failed");
         assertFailure(mapper.toResponse(new VerifyEnrollmentResult.NoUsableFactor()), HttpStatus.FORBIDDEN, "NO_USABLE_FACTOR");
         assertFailure(mapper.toResponse(new VerifyEnrollmentResult.Conflict()), HttpStatus.CONFLICT, "STATE_CONFLICT");
-        assertFailure(mapper.toResponse(new VerifyEnrollmentResult.SessionGone()), HttpStatus.UNAUTHORIZED, "SESSION_REQUIRED");
         assertFailure(mapper.toResponse(new VerifyEnrollmentResult.Unavailable()), HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
 
         ResponseEntity<ApiEnvelope<ConfirmEnrollmentResponse>> trusted =
@@ -117,7 +115,6 @@ class TrustedDeviceRestMapperTest {
         assertFailure(mapper.toResponse(new ConfirmEnrollmentResult.MfaExpired()), HttpStatus.UNAUTHORIZED, "MFA_EXPIRED");
         assertFailure(mapper.toResponse(new ConfirmEnrollmentResult.Rejected()), HttpStatus.BAD_REQUEST, "REQUEST_REJECTED");
         assertFailure(mapper.toResponse(new ConfirmEnrollmentResult.Conflict()), HttpStatus.CONFLICT, "STATE_CONFLICT");
-        assertFailure(mapper.toResponse(new ConfirmEnrollmentResult.SessionGone()), HttpStatus.UNAUTHORIZED, "SESSION_REQUIRED");
         assertFailure(mapper.toResponse(new ConfirmEnrollmentResult.Unavailable()), HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
     }
 

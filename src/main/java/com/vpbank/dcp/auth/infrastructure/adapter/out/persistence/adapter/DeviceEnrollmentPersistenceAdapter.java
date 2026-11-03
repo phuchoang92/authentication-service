@@ -16,7 +16,6 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.Trusted
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.DeviceEnrollmentPersistenceMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.DeviceEnrollmentJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
-import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -72,37 +71,6 @@ public class DeviceEnrollmentPersistenceAdapter implements EnrollmentRepository 
                         creationDigest);
         return existingEnrollmentEntity
                 .map(entity -> DeviceEnrollmentPersistenceMapper.toDomain(entity, freshEnrollment.deviceId()));
-    }
-
-    @Override
-    public Optional<DeviceEnrollment> find(EnrollmentId enrollmentId, CustomerId customerId, DeviceId deviceId) {
-        try {
-            Optional<DeviceEnrollmentEntity> enrollmentEntity =
-                    deviceEnrollmentJpaRepository.findByIdAndCustomerId(enrollmentId.value(), customerId.value());
-            if (enrollmentEntity.isEmpty()) {
-                return Optional.empty();
-            }
-
-            // The row is only this device's when its stored lookup matches the device ID the session carries.
-            boolean belongsToDevice = isTargetDevice(enrollmentEntity.get(), customerId, deviceId);
-            if (!belongsToDevice) {
-                return Optional.empty();
-            }
-
-            return Optional.of(DeviceEnrollmentPersistenceMapper.toDomain(enrollmentEntity.get(), deviceId));
-        } catch (DataAccessException failure) {
-            throw new RepositoryUnavailableException(failure);
-        }
-    }
-
-    private boolean isTargetDevice(DeviceEnrollmentEntity enrollmentEntity, CustomerId customerId, DeviceId deviceId) {
-        Channel channel = Channel.valueOf(enrollmentEntity.getChannel());
-        byte[] expectedLookup = deviceIdProtection.lookup(
-                enrollmentEntity.getClientDeviceIdLookupKeyId(),
-                customerId,
-                channel,
-                deviceId);
-        return MessageDigest.isEqual(enrollmentEntity.getTargetClientDeviceIdLookup(), expectedLookup);
     }
 
     /**

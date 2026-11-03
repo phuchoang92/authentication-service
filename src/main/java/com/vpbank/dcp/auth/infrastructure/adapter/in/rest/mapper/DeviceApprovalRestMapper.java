@@ -122,8 +122,6 @@ public final class DeviceApprovalRestMapper {
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.TOO_MANY_PENDING_DEVICES);
             case RequestApprovalResult.Conflict() ->
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.STATE_CONFLICT);
-            case RequestApprovalResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case RequestApprovalResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };
@@ -134,8 +132,6 @@ public final class DeviceApprovalRestMapper {
             case ApprovalStatusResult.Status status -> status(status);
             case ApprovalStatusResult.NoRequest() ->
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.STATE_CONFLICT);
-            case ApprovalStatusResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case ApprovalStatusResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };
@@ -146,8 +142,6 @@ public final class DeviceApprovalRestMapper {
             case ListPendingDevicesResult.Pending pending -> pending(pending);
             case ListPendingDevicesResult.NotPrimaryDevice() ->
                     errorMessages.failure(HttpStatus.FORBIDDEN, ErrorCodes.NOT_PRIMARY_DEVICE);
-            case ListPendingDevicesResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case ListPendingDevicesResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };
@@ -162,8 +156,6 @@ public final class DeviceApprovalRestMapper {
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.STATE_CONFLICT);
             case ApproveEnrollmentResult.NoUsableFactor() ->
                     errorMessages.failure(HttpStatus.FORBIDDEN, ErrorCodes.NO_USABLE_FACTOR);
-            case ApproveEnrollmentResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case ApproveEnrollmentResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };
@@ -184,8 +176,6 @@ public final class DeviceApprovalRestMapper {
                     errorMessages.failure(HttpStatus.FORBIDDEN, ErrorCodes.NOT_PRIMARY_DEVICE);
             case AuthorizeEnrollmentResult.Conflict() ->
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.STATE_CONFLICT);
-            case AuthorizeEnrollmentResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case AuthorizeEnrollmentResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };
@@ -199,8 +189,6 @@ public final class DeviceApprovalRestMapper {
                     errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.AUTHORIZATION_EXPIRED);
             case ClaimEnrollmentResult.Conflict() ->
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.STATE_CONFLICT);
-            case ClaimEnrollmentResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case ClaimEnrollmentResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };

@@ -17,7 +17,7 @@
 | Replay | `jti` used once: Valkey `SET NX` on `bff-assertion:used:v1:<SHA-256(jti)>` until `exp + 5 s`. Bad or replayed assertion → `401 REQUEST_REJECTED`; store unavailable → `503 TEMPORARILY_UNAVAILABLE`. |
 | Kind per route | Auth still checks the kind the BFF asserted, per route, with no I/O: new-device routes (`request`, `status`, `claim`, `init`, `verify`, `confirm`) need `NEED_TRUSTED_DEVICE` (otherwise `409 STATE_CONFLICT`); primary routes (`pending`, `approve`, `authorize`) need `ACTIVE` and the trusted primary device (otherwise `403 NOT_PRIMARY_DEVICE`). |
 | Other routes | Logout, `/api/v1/devices` and extend keep the session token (`SessionFilter`) in this slice. |
-| Old-device approval | `approve` / `authorize` keep the database (`TRUSTED_DEVICE_ENROLLMENT`) as today (user decision 2026-11-03). The new device's `request` keeps writing its row. |
+| Old-device approval | `approve` / `authorize` keep the database (`TRUSTED_DEVICE_ENROLLMENT`) as today (user decision 2026-11-03). The new device's `request` keeps writing its row. The request belongs to the device and waits 24 h (agreed 2026-11-03). |
 | Primary transaction | `init → verify → confirm` moves into its own Valkey record (turns 2–3); one-shot confirm becomes a CAS on that record; the enrollment row is written once, in the trust commit. |
 
 ## Turns
@@ -53,9 +53,27 @@
    fields no longer decodes; restricted sessions live 10 minutes). Fixed a turn-1 regression: `request` again
    refuses a session whose primary enrollment is in flight. `SessionService.findLive(SessionLookup)` (turn 1)
    was removed, unused. `mvn -o verify`: 286 unit tests, 36 ITs.
-4. `request / status / claim` bound to the device instead of the restricted session (one open request per device).
-5. Clean-up: unused result variants (`SessionGone` of the nine trust routes), `EnrollmentRepository.find` (no
-   caller since turn 3), docs.
+4. **Done 2026-11-03.** `request / status / claim` are bound to the device, not to the restricted session that
+   made the request: `EnrollmentRepository.findBySession` became `findLatestApproval(customer, channel, device)`
+   (the newest approval row whose requester lookup is this device, any state, so `status` still reports
+   FAILED/EXPIRED). `request` answers with the device's open request when there is one, from this login or a later
+   one (one open request per device); a closed request lets a later login ask again, while the same login still
+   gets `409` (`UQ_DE_CREATION` stays per session). `claim` works from any restricted session of the device. The
+   approval window (`auth.login.approval.pending-window`, also the PENDING row's lifetime) went from 10 minutes to
+   **24 hours**, so the new device can log in again to poll and claim. Known limits: two simultaneous requests from
+   two logins of one device can still make two rows (no database guard per device); a request written under a
+   rotated-out lookup key is not found; the claim's audit events use the claiming session as correlation ID
+   (linked to the request by `ENROLLMENT_ID`). `mvn -o verify`: 288 unit tests, 37 ITs.
+5. **Done 2026-11-03.** Clean-up of what slice 11 left unused: the `SessionGone` variant of the nine trust
+   results and its `401 SESSION_REQUIRED` mapping (a missing or bad caller is now the filter's `401
+   REQUEST_REJECTED`; `ListDevicesResult.SessionGone` stays, `/api/v1/devices` still reads the session);
+   `EnrollmentRepository.find` and the adapter's `isTargetDevice`; `DeviceEnrollment.start`, `countAttempt`,
+   `attemptsExhausted`, `markMfaRequired` (the primary steps live on `EnrollmentTransaction`, its row is made by
+   `fromTransaction`). Tests that used them now use approval rows or `fromTransaction`. README route table updated.
+   `mvn -o verify`: 288 unit tests, 37 ITs.
+
+Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
+and a database guard for one open approval request per device.
 
 ## Not in this slice
 

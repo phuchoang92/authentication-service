@@ -36,12 +36,6 @@ final class InMemoryEnrollmentRepository implements EnrollmentRepository {
     }
 
     @Override
-    public Optional<DeviceEnrollment> find(EnrollmentId id, CustomerId customerId, DeviceId deviceId) {
-        check();
-        return Optional.ofNullable(rows.get(id)).filter(e -> e.customerId().equals(customerId) && e.deviceId().equals(deviceId));
-    }
-
-    @Override
     public Optional<DeviceEnrollment> saveIfCurrent(DeviceEnrollment changed) {
         check();
         DeviceEnrollment stored = rows.get(changed.id());

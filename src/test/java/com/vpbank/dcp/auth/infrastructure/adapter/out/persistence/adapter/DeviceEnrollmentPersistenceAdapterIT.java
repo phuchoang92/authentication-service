@@ -99,34 +99,38 @@ class DeviceEnrollmentPersistenceAdapterIT {
     @Test
     void createIsIdempotentPerRestrictedSessionAndTheRowHoldsOnlyTheDeviceLookup() {
         SessionId session = SessionId.random();
-        DeviceEnrollment first = enrollments.create(DeviceEnrollment.start(EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET,
-                null, now.plusSeconds(600)), session);
-        DeviceEnrollment again = enrollments.create(DeviceEnrollment.start(EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET,
-                null, now.plusSeconds(600)), session);
+        TrustedDeviceId pendingTablet = TrustedDeviceId.random();
+        DeviceEnrollment first = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
+                Channel.MOBILE, TABLET, pendingTablet, now.plusSeconds(600)), session);
+        DeviceEnrollment again = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
+                Channel.MOBILE, TABLET, pendingTablet, now.plusSeconds(600)), session);
 
         assertThat(again.id()).isEqualTo(first.id());
         assertThat(enrollmentRows.count()).isEqualTo(1);
         assertThat(jdbc.sql("SELECT HEX(TARGET_CLIENT_DEVICE_ID_LOOKUP) FROM TRUSTED_DEVICE_ENROLLMENT").query(String.class).single())
                 .hasSize(64).doesNotContain(java.util.HexFormat.of().withUpperCase().formatHex("tablet-2".getBytes()));
-        assertThat(enrollments.find(first.id(), ALICE, TABLET)).isPresent();
-        assertThat(enrollments.find(first.id(), ALICE, PHONE)).isEmpty();           // another device cannot borrow it
-        assertThat(enrollments.find(first.id(), new CustomerId("77777"), TABLET)).isEmpty();
-        // Another session of the same customer may start its own enrollment.
-        assertThat(enrollments.create(DeviceEnrollment.start(EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET, null,
-                now.plusSeconds(600)), SessionId.random()).id()).isNotEqualTo(first.id());
+        assertThat(enrollments.findLatestApproval(ALICE, Channel.MOBILE, TABLET)).map(DeviceEnrollment::id).contains(first.id());
+        assertThat(enrollments.findLatestApproval(ALICE, Channel.MOBILE, PHONE)).isEmpty();  // another device cannot borrow it
+        assertThat(enrollments.findLatestApproval(new CustomerId("77777"), Channel.MOBILE, TABLET)).isEmpty();
+        // Another session of the same customer may make its own request.
+        assertThat(enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET,
+                pendingTablet, now.plusSeconds(600)), SessionId.random()).id()).isNotEqualTo(first.id());
     }
 
     @Test
     void stepsAreCompareAndSetOnVersion() {
-        DeviceEnrollment created = enrollments.create(DeviceEnrollment.start(EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET,
-                null, now.plusSeconds(600)), SessionId.random());
-        DeviceEnrollment counted = enrollments.saveIfCurrent(created.countAttempt()).orElseThrow();
-        assertThat(counted.verifyAttempts()).isEqualTo(1);
-        assertThat(counted.version()).isEqualTo(1);
-        assertThat(enrollments.saveIfCurrent(created.countAttempt())).isEmpty(); // stale
-        DeviceEnrollment mfa = enrollments.saveIfCurrent(counted.markMfaRequired("mfa-1")).orElseThrow();
-        assertThat(mfa.state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
-        assertThat(enrollments.find(mfa.id(), ALICE, TABLET).orElseThrow().mfaTransactionId()).isEqualTo("mfa-1");
+        DeviceEnrollment created = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
+                Channel.MOBILE, TABLET, TrustedDeviceId.random(), now.plusSeconds(600)), SessionId.random());
+        TrustedDeviceId phoneRow = TrustedDeviceId.random();
+        DeviceEnrollment approved = enrollments.saveIfCurrent(created.approveBy(phoneRow, "mfa-1")).orElseThrow();
+        assertThat(approved.version()).isEqualTo(1);
+        assertThat(enrollments.saveIfCurrent(created.approveBy(phoneRow, "mfa-2"))).isEmpty(); // stale
+        DeviceEnrollment failed = enrollments.saveIfCurrent(approved.fail()).orElseThrow();
+        assertThat(failed.state()).isEqualTo(EnrollmentState.FAILED);
+        DeviceEnrollment reread = enrollments.findLatestApproval(ALICE, Channel.MOBILE, TABLET).orElseThrow();
+        assertThat(reread.mfaTransactionId()).isEqualTo("mfa-1");
+        assertThat(reread.actorDeviceId()).isEqualTo(phoneRow);
+        assertThat(reread.version()).isEqualTo(2);
     }
 
     @Test

@@ -24,7 +24,5 @@ public sealed interface ConfirmEnrollmentResult {
 
     record Conflict() implements ConfirmEnrollmentResult { }
 
-    record SessionGone() implements ConfirmEnrollmentResult { }
-
     record Unavailable() implements ConfirmEnrollmentResult { }
 }

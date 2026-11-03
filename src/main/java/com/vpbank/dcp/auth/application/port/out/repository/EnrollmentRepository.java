@@ -14,13 +14,11 @@ import java.util.Optional;
 public interface EnrollmentRepository {
 
     /**
-     * Stores a new enrollment, or returns the one already created from the same restricted
-     * session (UQ_DE_CREATION): a retried init never makes a second enrollment.
+     * Stores a new approval request, or returns the one already created from the same restricted
+     * session (UQ_DE_CREATION): a retried request never makes a second row. (A primary enrollment's row is
+     * written by the trust commit instead, slice 11.)
      */
     DeviceEnrollment create(DeviceEnrollment fresh, SessionId sessionId);
-
-    /** The row keeps only the device ID's lookup, so the caller's session supplies the ID; it must match. */
-    Optional<DeviceEnrollment> find(EnrollmentId id, CustomerId customerId, DeviceId deviceId);
 
     /** Compare-and-set on version; returns the stored row. Empty = stale. */
     Optional<DeviceEnrollment> saveIfCurrent(DeviceEnrollment changed);

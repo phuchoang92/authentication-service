@@ -124,11 +124,15 @@ class TrustedDeviceServiceTest {
         TrustedDevice oldTablet = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
                 DevicePlatform.IOS, "{old}", NOW.minus(Duration.ofDays(9)), DevicePolicy.standard());
         devices.rows.put(oldTablet.id(), oldTablet);
-        com.vpbank.dcp.auth.domain.model.DeviceEnrollment enrollment = com.vpbank.dcp.auth.domain.model.DeviceEnrollment
-                .start(com.vpbank.dcp.auth.domain.model.EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET, oldTablet.id(),
-                        NOW.plusSeconds(600)).markMfaRequired("mfa-1");
-
         com.vpbank.dcp.auth.domain.model.SessionId restrictedSession = com.vpbank.dcp.auth.domain.model.SessionId.random();
+        com.vpbank.dcp.auth.domain.model.AdmittedSession tabletSession = new com.vpbank.dcp.auth.domain.model.AdmittedSession(
+                restrictedSession, ALICE, Channel.MOBILE, TABLET, com.vpbank.dcp.auth.domain.enums.SessionStatus.NEED_TRUSTED_DEVICE);
+        com.vpbank.dcp.auth.domain.model.DeviceEnrollment enrollment = com.vpbank.dcp.auth.domain.model.DeviceEnrollment
+                .fromTransaction(com.vpbank.dcp.auth.domain.model.EnrollmentTransaction.keyExchange(
+                        com.vpbank.dcp.auth.domain.model.EnrollmentId.random(), tabletSession, oldTablet.id(), "{new}",
+                        DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest", NOW.plusSeconds(600))
+                        .markMfaRequired("mfa-1"));
+
         TrustedDevice trusted = service.confirmTrust(enrollment, restrictedSession, DevicePlatform.IOS, "{new}", "receipt", "corr-c");
 
         assertThat(trusted.publicKey()).isEqualTo("{new}");

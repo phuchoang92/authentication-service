@@ -11,10 +11,11 @@ import lombok.Builder;
 
 /**
  * One trust transaction of an installation (phase 4). Two paths share the aggregate: the primary
- * enrollment of slice 5 (KEY_EXCHANGE → MFA_REQUIRED → COMPLETED, the device passes FACE itself) and
- * the approval of slice 6 (WAITING_APPROVAL → WAITING_AUTHORIZATION → COMPLETED, the current primary
- * device passes FACE + OTP and hands the new device a one-time authorization token). FAILED and EXPIRED
- * are terminal for both.
+ * enrollment of slice 5 (the device passes FACE itself; since slice 11 its steps run on an
+ * {@link EnrollmentTransaction} in the cache and the row is written once, MFA_REQUIRED → COMPLETED, at the
+ * trust commit) and the approval of slice 6 (WAITING_APPROVAL → WAITING_AUTHORIZATION → COMPLETED, the
+ * current primary device passes FACE + OTP and hands the new device a one-time authorization token).
+ * FAILED and EXPIRED are terminal for the approval.
  *
  * <p>{@code deviceId} is the requesting installation; the row stores only its HMAC lookup, so the
  * caller supplies it when the aggregate is rebuilt. {@code targetDeviceId} is the device row that will
@@ -46,24 +47,6 @@ public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel c
                 && (authorizationTokenDigest == null || authorizationExpiresAt == null || actorDeviceId == null)) {
             throw new IllegalArgumentException("WAITING_AUTHORIZATION needs the approving device, the token digest and its expiry");
         }
-    }
-
-    /** Slice 5: the device itself will prove its key and pass FACE. */
-    public static DeviceEnrollment start(EnrollmentId id, CustomerId customerId, Channel channel, DeviceId deviceId,
-                                         TrustedDeviceId targetDeviceId, Instant expiresAt) {
-        return DeviceEnrollment.builder()
-                .id(id)
-                .customerId(customerId)
-                .channel(channel)
-                .deviceId(deviceId)
-                .purpose(EnrollmentPurpose.TRUST_DEVICE)
-                .state(EnrollmentState.KEY_EXCHANGE)
-                .targetDeviceId(targetDeviceId)
-                .verifyAttempts(0)
-                .authorizationAttempts(0)
-                .expiresAt(expiresAt)
-                .version(0)
-                .build();
     }
 
     /** Slice 6: the request waits for the primary device; {@code targetDeviceId} is the PENDING or known live row. */
@@ -118,25 +101,7 @@ public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel c
         return purpose == EnrollmentPurpose.TRUST_DEVICE_APPROVAL;
     }
 
-    // ---- slice 5 path ----
-
-    public DeviceEnrollment countAttempt() {
-        requireState(EnrollmentState.KEY_EXCHANGE);
-        return toBuilder().verifyAttempts(verifyAttempts + 1).build();
-    }
-
-    public boolean attemptsExhausted(EnrollmentPolicy policy) {
-        return verifyAttempts >= policy.maxVerifyAttempts();
-    }
-
-    public DeviceEnrollment markMfaRequired(String mfaTransactionId) {
-        requireState(EnrollmentState.KEY_EXCHANGE);
-        Objects.requireNonNull(mfaTransactionId, "mfaTransactionId");
-        return toBuilder()
-                .state(EnrollmentState.MFA_REQUIRED)
-                .mfaTransactionId(mfaTransactionId)
-                .build();
-    }
+    // ---- slice 5 path: the row is written at the trust commit (slice 11) ----
 
     public DeviceEnrollment complete() {
         requireState(EnrollmentState.MFA_REQUIRED);

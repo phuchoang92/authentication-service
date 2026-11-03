@@ -21,7 +21,5 @@ public sealed interface ClaimEnrollmentResult {
     /** No request from this session, or it is not waiting for the token yet. */
     record Conflict() implements ClaimEnrollmentResult { }
 
-    record SessionGone() implements ClaimEnrollmentResult { }
-
     record Unavailable() implements ClaimEnrollmentResult { }
 }

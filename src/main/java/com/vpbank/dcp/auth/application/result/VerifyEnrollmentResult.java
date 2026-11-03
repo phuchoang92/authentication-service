@@ -14,7 +14,5 @@ public sealed interface VerifyEnrollmentResult {
 
     record Conflict() implements VerifyEnrollmentResult { }
 
-    record SessionGone() implements VerifyEnrollmentResult { }
-
     record Unavailable() implements VerifyEnrollmentResult { }
 }

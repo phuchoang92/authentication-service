@@ -17,7 +17,5 @@ public sealed interface RequestApprovalResult {
     /** The session is not restricted, or another enrollment path is already in progress on it. */
     record Conflict() implements RequestApprovalResult { }
 
-    record SessionGone() implements RequestApprovalResult { }
-
     record Unavailable() implements RequestApprovalResult { }
 }

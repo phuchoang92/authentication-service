@@ -77,8 +77,6 @@ public final class TrustedDeviceRestMapper {
                     errorMessages.failure(HttpStatus.BAD_REQUEST, ErrorCodes.DEVICE_KEY_REQUIRED);
             case InitEnrollmentResult.Conflict() ->
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.STATE_CONFLICT);
-            case InitEnrollmentResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case InitEnrollmentResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };
@@ -92,8 +90,6 @@ public final class TrustedDeviceRestMapper {
                     errorMessages.failure(HttpStatus.FORBIDDEN, ErrorCodes.NO_USABLE_FACTOR);
             case VerifyEnrollmentResult.Conflict() ->
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.STATE_CONFLICT);
-            case VerifyEnrollmentResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case VerifyEnrollmentResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };
@@ -112,8 +108,6 @@ public final class TrustedDeviceRestMapper {
                     errorMessages.failure(HttpStatus.BAD_REQUEST, ErrorCodes.REQUEST_REJECTED);
             case ConfirmEnrollmentResult.Conflict() ->
                     errorMessages.failure(HttpStatus.CONFLICT, ErrorCodes.STATE_CONFLICT);
-            case ConfirmEnrollmentResult.SessionGone() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_REQUIRED);
             case ConfirmEnrollmentResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.TEMPORARILY_UNAVAILABLE);
         };

@@ -14,7 +14,5 @@ public sealed interface ApproveEnrollmentResult {
 
     record NoUsableFactor() implements ApproveEnrollmentResult { }
 
-    record SessionGone() implements ApproveEnrollmentResult { }
-
     record Unavailable() implements ApproveEnrollmentResult { }
 }

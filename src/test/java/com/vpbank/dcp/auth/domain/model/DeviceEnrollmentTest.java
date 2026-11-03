@@ -13,23 +13,28 @@ import org.junit.jupiter.api.Test;
 
 class DeviceEnrollmentTest {
     private static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
-    private final DeviceEnrollment started = DeviceEnrollment.start(EnrollmentId.random(), new CustomerId("90359"),
-            Channel.MOBILE, new DeviceId("tablet-2"), null, T0.plus(Duration.ofMinutes(10)));
+    /** A primary enrollment's row as the trust commit first sees it: past its key proof in the cache (slice 11). */
+    private final DeviceEnrollment primaryRow = DeviceEnrollment.fromTransaction(EnrollmentTransaction.keyExchange(
+                    EnrollmentId.random(),
+                    new AdmittedSession(SessionId.random(), new CustomerId("90359"), Channel.MOBILE,
+                            new DeviceId("tablet-2"), com.vpbank.dcp.auth.domain.enums.SessionStatus.NEED_TRUSTED_DEVICE),
+                    null,
+                    "{dev}",
+                    DevicePlatform.IOS,
+                    "{pub}",
+                    "{priv}",
+                    "digest",
+                    T0.plus(Duration.ofMinutes(10)))
+            .markMfaRequired("mfa-1"));
 
     @Test
-    void walksKeyExchangeToMfaRequiredToCompleted() {
-        assertThat(started.state()).isEqualTo(EnrollmentState.KEY_EXCHANGE);
-        assertThat(started.isOpen(T0)).isTrue();
-        assertThat(started.isOpen(T0.plus(Duration.ofMinutes(10)))).isFalse();
-        DeviceEnrollment counted = started.countAttempt().countAttempt();
-        assertThat(counted.verifyAttempts()).isEqualTo(2);
-        assertThat(counted.attemptsExhausted(EnrollmentPolicy.standard())).isFalse();
-        assertThat(counted.countAttempt().attemptsExhausted(EnrollmentPolicy.standard())).isTrue();
-        DeviceEnrollment mfa = counted.markMfaRequired("mfa-1");
-        assertThat(mfa.state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
-        assertThat(mfa.mfaTransactionId()).isEqualTo("mfa-1");
-        DeviceEnrollment done = mfa.complete();
+    void thePrimaryRowGoesFromMfaRequiredToCompletedAtTheCommit() {
+        assertThat(primaryRow.state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
+        assertThat(primaryRow.isOpen(T0)).isTrue();
+        assertThat(primaryRow.isOpen(T0.plus(Duration.ofMinutes(10)))).isFalse();
+        DeviceEnrollment done = primaryRow.complete();
         assertThat(done.state()).isEqualTo(EnrollmentState.COMPLETED);
+        assertThat(done.mfaMethod()).isEqualTo("FACE");
         assertThat(done.isOpen(T0)).isFalse();
     }
 
@@ -76,12 +81,14 @@ class DeviceEnrollmentTest {
 
     @Test
     void stepsOutOfOrderAreProgrammingErrorsAndTerminalStatesStayTerminal() {
-        assertThatThrownBy(started::complete).isInstanceOf(EnrollmentStateException.class);
-        assertThatThrownBy(() -> started.markMfaRequired("x").countAttempt()).isInstanceOf(EnrollmentStateException.class);
-        assertThatThrownBy(() -> started.fail().fail()).isInstanceOf(EnrollmentStateException.class);
-        assertThatThrownBy(() -> started.markMfaRequired("x").complete().expire()).isInstanceOf(EnrollmentStateException.class);
-        assertThat(started.markMfaRequired("x").expire().state()).isEqualTo(EnrollmentState.EXPIRED);
-        assertThatThrownBy(() -> started.toBuilder().state(EnrollmentState.MFA_REQUIRED).build())
+        DeviceEnrollment requested = DeviceEnrollment.requestApproval(EnrollmentId.random(), new CustomerId("90359"),
+                Channel.MOBILE, new DeviceId("watch-3"), TrustedDeviceId.random(), T0.plus(Duration.ofMinutes(10)));
+        assertThatThrownBy(requested::complete).isInstanceOf(EnrollmentStateException.class);
+        assertThatThrownBy(() -> primaryRow.countClaimAttempt()).isInstanceOf(EnrollmentStateException.class);
+        assertThatThrownBy(() -> requested.fail().fail()).isInstanceOf(EnrollmentStateException.class);
+        assertThatThrownBy(() -> primaryRow.complete().expire()).isInstanceOf(EnrollmentStateException.class);
+        assertThat(primaryRow.expire().state()).isEqualTo(EnrollmentState.EXPIRED);
+        assertThatThrownBy(() -> primaryRow.toBuilder().mfaTransactionId(null).build())
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

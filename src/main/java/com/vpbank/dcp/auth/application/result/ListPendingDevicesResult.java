@@ -13,7 +13,5 @@ public sealed interface ListPendingDevicesResult {
     /** The caller's session is not an ACTIVE session on the customer's current primary device. */
     record NotPrimaryDevice() implements ListPendingDevicesResult { }
 
-    record SessionGone() implements ListPendingDevicesResult { }
-
     record Unavailable() implements ListPendingDevicesResult { }
 }

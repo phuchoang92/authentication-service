@@ -11,7 +11,5 @@ public sealed interface ApprovalStatusResult {
     /** This restricted session has not made an approval request. */
     record NoRequest() implements ApprovalStatusResult { }
 
-    record SessionGone() implements ApprovalStatusResult { }
-
     record Unavailable() implements ApprovalStatusResult { }
 }

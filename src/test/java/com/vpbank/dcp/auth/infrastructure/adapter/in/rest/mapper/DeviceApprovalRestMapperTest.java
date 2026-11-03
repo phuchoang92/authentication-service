@@ -88,7 +88,6 @@ class DeviceApprovalRestMapperTest {
         assertFailure(mapper.toResponse(new RequestApprovalResult.DeviceKeyRequired()), HttpStatus.BAD_REQUEST, "DEVICE_KEY_REQUIRED");
         assertFailure(mapper.toResponse(new RequestApprovalResult.TooManyPending()), HttpStatus.CONFLICT, "TOO_MANY_PENDING_DEVICES");
         assertFailure(mapper.toResponse(new RequestApprovalResult.Conflict()), HttpStatus.CONFLICT, "STATE_CONFLICT");
-        assertFailure(mapper.toResponse(new RequestApprovalResult.SessionGone()), HttpStatus.UNAUTHORIZED, "SESSION_REQUIRED");
         assertFailure(mapper.toResponse(new RequestApprovalResult.Unavailable()), HttpStatus.SERVICE_UNAVAILABLE, "TEMPORARILY_UNAVAILABLE");
 
         var status = mapper.toResponse(new ApprovalStatusResult.Status(ENROLLMENT, EnrollmentState.FAILED, EXPIRES));
@@ -127,7 +126,6 @@ class DeviceApprovalRestMapperTest {
         assertThat(wrong.getBody().error().message()).isEqualTo("The QR code is not correct");
         assertFailure(mapper.toResponse(new ClaimEnrollmentResult.AuthorizationExpired()), HttpStatus.UNAUTHORIZED, "AUTHORIZATION_EXPIRED");
         assertFailure(mapper.toResponse(new ClaimEnrollmentResult.Conflict()), HttpStatus.CONFLICT, "STATE_CONFLICT");
-        assertFailure(mapper.toResponse(new ClaimEnrollmentResult.SessionGone()), HttpStatus.UNAUTHORIZED, "SESSION_REQUIRED");
     }
 
     private static void assertFailure(ResponseEntity<? extends ApiEnvelope<?>> response, HttpStatus status, String code) {

@@ -27,7 +27,5 @@ public sealed interface AuthorizeEnrollmentResult {
     /** Unknown request, no approval in progress, or approved by another device. */
     record Conflict() implements AuthorizeEnrollmentResult { }
 
-    record SessionGone() implements AuthorizeEnrollmentResult { }
-
     record Unavailable() implements AuthorizeEnrollmentResult { }
 }

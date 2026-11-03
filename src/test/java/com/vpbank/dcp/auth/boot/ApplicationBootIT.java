@@ -323,19 +323,30 @@ class ApplicationBootIT {
         mvc.perform(get("/api/v1/trusted-device/status").header("Authorization", bffAssertion(watchRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_AUTHORIZATION"));
 
-        // The watch scans the QR: a wrong token costs an attempt, the right one makes it trusted and primary.
+        // The watch scans the QR: a wrong token costs an attempt.
         ECKey watchKenc = new ECKeyGenerator(Curve.P_256).generate();
         String claimBody = "{\"authorizationToken\":\"" + qrToken + "\",\"tokenEncryptionKey\":" + watchKenc.toPublicJWK().toJSONString() + "}";
         mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", bffAssertion(watchRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON).content(claimBody.replace(qrToken, "not-the-qr-token")))
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("WRONG_AUTHORIZATION"))
                 .andExpect(jsonPath("$.error.details[0].message").value("4"));
-        MvcResult claim = mvc.perform(post("/api/v1/trusted-device/claim").header("Authorization", bffAssertion(watchRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE"))
+
+        // The request belongs to the watch, not to that login (slice 11): the customer logs in on the watch again,
+        // still sees the request and claims it from the new restricted session.
+        MvcResult watchLoginAgain = mvc.perform(post("/api/ns/v1/login").contentType(MediaType.APPLICATION_JSON).content(watchBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("NEED_TRUSTED_DEVICE")).andReturn();
+        String watchSecondRestrictedToken = tokenOf(watchLoginAgain, kenc);
+        mvc.perform(get("/api/v1/trusted-device/status")
+                        .header("Authorization", bffAssertion(watchSecondRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("WAITING_AUTHORIZATION"))
+                .andExpect(jsonPath("$.data.enrollmentId").value(approvalId));
+        MvcResult claim = mvc.perform(post("/api/v1/trusted-device/claim")
+                        .header("Authorization", bffAssertion(watchSecondRestrictedToken, "watch-3", "NEED_TRUSTED_DEVICE"))
                         .contentType(MediaType.APPLICATION_JSON).content(claimBody))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.status").value("ACTIVE"))
                 .andExpect(jsonPath("$..token").doesNotExist()).andReturn();
-        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + watchRestrictedToken))
-                .andExpect(status().isUnauthorized()); // the restricted session was consumed by the claim
+        mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + watchSecondRestrictedToken))
+                .andExpect(status().isUnauthorized()); // the restricted session that claimed was consumed
         String watchActiveToken = tokenOf(claim, watchKenc);
         mvc.perform(get("/api/v1/devices").header("Authorization", "Bearer " + watchActiveToken))
                 .andExpect(status().isOk())

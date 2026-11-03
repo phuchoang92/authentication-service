@@ -38,7 +38,7 @@ trusted-device routes are admitted by a signed BFF assertion instead of the app'
 | `GET /api/v1/trusted-device/pending` | BFF for the primary device (ACTIVE session) | `200 [{enrollmentId, deviceId (masked), platform, status, expiresAt}]`; `403 NOT_PRIMARY_DEVICE` |
 | `POST /api/v1/trusted-device/pending/{enrollmentId}/approve` | BFF for the primary device | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}` (FACE + OTP at MFA); `403 NOT_PRIMARY_DEVICE`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT` |
 | `POST /api/v1/trusted-device/pending/{enrollmentId}/authorize` | BFF for the primary device | `200 {status:"WAITING_AUTHORIZATION", enrollmentId, authorizationToken, expiresAt}` — the QR; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT` |
-| `POST /api/v1/trusted-device/claim` | BFF for the new device (the same restricted session) | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at claim; `401 WRONG_AUTHORIZATION` + detail `attemptsLeft`; `401 AUTHORIZATION_EXPIRED`; `409 STATE_CONFLICT` |
+| `POST /api/v1/trusted-device/claim` | BFF for the new device (a restricted session of the requesting device) | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at claim; `401 WRONG_AUTHORIZATION` + detail `attemptsLeft`; `401 AUTHORIZATION_EXPIRED`; `409 STATE_CONFLICT` |
 | `GET /api/v1/devices` | app, ACTIVE session | `200 [{deviceId (masked), platform, status, trustLevel, primary, trustedAt, expiresAt, lastLoginAt}]`; `403 DEVICE_TRUST_REQUIRED` from a restricted session |
 | `POST /internal/v1/customers/{customerId}/password-unlock` | bank tooling | `204`; `404 CUSTOMER_UNKNOWN` |
 | `POST /internal/v1/sessions/extend` | BFF after admission (flow 16) | `200 {idleExpiresAt, absoluteExpiresAt}`; `400`; `410 SESSION_GONE`; `409 SESSION_CONFLICT`; `503` |
@@ -92,11 +92,12 @@ record and ends the session. The MFA contract is an assumption until the MFA tea
 
 **Approval by the primary device (phase 4, second path, slice 6):** a new installation on a restricted
 session calls `request` with its public key; Auth keeps a `PENDING` device row (not trusted, at most 3
-waiting per customer and channel) and an approval request bound to that session. The customer opens the
+waiting per customer and channel) and an approval request that belongs to the device and waits 24 hours (slice 11:
+a later login of the same device sees the same request, polls it and may claim it). The customer opens the
 current primary device, lists the pending requests, approves one (FACE + OTP at the MFA service) and
 receives a one-time 32-byte token, valid 180 s, which the app shows as a QR. The new device scans it and
-calls `claim` from the same session: attempts are counted before the digest check (5, then the request
-fails and the session ends), and on success one SQL transaction makes the pending row trusted and the
+calls `claim` from a restricted session of that device: attempts are counted before the digest check (5, then the
+request fails and the session ends), and on success one SQL transaction makes the pending row trusted and the
 customer's primary (`PRIMARY_MODE = OLD_DEVICE_APPROVAL`), expires the oldest device beyond the cap,
 completes the request and writes the audit trail with the approving device as actor. The old primary
 stays trusted. Auth stores only the token's SHA-256. Push notification to the primary is a follow-up.
