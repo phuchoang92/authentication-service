@@ -2,6 +2,7 @@ package com.vpbank.dcp.auth.domain.model;
 
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
+
 import java.util.Objects;
 
 /**
@@ -23,12 +24,16 @@ public record AdmittedSession(SessionId sessionId, CustomerId customerId, Channe
         }
     }
 
-    /** A NEED_TRUSTED_DEVICE session: the device still needs trust (request, init, verify, confirm, claim). */
+    /**
+     * A NEED_TRUSTED_DEVICE session: the device still needs trust (request, init, verify, confirm, claim).
+     */
     public boolean restricted() {
         return status == SessionStatus.NEED_TRUSTED_DEVICE;
     }
 
-    /** An ACTIVE session: the device is trusted (pending list, approve, authorize). */
+    /**
+     * An ACTIVE session: the device is trusted (pending list, approve, authorize).
+     */
     public boolean full() {
         return status.full();
     }

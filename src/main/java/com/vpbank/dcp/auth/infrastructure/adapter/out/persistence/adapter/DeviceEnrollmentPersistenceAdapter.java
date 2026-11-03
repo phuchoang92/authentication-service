@@ -105,25 +105,22 @@ public class DeviceEnrollmentPersistenceAdapter implements EnrollmentRepository 
         return MessageDigest.isEqual(enrollmentEntity.getTargetClientDeviceIdLookup(), expectedLookup);
     }
 
+    /**
+     * The approval row keeps the requesting device only as its HMAC lookup, so the lookup is computed with the
+     * current lookup key and matched exactly. A request written under a lookup key that has since been rotated out
+     * is not found; requests live a day at most (slice 11).
+     */
     @Override
-    public Optional<DeviceEnrollment> findBySession(CustomerId customerId, DeviceId deviceId, SessionId sessionId) {
+    public Optional<DeviceEnrollment> findLatestApproval(CustomerId customerId, Channel channel, DeviceId deviceId) {
         try {
-            byte[] creationDigest = DeviceEnrollmentPersistenceMapper.creationDigest(sessionId);
-            Optional<DeviceEnrollmentEntity> enrollmentEntity = deviceEnrollmentJpaRepository
-                    .findByCustomerIdAndPurposeAndCreationIdempotencyDigest(
+            byte[] requesterLookup = deviceIdProtection.lookup(customerId, channel, deviceId);
+            Optional<DeviceEnrollmentEntity> latestEntity = deviceEnrollmentJpaRepository
+                    .findFirstByCustomerIdAndChannelAndPurposeAndRequesterClientDeviceIdLookupOrderByCreatedAtDesc(
                             customerId.value(),
+                            channel.name(),
                             EnrollmentPurpose.TRUST_DEVICE_APPROVAL,
-                            creationDigest);
-            if (enrollmentEntity.isEmpty()) {
-                return Optional.empty();
-            }
-
-            boolean belongsToDevice = isTargetDevice(enrollmentEntity.get(), customerId, deviceId);
-            if (!belongsToDevice) {
-                return Optional.empty();
-            }
-
-            return Optional.of(DeviceEnrollmentPersistenceMapper.toDomain(enrollmentEntity.get(), deviceId));
+                            requesterLookup);
+            return latestEntity.map(entity -> DeviceEnrollmentPersistenceMapper.toDomain(entity, deviceId));
         } catch (DataAccessException failure) {
             throw new RepositoryUnavailableException(failure);
         }

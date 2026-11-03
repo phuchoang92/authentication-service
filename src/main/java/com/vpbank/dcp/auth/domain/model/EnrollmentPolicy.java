@@ -32,6 +32,6 @@ public record EnrollmentPolicy(int maxVerifyAttempts, Duration pendingWindow, Du
     }
 
     public static EnrollmentPolicy standard() {
-        return new EnrollmentPolicy(3, Duration.ofMinutes(10), Duration.ofSeconds(180), 5, 3);
+        return new EnrollmentPolicy(3, Duration.ofHours(24), Duration.ofSeconds(180), 5, 3);
     }
 }

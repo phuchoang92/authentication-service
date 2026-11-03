@@ -26,10 +26,10 @@ public interface EnrollmentRepository {
     Optional<DeviceEnrollment> saveIfCurrent(DeviceEnrollment changed);
 
     /**
-     * Slice 6: the enrollment the given restricted session created, if any (the claim and the status poll
-     * are bound to that session). The device ID comes from the session.
+     * The newest approval request of this device on the channel, in any state (slice 11: the request, the status
+     * poll and the claim are bound to the device, not to the restricted session that made the request).
      */
-    Optional<DeviceEnrollment> findBySession(CustomerId customerId, DeviceId deviceId, SessionId sessionId);
+    Optional<DeviceEnrollment> findLatestApproval(CustomerId customerId, Channel channel, DeviceId deviceId);
 
     /**
      * Slice 6, from the primary device's side: an approval enrollment of the customer on the channel. The

@@ -160,7 +160,8 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
     /**
      * The enrollment flow's commit, all or nothing: replaced/capped rows → EXPIRED, the new trusted row,
      * the primary row re-pointed (FACE_CONFIRMED, enrollment, face flag), the enrollment COMPLETED, and
-     * the audit trail 0..n under the correlation ID with the enrollment ID and the MFA receipt digest.
+     * the audit trail 0..n under the correlation ID with the enrollment ID and the MFA receipt digest. A primary
+     * enrollment's row is inserted here, already COMPLETED (slice 11); an approval's existing row is updated.
      */
     @Override
     @Transactional
@@ -224,7 +225,16 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
                     confirmation.primaryMode());
             primaryTrustedDeviceJpaRepository.saveAndFlush(primaryEntity);
 
-            DeviceEnrollmentEntity enrollmentEntity = deviceEnrollmentJpaRepository.findById(enrollmentId).orElseThrow();
+            DeviceEnrollmentEntity enrollmentEntity;
+            boolean firstWriteOfTheEnrollment = confirmation.creationSessionId() != null;
+            if (firstWriteOfTheEnrollment) {
+                enrollmentEntity = DeviceEnrollmentPersistenceMapper.toEntity(
+                        confirmation.enrollment(),
+                        confirmation.creationSessionId(),
+                        deviceIdProtection);
+            } else {
+                enrollmentEntity = deviceEnrollmentJpaRepository.findById(enrollmentId).orElseThrow();
+            }
             DeviceEnrollmentPersistenceMapper.apply(enrollmentEntity, confirmation.enrollment(), now);
             deviceEnrollmentJpaRepository.saveAndFlush(enrollmentEntity);
 

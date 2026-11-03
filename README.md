@@ -59,9 +59,7 @@ against the realm JWKS.
 `deviceId`, `sessionKind` (`ACTIVE` / `NEED_TRUSTED_DEVICE`), `iat`, `exp` (≤ 60 s later), `jti` (used once, kept
 in Valkey `bff-assertion:used:v1:<sha256>`). A bad or replayed assertion is `401 REQUEST_REJECTED`, a replay store
 that cannot answer `503`. The use cases read no session to learn the caller; they check the asserted kind per
-route (`409 STATE_CONFLICT` / `403 NOT_PRIMARY_DEVICE`). Until slice 11 turn 3 the primary enrollment still
-reads its transaction context from the restricted session's HASH, by the asserted address. The BFF does not
-mint these assertions yet.
+route (`409 STATE_CONFLICT` / `403 NOT_PRIMARY_DEVICE`). The BFF does not mint these assertions yet.
 
 **One Valkey read per request (slice 8):** the session filter on `/api/**` only checks that the Bearer token has
 the right shape; it reads nothing. The use case behind the route reads the session once, decides whether that
@@ -86,9 +84,11 @@ wrong answer fails the enrollment and ends the session), which opens a FACE tran
 service. `confirm` reads the signed receipt (ES256 from a pinned key, exact claim set) and on PASSED
 writes, in one SQL transaction, the new trusted row (replacing a previous row of the same
 installation, expiring the oldest beyond the cap), the primary row (`FACE_CONFIRMED`), the
-enrollment `COMPLETED` and the audit trail; the restricted session is consumed and a new ACTIVE
-session is sealed to the key sent at confirm. Ksrv's private key lives only in the restricted
-session's Valkey HASH. The MFA contract is an assumption until the MFA team confirms it.
+enrollment row (inserted `COMPLETED`) and the audit trail; the restricted session is consumed and a new ACTIVE
+session is sealed to the key sent at confirm. Until then the steps share one Valkey record per device
+(`enrollment-tx:v1:<channel>:<customerId>:<deviceId>`, slice 11): Ksrv, challenge digest, attempts and MFA
+transaction, compare-and-set on every step; nothing reaches SQL before the commit, and a failure removes the
+record and ends the session. The MFA contract is an assumption until the MFA team confirms it.
 
 **Approval by the primary device (phase 4, second path, slice 6):** a new installation on a restricted
 session calls `request` with its public key; Auth keeps a `PENDING` device row (not trusted, at most 3

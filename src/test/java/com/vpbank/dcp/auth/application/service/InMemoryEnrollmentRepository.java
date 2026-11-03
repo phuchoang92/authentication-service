@@ -9,13 +9,17 @@ import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Enrollments with the adapter's contract: one per restricted session (idempotent create), CAS on version. */
+/**
+ * Enrollments with the adapter's contract: one per restricted session (idempotent create), CAS on version, and the
+ * newest approval of a device found by the device (insertion order stands in for CREATED_AT).
+ */
 final class InMemoryEnrollmentRepository implements EnrollmentRepository {
-    final Map<EnrollmentId, DeviceEnrollment> rows = new HashMap<>();
+    final Map<EnrollmentId, DeviceEnrollment> rows = new LinkedHashMap<>();
     final Map<SessionId, EnrollmentId> bySession = new HashMap<>();
     boolean unavailable;
 
@@ -50,13 +54,19 @@ final class InMemoryEnrollmentRepository implements EnrollmentRepository {
     }
 
     @Override
-    public Optional<DeviceEnrollment> findBySession(CustomerId customerId, DeviceId deviceId, SessionId sessionId) {
+    public Optional<DeviceEnrollment> findLatestApproval(CustomerId customerId, Channel channel, DeviceId deviceId) {
         check();
-        EnrollmentId id = bySession.get(sessionId);
-        if (id == null) {
-            return Optional.empty();
+        DeviceEnrollment latest = null;
+        for (DeviceEnrollment enrollment : rows.values()) {
+            boolean thisDevicesApproval = enrollment.isApproval()
+                    && enrollment.customerId().equals(customerId)
+                    && enrollment.channel() == channel
+                    && enrollment.deviceId().equals(deviceId);
+            if (thisDevicesApproval) {
+                latest = enrollment;
+            }
         }
-        return find(id, customerId, deviceId);
+        return Optional.ofNullable(latest);
     }
 
     @Override

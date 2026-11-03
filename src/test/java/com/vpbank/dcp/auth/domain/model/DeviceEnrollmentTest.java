@@ -7,7 +7,6 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.exception.EnrollmentStateException;
-import com.vpbank.dcp.auth.domain.exception.SessionStateException;
 import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -87,18 +86,27 @@ class DeviceEnrollmentTest {
     }
 
     @Test
-    void onlyARestrictedSessionCarriesAnEnrollmentContextAndItRedactsKeys() {
-        EnrollmentContext context = EnrollmentContext.builder().enrollmentId(started.id()).devicePublicJwk("{dev}")
-                .platform(DevicePlatform.IOS).serverPublicJwk("{pub}").serverPrivateJwk("{PRIVATE}").challengeDigest("d").build();
-        Session restricted = Session.startRestricted(SessionId.random(), new CustomerId("90359"), new DeviceId("tablet-2"),
-                Channel.MOBILE, T0, DevicePolicy.standard());
-        Session withContext = restricted.withEnrollment(context);
-        assertThat(withContext.enrollment().keyProven()).isFalse();
-        assertThat(withContext.withEnrollment(context.proven()).enrollment().keyProven()).isTrue();
-        assertThat(context.toString()).doesNotContain("PRIVATE");
+    void aTransactionPastItsKeyProofBecomesThePrimaryEnrollmentRowTheCommitWrites() {
+        AdmittedSession tablet = new AdmittedSession(SessionId.random(), new CustomerId("90359"), Channel.MOBILE,
+                new DeviceId("tablet-2"), com.vpbank.dcp.auth.domain.enums.SessionStatus.NEED_TRUSTED_DEVICE);
+        EnrollmentTransaction started = EnrollmentTransaction.keyExchange(EnrollmentId.random(), tablet,
+                TrustedDeviceId.random(), "{dev}", DevicePlatform.IOS, "{pub}", "{priv}", "digest", T0.plusSeconds(600));
+        EnrollmentTransaction passed = started.countVerifyAttempt().markMfaRequired("mfa-1");
 
-        Session active = Session.start(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE, T0,
-                new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)));
-        assertThatThrownBy(() -> active.withEnrollment(context)).isInstanceOf(SessionStateException.class);
+        DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed);
+
+        assertThat(enrollment.id()).isEqualTo(passed.id());
+        assertThat(enrollment.purpose()).isEqualTo(com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose.TRUST_DEVICE);
+        assertThat(enrollment.state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
+        assertThat(enrollment.customerId()).isEqualTo(tablet.customerId());
+        assertThat(enrollment.deviceId()).isEqualTo(tablet.deviceId());
+        assertThat(enrollment.targetDeviceId()).isEqualTo(passed.targetDeviceId());
+        assertThat(enrollment.mfaTransactionId()).isEqualTo("mfa-1");
+        assertThat(enrollment.verifyAttempts()).isEqualTo(1);
+        assertThat(enrollment.expiresAt()).isEqualTo(passed.expiresAt());
+        assertThat(enrollment.version()).isZero();
+        assertThat(enrollment.complete().state()).isEqualTo(EnrollmentState.COMPLETED);
+
+        assertThatThrownBy(() -> DeviceEnrollment.fromTransaction(started)).isInstanceOf(EnrollmentStateException.class);
     }
 }

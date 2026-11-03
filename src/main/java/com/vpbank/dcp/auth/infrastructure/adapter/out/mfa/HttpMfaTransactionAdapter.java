@@ -4,8 +4,6 @@ import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableExce
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
-import com.vpbank.dcp.auth.domain.model.CustomerId;
-import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.mfa.dto.CheckTransactionRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.mfa.dto.CheckTransactionResponse;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.mfa.dto.CreateTransactionRequest;
@@ -23,7 +21,7 @@ import org.springframework.web.client.RestClientException;
  * any other 4xx is a contract error and fails closed. {@code check} reads the signed receipt; 404 =
  * the transaction expired. 5xx and timeouts are unavailable; Auth never retries here.
  *
- * <p>The customer number is needed to verify the receipt's binding, so it travels with the check.
+ * <p>The customer number is needed to verify the receipt's binding, so it travels with the check request.
  */
 @RequiredArgsConstructor
 public final class HttpMfaTransactionAdapter implements MfaTransactionPort {
@@ -38,12 +36,6 @@ public final class HttpMfaTransactionAdapter implements MfaTransactionPort {
 
     @NonNull private final RestClient restClient;
     @NonNull private final MfaReceiptVerifier mfaReceiptVerifier;
-    @NonNull private final CustomerLookup enrollmentCustomerLookup;
-
-    /** Resolves the customer behind an enrollment for the receipt check; wired from the enrollment repository. */
-    public interface CustomerLookup {
-        CustomerId customerOf(EnrollmentId authOperationId);
-    }
 
     @Override
     public CreateResult create(MfaTransactionRequest mfaTransactionRequest) {
@@ -106,11 +98,10 @@ public final class HttpMfaTransactionAdapter implements MfaTransactionPort {
                             throw new PartnerUnavailableException(PARTNER);
                         }
 
-                        CustomerId customerId = enrollmentCustomerLookup.customerOf(mfaCheckRequest.authOperationId());
                         return mfaReceiptVerifier.verify(
                                 checkResponse.data().receipt(),
                                 mfaCheckRequest,
-                                customerId);
+                                mfaCheckRequest.customerId());
                     });
         } catch (RestClientException failure) {
             throw new PartnerUnavailableException(PARTNER, failure);

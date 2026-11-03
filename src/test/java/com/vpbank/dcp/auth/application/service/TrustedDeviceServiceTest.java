@@ -128,7 +128,8 @@ class TrustedDeviceServiceTest {
                 .start(com.vpbank.dcp.auth.domain.model.EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET, oldTablet.id(),
                         NOW.plusSeconds(600)).markMfaRequired("mfa-1");
 
-        TrustedDevice trusted = service.confirmTrust(enrollment, DevicePlatform.IOS, "{new}", "receipt", "corr-c");
+        com.vpbank.dcp.auth.domain.model.SessionId restrictedSession = com.vpbank.dcp.auth.domain.model.SessionId.random();
+        TrustedDevice trusted = service.confirmTrust(enrollment, restrictedSession, DevicePlatform.IOS, "{new}", "receipt", "corr-c");
 
         assertThat(trusted.publicKey()).isEqualTo("{new}");
         assertThat(devices.rows.get(oldTablet.id()).status()).isEqualTo(DeviceStatus.EXPIRED); // replaced, not counted as a peer
@@ -138,6 +139,8 @@ class TrustedDeviceServiceTest {
         assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).contains(trusted.id());
         assertThat(devices.confirmations.getFirst().enrollment().state())
                 .isEqualTo(EnrollmentState.COMPLETED);
+        // The row is written for the first time by this commit, bound to the restricted session (slice 11).
+        assertThat(devices.confirmations.getFirst().creationSessionId()).isEqualTo(restrictedSession);
         assertThat(service.knownDevice(ALICE, Channel.MOBILE, TABLET)).hasValueSatisfying(k ->
                 assertThat(k.publicKey()).isEqualTo("{new}"));
         assertThat(service.knownDevice(ALICE, Channel.MOBILE, new DeviceId("nobody"))).isEmpty();

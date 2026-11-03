@@ -54,13 +54,13 @@ class HttpMfaTransactionAdapterTest {
     private final RestClient.Builder builder = RestClient.builder().baseUrl(BASE);
     private final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
     private final HttpMfaTransactionAdapter mfa = new HttpMfaTransactionAdapter(builder.build(),
-            new MfaReceiptVerifier(KEY.toPublicJWK(), "mfa-service", Clock.fixed(NOW, ZoneOffset.UTC)), id -> ALICE);
+            new MfaReceiptVerifier(KEY.toPublicJWK(), "mfa-service", Clock.fixed(NOW, ZoneOffset.UTC)));
     private final MfaTransactionRequest request = MfaTransactionRequest.builder().customerId(ALICE).channel(Channel.MOBILE)
             .authOperationId(OP).purpose(EnrollmentPurpose.TRUST_DEVICE).factors(List.of(MfaFactor.FACE))
             .notAfter(NOW.plusSeconds(600)).contextDigest(DIGEST).build();
-    private final MfaCheckRequest faceCheck = MfaCheckRequest.builder().mfaTransactionId("mfa-1").authOperationId(OP)
+    private final MfaCheckRequest faceCheck = MfaCheckRequest.builder().mfaTransactionId("mfa-1").customerId(ALICE).authOperationId(OP)
             .purpose(EnrollmentPurpose.TRUST_DEVICE).factors(List.of(MfaFactor.FACE)).contextDigest(DIGEST).build();
-    private final MfaCheckRequest faceAndOtpCheck = MfaCheckRequest.builder().mfaTransactionId("mfa-1").authOperationId(OP)
+    private final MfaCheckRequest faceAndOtpCheck = MfaCheckRequest.builder().mfaTransactionId("mfa-1").customerId(ALICE).authOperationId(OP)
             .purpose(EnrollmentPurpose.TRUST_DEVICE_APPROVAL).factors(List.of(MfaFactor.FACE, MfaFactor.OTP))
             .contextDigest(DIGEST).build();
 

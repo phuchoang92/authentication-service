@@ -63,15 +63,13 @@ class SessionServiceTest {
     }
 
     @Test
-    void issuesARestrictedSessionWithTheFixedDeadlineAndFindsItByItsAddress() {
+    void issuesARestrictedSessionWithTheFixedDeadline() {
         IssuedSession issued = service.issueRestricted(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
 
         assertThat(issued.session().status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
         assertThat(issued.session().idleExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
         assertThat(issued.session().absoluteExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
-        // The BFF-admitted trust flows know only the channel and session ID (slice 11).
-        assertThat(service.findLive(LOOKUP)).map(StoredSession::session).contains(sessions.only());
-        assertThat(service.findLive(new SessionLookup(Channel.WEB, SESSION))).isEmpty();
+        assertThat(service.findLive(TOKEN)).map(StoredSession::session).contains(sessions.only());
     }
 
     @Test

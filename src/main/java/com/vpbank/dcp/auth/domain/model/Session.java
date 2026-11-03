@@ -12,14 +12,14 @@ import java.util.Objects;
 /**
  * One login session. An ACTIVE session's idle expiry slides with eligible activity up to the
  * fixed absolute expiry (DD 06 / flow 16). A NEED_TRUSTED_DEVICE session is restricted: one fixed
- * TTL, never extended (DD 20 §3); it carries the enrollment context of the trust flow (null until
- * init). {@code sessionVersion} is the compare-and-set revision the store must still see when it
- * saves a change; each saved change increments it in the store.
+ * TTL, never extended (DD 20 §3); the trust flow it runs keeps its own record (slice 11:
+ * {@link EnrollmentTransaction}). {@code sessionVersion} is the compare-and-set revision the store must
+ * still see when it saves a change; each saved change increments it in the store.
  */
 @Builder(toBuilder = true)
 public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
                       SessionStatus status, Instant createdAt, Instant idleExpiresAt,
-                      Instant absoluteExpiresAt, long sessionVersion, EnrollmentContext enrollment) {
+                      Instant absoluteExpiresAt, long sessionVersion) {
     public Session {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(customerId, "customerId");
@@ -110,17 +110,6 @@ public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Ch
             throw new SessionStateException("Session is already " + status);
         }
         return toBuilder().status(SessionStatus.ENDED).build();
-    }
-
-    /**
-     * Init attached the enrollment: its ID, the device key and Ksrv, the challenge digest. Restricted sessions only.
-     */
-    public Session withEnrollment(EnrollmentContext context) {
-        if (status != SessionStatus.NEED_TRUSTED_DEVICE) {
-            throw new SessionStateException("Only a restricted session carries an enrollment");
-        }
-        Objects.requireNonNull(context, "context");
-        return toBuilder().enrollment(context).build();
     }
 
     public Session withSessionVersion(long storedVersion) {

@@ -1,6 +1,11 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose;
+import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
+import com.vpbank.dcp.auth.domain.model.EnrollmentId;
+import com.vpbank.dcp.auth.domain.model.EnrollmentTransaction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -13,10 +18,20 @@ final class EnrollmentDigests {
 
     /** What MFA binds the transaction to (DD 20 §5): purpose, customer, channel, operation; recomputed, never stored. */
     static String contextDigest(DeviceEnrollment enrollment) {
-        String context = enrollment.purpose().name()
-                + ";" + enrollment.customerId().value()
-                + ";" + enrollment.channel().name()
-                + ";" + enrollment.id();
+        return contextDigest(enrollment.purpose(), enrollment.customerId(), enrollment.channel(), enrollment.id());
+    }
+
+    /** The same binding for a primary enrollment still in the cache (slice 11): it gives the same digest as its row. */
+    static String contextDigest(EnrollmentTransaction transaction) {
+        return contextDigest(EnrollmentPurpose.TRUST_DEVICE, transaction.customerId(), transaction.channel(), transaction.id());
+    }
+
+    private static String contextDigest(EnrollmentPurpose purpose, CustomerId customerId, Channel channel,
+                                        EnrollmentId enrollmentId) {
+        String context = purpose.name()
+                + ";" + customerId.value()
+                + ";" + channel.name()
+                + ";" + enrollmentId;
         return digest(context.getBytes(StandardCharsets.UTF_8));
     }
 

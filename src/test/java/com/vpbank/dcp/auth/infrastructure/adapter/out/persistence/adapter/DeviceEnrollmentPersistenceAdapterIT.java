@@ -10,11 +10,14 @@ import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.PrimaryMode;
+import com.vpbank.dcp.auth.domain.enums.SessionStatus;
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
+import com.vpbank.dcp.auth.domain.model.EnrollmentTransaction;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
@@ -135,17 +138,23 @@ class DeviceEnrollmentPersistenceAdapterIT {
                 DevicePlatform.IOS, "{old}", now, DevicePolicy.standard());
         deviceRows.saveAndFlush(com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper
                 .toEntity(oldTablet, protection()));
-        DeviceEnrollment created = enrollments.create(DeviceEnrollment.start(EnrollmentId.random(), ALICE, Channel.MOBILE, TABLET,
-                oldTablet.id(), now.plusSeconds(600)), SessionId.random());
-        DeviceEnrollment counted = enrollments.saveIfCurrent(created.countAttempt()).orElseThrow();
-        DeviceEnrollment enrollment = enrollments.saveIfCurrent(counted.markMfaRequired("mfa-1")).orElseThrow();
+        // Slice 11: init → verify lived in the cache, so the enrollment has no row until this commit.
+        SessionId restrictedSession = SessionId.random();
+        AdmittedSession tabletSession = new AdmittedSession(restrictedSession, ALICE, Channel.MOBILE, TABLET,
+                SessionStatus.NEED_TRUSTED_DEVICE);
+        EnrollmentTransaction passed = EnrollmentTransaction.keyExchange(EnrollmentId.random(), tabletSession, oldTablet.id(),
+                "{new}", DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest", now.plusSeconds(600))
+                .countVerifyAttempt()
+                .markMfaRequired("mfa-1");
+        DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed);
+        assertThat(enrollmentRows.findById(enrollment.id().value())).isEmpty();
         TrustedDevice newTablet = TrustedDevice.trustedByEnrollment(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
                 DevicePlatform.IOS, "{new}", now, DevicePolicy.standard());
 
         TrustedDevice trusted = devices.trustConfirmed(TrustConfirmation.builder().device(newTablet)
                 .replaced(oldTablet.expire()).expiredByCap(List.of()).enrollment(enrollment.complete())
                 .primaryMode(PrimaryMode.FACE_CONFIRMED).faceAuthenticated(true)
-                .receiptDigest("receipt-sha").build(), "corr-1");
+                .receiptDigest("receipt-sha").creationSessionId(restrictedSession).build(), "corr-1");
 
         assertThat(trusted.publicKey()).isEqualTo("{new}");
         assertThat(devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow().id()).isEqualTo(newTablet.id());
@@ -160,6 +169,13 @@ class DeviceEnrollmentPersistenceAdapterIT {
         assertThat(row.getState()).isEqualTo(EnrollmentState.COMPLETED);
         assertThat(row.getConfirmedMfaMethod()).isEqualTo("FACE");
         assertThat(row.getMfaConfirmedAt()).isNotNull();
+        assertThat(row.getPurpose()).isEqualTo(com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose.TRUST_DEVICE);
+        assertThat(row.getMultifactorId()).isEqualTo("mfa-1");
+        assertThat(row.getAuthorizationAttempts()).isEqualTo(1); // the verify attempts the transaction counted
+        assertThat(row.getTargetDeviceId()).isEqualTo(oldTablet.id().value());
+        assertThat(row.getCreationIdempotencyDigest())
+                .isEqualTo(com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.DeviceEnrollmentPersistenceMapper
+                        .creationDigest(restrictedSession));
         assertThat(audit.findByCorrelationIdOrderByEventSequenceAsc("corr-1"))
                 .extracting(TrustedDeviceAuditEntity::getEventType)
                 .containsExactly("DEVICE_REPLACED", "DEVICE_TRUSTED", "PRIMARY_CHANGED");
@@ -171,7 +187,7 @@ class DeviceEnrollmentPersistenceAdapterIT {
     }
 
     @Test
-    void anApprovalIsBoundToItsSessionReadableFromThePrimarySideAndCommitsThePendingRowAsPrimary() {
+    void anApprovalIsBoundToItsDeviceReadableFromThePrimarySideAndCommitsThePendingRowAsPrimary() {
         // The phone is the direct primary; the watch registered a PENDING row and asked for approval.
         TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, PHONE,
                 DevicePlatform.ANDROID, null, now, DevicePolicy.standard());
@@ -185,10 +201,11 @@ class DeviceEnrollmentPersistenceAdapterIT {
         DeviceEnrollment requested = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
                 Channel.MOBILE, watchId, watch.id(), now.plusSeconds(600)), watchSession);
 
-        // Bound to the session and the installation that made it.
-        assertThat(enrollments.findBySession(ALICE, watchId, watchSession)).map(DeviceEnrollment::id).contains(requested.id());
-        assertThat(enrollments.findBySession(ALICE, watchId, SessionId.random())).isEmpty();
-        assertThat(enrollments.findBySession(ALICE, PHONE, watchSession)).isEmpty();
+        // Bound to the requesting device (slice 11), not to the session: found from any login of the watch.
+        assertThat(enrollments.findLatestApproval(ALICE, Channel.MOBILE, watchId)).map(DeviceEnrollment::id).contains(requested.id());
+        assertThat(enrollments.findLatestApproval(ALICE, Channel.MOBILE, PHONE)).isEmpty();
+        assertThat(enrollments.findLatestApproval(ALICE, Channel.WEB, watchId)).isEmpty();
+        assertThat(enrollments.findLatestApproval(new CustomerId("77777"), Channel.MOBILE, watchId)).isEmpty();
         assertThat(jdbc.sql("SELECT HEX(REQUESTER_CLIENT_DEVICE_ID_LOOKUP) FROM TRUSTED_DEVICE_ENROLLMENT").query(String.class).single())
                 .hasSize(64);
 
@@ -215,7 +232,7 @@ class DeviceEnrollmentPersistenceAdapterIT {
         assertThat(row.getAuthorizationTokenDigest()).hasSize(32).startsWith(new byte[]{1, 2, 3});
         assertThat(row.getAuthorizationExpiresAt()).isEqualTo(now.plusSeconds(180));
         assertThat(row.getAuthorizationAttempts()).isEqualTo(1);
-        DeviceEnrollment reread = enrollments.findBySession(ALICE, watchId, watchSession).orElseThrow();
+        DeviceEnrollment reread = enrollments.findLatestApproval(ALICE, Channel.MOBILE, watchId).orElseThrow();
         assertThat(reread.authorizationTokenDigest()).isEqualTo(tokenDigest);
         assertThat(reread.authorizationAttempts()).isEqualTo(1);
         assertThat(reread.verifyAttempts()).isZero();
@@ -251,6 +268,33 @@ class DeviceEnrollmentPersistenceAdapterIT {
         assertThat(events.subList(1, 3)).extracting(TrustedDeviceAuditEntity::getReasonCode).containsOnly("OLD_DEVICE_APPROVAL");
         assertThat(events.subList(1, 3)).extracting(TrustedDeviceAuditEntity::getActorDeviceId).containsOnly(phone.id().value());
         assertThat(events.get(1).getMetadata()).contains(phone.id().value().toString());
+    }
+
+    @Test
+    void theNewestRequestOfTheDeviceIsTheOneFoundAndEachSessionStillCreatesOnlyOne() throws InterruptedException {
+        DeviceId watchId = new DeviceId("watch-3");
+        TrustedDevice watch = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE, watchId,
+                DevicePlatform.IOS, "{watch-key}", now, Duration.ofHours(24));
+        devices.registerPending(watch, "corr-w");
+        SessionId firstLogin = SessionId.random();
+        DeviceEnrollment first = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
+                Channel.MOBILE, watchId, watch.id(), now.plusSeconds(86400)), firstLogin);
+        enrollments.saveIfCurrent(first.fail()).orElseThrow();
+        Thread.sleep(5); // CREATED_AT orders the rows
+
+        // A second request from the same login is the first one again (UQ_DE_CREATION), closed as it is.
+        DeviceEnrollment retried = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
+                Channel.MOBILE, watchId, watch.id(), now.plusSeconds(86400)), firstLogin);
+        assertThat(retried.id()).isEqualTo(first.id());
+        assertThat(retried.state()).isEqualTo(EnrollmentState.FAILED);
+
+        // A later login of the same watch asks again: that newer request is the device's request now.
+        DeviceEnrollment second = enrollments.create(DeviceEnrollment.requestApproval(EnrollmentId.random(), ALICE,
+                Channel.MOBILE, watchId, watch.id(), now.plusSeconds(86400)), SessionId.random());
+        assertThat(enrollments.findLatestApproval(ALICE, Channel.MOBILE, watchId)).map(DeviceEnrollment::id)
+                .contains(second.id());
+        assertThat(enrollments.findOpenApprovals(ALICE, Channel.MOBILE)).extracting(DeviceEnrollment::id)
+                .containsExactly(second.id());
     }
 
     @Autowired com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection protectionBean;

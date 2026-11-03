@@ -85,6 +85,31 @@ public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel c
                 .build();
     }
 
+    /**
+     * Slice 11: the primary enrollment that passed its key proof in the cache, as the row the trust commit
+     * writes for the first time. It carries the attempts, the MFA transaction and the deadline it had there.
+     */
+    public static DeviceEnrollment fromTransaction(EnrollmentTransaction transaction) {
+        Objects.requireNonNull(transaction, "transaction");
+        if (transaction.state() != EnrollmentState.MFA_REQUIRED) {
+            throw new EnrollmentStateException("Only a transaction past its key proof becomes an enrollment row");
+        }
+        return DeviceEnrollment.builder()
+                .id(transaction.id())
+                .customerId(transaction.customerId())
+                .channel(transaction.channel())
+                .deviceId(transaction.deviceId())
+                .purpose(EnrollmentPurpose.TRUST_DEVICE)
+                .state(EnrollmentState.MFA_REQUIRED)
+                .targetDeviceId(transaction.targetDeviceId())
+                .mfaTransactionId(transaction.mfaTransactionId())
+                .verifyAttempts(transaction.verifyAttempts())
+                .authorizationAttempts(0)
+                .expiresAt(transaction.expiresAt())
+                .version(0)
+                .build();
+    }
+
     public boolean isOpen(Instant now) {
         return state.open() && now.isBefore(expiresAt);
     }

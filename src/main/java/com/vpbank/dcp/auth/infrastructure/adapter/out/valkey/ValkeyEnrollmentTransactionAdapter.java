@@ -78,6 +78,7 @@ public final class ValkeyEnrollmentTransactionAdapter implements EnrollmentTrans
         Map<String, String> fields = EnrollmentTransactionHashCodec.encode(nextVersion);
 
         boolean written = translate(() -> compareAndSet(key, expectedVersion, ops -> {
+            ops.delete(key);
             ops.opsForHash().putAll(key, fields);
             ops.expireAt(key, nextVersion.expiresAt());
         }));

@@ -47,6 +47,7 @@ import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
+import com.vpbank.dcp.auth.domain.model.EnrollmentTransaction;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Session;
 import com.vpbank.dcp.auth.domain.model.SessionId;
@@ -88,6 +89,7 @@ class DeviceApprovalServiceTest {
 
     private final InMemorySessionStore sessions = new InMemorySessionStore();
     private final InMemoryEnrollmentRepository enrollments = new InMemoryEnrollmentRepository();
+    private final InMemoryEnrollmentTransactionStore transactions = new InMemoryEnrollmentTransactionStore();
     private final InMemoryTrustedDeviceRepository devices = new InMemoryTrustedDeviceRepository();
     private final MfaTransactionPort mfa = mock(MfaTransactionPort.class);
     private final AuthorizationTokenGenerator qrTokens = mock(AuthorizationTokenGenerator.class);
@@ -98,7 +100,7 @@ class DeviceApprovalServiceTest {
             TrustedDeviceId::random, clock);
     private final SessionService sessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
             sessionPolicy(), DevicePolicy.standard(), clock);
-    private final DeviceApprovalService service = new DeviceApprovalService(sessionService, enrollments, devices,
+    private final DeviceApprovalService service = new DeviceApprovalService(sessionService, enrollments, transactions, devices,
             trustedDevices, mfa, qrTokens, () -> ENROLLMENT, EnrollmentPolicy.standard(), clock);
 
     private TrustedDevice phone;
@@ -221,7 +223,8 @@ class DeviceApprovalServiceTest {
 
         doReturn(new CheckResult.Passed("receipt")).when(mfa).check(argThat(check ->
                 check.mfaTransactionId().equals("mfa-7") && check.factorClaim().equals("FACE+OTP")
-                        && check.purpose() == EnrollmentPurpose.TRUST_DEVICE_APPROVAL));
+                        && check.purpose() == EnrollmentPurpose.TRUST_DEVICE_APPROVAL
+                        && check.customerId().equals(ALICE)));
         AuthorizeEnrollmentResult authorized = service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         assertThat(authorized).isEqualTo(new AuthorizeEnrollmentResult.Authorized(ENROLLMENT, QR_TOKEN, NOW.plusSeconds(180)));
         DeviceEnrollment stored = enrollments.only();
@@ -325,7 +328,7 @@ class DeviceApprovalServiceTest {
         Clock later = Clock.fixed(NOW.plusSeconds(180), ZoneOffset.UTC);
         SessionService laterSessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
                 sessionPolicy(), DevicePolicy.standard(), later);
-        DeviceApprovalService laterService = new DeviceApprovalService(laterSessionService, enrollments, devices,
+        DeviceApprovalService laterService = new DeviceApprovalService(laterSessionService, enrollments, transactions, devices,
                 trustedDevices, mfa, qrTokens, () -> ENROLLMENT, EnrollmentPolicy.standard(), later);
         assertThat(laterService.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.AuthorizationExpired.class);
@@ -348,6 +351,24 @@ class DeviceApprovalServiceTest {
         assertThat(confirmation.expiredByCap()).hasSize(1);
         assertThat(confirmation.expiredByCap().get(0).deviceId()).isEqualTo(new DeviceId("extra-2")); // oldest login
         assertThat(devices.findLive(ALICE, Channel.MOBILE)).hasSize(5);
+    }
+
+    @Test
+    void aSessionThatStartedThePrimaryEnrollmentCannotAlsoAskForApproval() {
+        EnrollmentTransaction startedOnThisSession = EnrollmentTransaction.keyExchange(EnrollmentId.random(), WATCH_SESSION,
+                null, WATCH_KEY, DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest", NOW.plusSeconds(600));
+        transactions.createIfAbsent(startedOnThisSession);
+
+        assertThat(service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS)))
+                .isInstanceOf(RequestApprovalResult.Conflict.class);
+        assertThat(enrollments.rows).isEmpty();
+        assertThat(devices.findLive(ALICE, Channel.MOBILE, WATCH)).isEmpty();
+
+        // A later login of the same watch is another session: the earlier login's transaction does not block it.
+        AdmittedSession laterWatchLogin = new AdmittedSession(SessionId.random(), ALICE, Channel.MOBILE, WATCH,
+                SessionStatus.NEED_TRUSTED_DEVICE);
+        assertThat(service.request(new RequestApprovalCommand(laterWatchLogin, WATCH_KEY, DevicePlatform.IOS)))
+                .isInstanceOf(RequestApprovalResult.WaitingApproval.class);
     }
 
     @Test

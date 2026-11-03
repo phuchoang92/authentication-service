@@ -19,9 +19,9 @@ public interface DeviceEnrollmentJpaRepository extends JpaRepository<DeviceEnrol
 
     Optional<DeviceEnrollmentEntity> findByIdAndCustomerId(UUID id, String customerId);
 
-    /** The enrollment a restricted session created for one purpose (slice 6: the claim binding). */
-    Optional<DeviceEnrollmentEntity> findByCustomerIdAndPurposeAndCreationIdempotencyDigest(
-            String customerId, EnrollmentPurpose purpose, byte[] creationIdempotencyDigest);
+    /** The newest enrollment of one requesting device for one purpose (slice 11: the approval is bound to the device). */
+    Optional<DeviceEnrollmentEntity> findFirstByCustomerIdAndChannelAndPurposeAndRequesterClientDeviceIdLookupOrderByCreatedAtDesc(
+            String customerId, String channel, EnrollmentPurpose purpose, byte[] requesterClientDeviceIdLookup);
 
     Optional<DeviceEnrollmentEntity> findByIdAndCustomerIdAndChannelAndPurpose(UUID id, String customerId, String channel,
                                                                                 EnrollmentPurpose purpose);

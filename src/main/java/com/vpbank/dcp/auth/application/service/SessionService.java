@@ -75,16 +75,6 @@ public final class SessionService {
                 .filter(stored -> stored.session().isLive(now));
     }
 
-    /**
-     * The same read by the session's address, for callers the BFF already admitted (slice 11): they know the
-     * channel and session ID from the assertion and never see the token.
-     */
-    public Optional<StoredSession> findLive(SessionLookup sessionLookup) {
-        Instant now = clock.instant();
-        return sessionStore.findByLookup(sessionLookup)
-                .filter(stored -> stored.session().isLive(now));
-    }
-
     // ---- issue ----
 
     public SessionId newSessionId() {

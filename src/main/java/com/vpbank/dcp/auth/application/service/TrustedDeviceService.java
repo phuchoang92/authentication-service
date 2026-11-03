@@ -15,6 +15,7 @@ import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
+import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.time.Clock;
@@ -145,9 +146,10 @@ public final class TrustedDeviceService {
      * proved and the customer's primary on the channel. A previous live row of the same installation
      * is replaced (a reinstall or a re-trust), the device cap is enforced, and everything is written in
      * one transaction with the enrollment and its audit trail. The old primary stays trusted (§7).
+     * The enrollment row is written here for the first time (slice 11), bound to {@code restrictedSessionId}.
      */
-    public TrustedDevice confirmTrust(DeviceEnrollment enrollment, DevicePlatform platform, String devicePublicJwk,
-                                      String receiptDigest, String correlationId) {
+    public TrustedDevice confirmTrust(DeviceEnrollment enrollment, SessionId restrictedSessionId, DevicePlatform platform,
+                                      String devicePublicJwk, String receiptDigest, String correlationId) {
         Instant now = clock.instant();
 
         List<TrustedDevice> liveTrustedDevices =
@@ -184,6 +186,7 @@ public final class TrustedDeviceService {
                 .primaryMode(PrimaryMode.FACE_CONFIRMED)
                 .faceAuthenticated(true)
                 .receiptDigest(receiptDigest)
+                .creationSessionId(restrictedSessionId)
                 .build();
 
         return trustedDeviceRepository.trustConfirmed(

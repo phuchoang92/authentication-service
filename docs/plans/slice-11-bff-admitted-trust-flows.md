@@ -30,11 +30,32 @@
    session; a request's deadline is `now + pendingWindow` (the PENDING row's). `DeviceEnrollmentService`
    still reads the restricted session by its asserted address, only for the transaction context it holds.
    `mvn -o verify`: 270 unit tests, 31 ITs.
-2. `TrustTransactionStore` (port + Valkey adapter, HASH codec, CAS on the step) and the domain transaction.
-3. `init / verify / confirm` on the transaction record; the enrollment row only at commit; `EnrollmentContext`
-   leaves `Session` and the session codec.
+2. **Done 2026-11-03.** `EnrollmentTransaction` (domain): owner (customer, channel, device, the restricted
+   session that ran init), device key and platform, Ksrv pair, challenge digest, verify attempts, MFA transaction
+   ID, deadline, version; states KEY_EXCHANGE → MFA_REQUIRED only (it reuses `EnrollmentState`); failure, expiry
+   and the trust commit remove it. Port `EnrollmentTransactionStore` (`createIfAbsent`, `find`, `saveIfCurrent`,
+   `deleteIfCurrent`) and `ValkeyEnrollmentTransactionAdapter`: one HASH per device at
+   `enrollment-tx:v1:<channel>:<customerId>:<deviceId>`, `PEXPIREAT` = deadline, every write WATCH/compare
+   version/MULTI, a save replaces the whole HASH (`DEL` + `HSET`). The confirm one-shot is `deleteIfCurrent`
+   (CAS removal), replacing today's session `DEL`. Ksrv's private key stays unencrypted, as in the session today.
+   Not wired into the services yet. `mvn -o verify`: 280 unit tests, 36 ITs.
+3. **Done 2026-11-03 (decisions agreed the same day).** `DeviceEnrollmentService` runs on
+   `EnrollmentTransactionStore` and reads no session: init creates the transaction (deadline = restricted
+   session TTL, `auth.device.restricted-session-ttl`); init from the same session twice is `409`, init from a later
+   login of the same device removes the earlier transaction (CAS) and starts over; verify and confirm need the
+   transaction of this session, open and at their step. Wrong-answer exhaustion, no usable factor, MFA FAILED and
+   EXPIRED remove the transaction and end the restricted session (no FAILED/EXPIRED row is written any more).
+   PASSED: `deleteIfCurrent` (one-shot) → consume the restricted session (already gone → `409`) → trust commit,
+   which **inserts** the enrollment row already COMPLETED (`TrustConfirmation.creationSessionId`,
+   `DeviceEnrollment.fromTransaction`). `MfaCheckRequest` carries the customer; `HttpMfaTransactionAdapter` lost its
+   row-based `CustomerLookup`. `EnrollmentDigests.contextDigest(EnrollmentTransaction)` gives the same digest as
+   the row would. `EnrollmentContext` left `Session` and the session codec (a HASH written by slice 5 with those
+   fields no longer decodes; restricted sessions live 10 minutes). Fixed a turn-1 regression: `request` again
+   refuses a session whose primary enrollment is in flight. `SessionService.findLive(SessionLookup)` (turn 1)
+   was removed, unused. `mvn -o verify`: 286 unit tests, 36 ITs.
 4. `request / status / claim` bound to the device instead of the restricted session (one open request per device).
-5. Clean-up: unused result variants (`SessionGone` where no session is read any more), docs.
+5. Clean-up: unused result variants (`SessionGone` of the nine trust routes), `EnrollmentRepository.find` (no
+   caller since turn 3), docs.
 
 ## Not in this slice
 

@@ -17,6 +17,7 @@ import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.service.CaptchaService;
@@ -28,7 +29,6 @@ import com.vpbank.dcp.auth.application.service.PasswordUnlockService;
 import com.vpbank.dcp.auth.application.service.SessionManagementService;
 import com.vpbank.dcp.auth.application.service.SessionService;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService;
-import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
@@ -57,7 +57,6 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.mfa.HttpMfaTransactionAdap
 import com.vpbank.dcp.auth.infrastructure.adapter.out.mfa.MfaReceiptVerifier;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.CustomerAuthenticationPersistenceAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.DeviceEnrollmentJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.token.RandomAuthorizationTokenGenerator;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyAssertionReplayStore;
 import java.security.SecureRandom;
@@ -169,23 +168,27 @@ public class LoginConfiguration {
     /** One bean, three use-case views (init/verify/confirm), like SessionService. */
     @Bean
     DeviceEnrollmentService deviceEnrollmentService(SessionService sessionService,
-                                                    EnrollmentRepository enrollmentRepository,
+                                                    EnrollmentTransactionStore enrollmentTransactionStore,
                                                     TrustedDeviceService trustedDeviceService,
                                                     MfaTransactionPort mfaTransactionPort,
                                                     ServerKeyPairGenerator serverKeyPairGenerator,
                                                     ChallengeSealer challengeSealer,
                                                     LoginProperties properties,
+                                                    DevicePolicy devicePolicy,
                                                     Clock clock) {
         EnrollmentPolicy enrollmentPolicy = enrollmentPolicy(properties);
+        // The transaction cannot outlive the restricted session that runs it (slice 11).
+        Duration enrollmentLifetime = devicePolicy.restrictedSessionTtl();
         return new DeviceEnrollmentService(
                 sessionService,
-                enrollmentRepository,
+                enrollmentTransactionStore,
                 trustedDeviceService,
                 mfaTransactionPort,
                 serverKeyPairGenerator,
                 challengeSealer,
                 EnrollmentId::random,
                 enrollmentPolicy,
+                enrollmentLifetime,
                 clock);
     }
 
@@ -204,6 +207,7 @@ public class LoginConfiguration {
     @Bean
     DeviceApprovalService deviceApprovalService(SessionService sessionService,
                                                 EnrollmentRepository enrollmentRepository,
+                                                EnrollmentTransactionStore enrollmentTransactionStore,
                                                 TrustedDeviceRepository trustedDeviceRepository,
                                                 TrustedDeviceService trustedDeviceService,
                                                 MfaTransactionPort mfaTransactionPort,
@@ -214,6 +218,7 @@ public class LoginConfiguration {
         return new DeviceApprovalService(
                 sessionService,
                 enrollmentRepository,
+                enrollmentTransactionStore,
                 trustedDeviceRepository,
                 trustedDeviceService,
                 mfaTransactionPort,
@@ -244,22 +249,15 @@ public class LoginConfiguration {
     }
 
     @Bean
-    MfaTransactionPort mfaTransactionPort(MfaProperties mfaProperties,
-                                          DeviceEnrollmentJpaRepository deviceEnrollmentJpaRepository,
-                                          Clock clock) {
+    MfaTransactionPort mfaTransactionPort(MfaProperties mfaProperties, Clock clock) {
         ECKey mfaReceiptKey = pinnedPublicKey(MFA_RECEIPT_KEY_SETTING, mfaProperties.receiptPublicJwk());
         MfaReceiptVerifier mfaReceiptVerifier =
                 new MfaReceiptVerifier(mfaReceiptKey, mfaProperties.receiptIssuer(), clock);
 
-        // The receipt names the customer; the enrollment row is the only place that says who that must be.
-        HttpMfaTransactionAdapter.CustomerLookup enrollmentCustomerLookup = (EnrollmentId enrollmentId) ->
-                deviceEnrollmentJpaRepository.findById(enrollmentId.value())
-                        .map(enrollmentEntity -> new CustomerId(enrollmentEntity.getCustomerId()))
-                        .orElseThrow(() -> new IllegalStateException("Unknown enrollment " + enrollmentId));
-
+        // The receipt names the customer; the check request says who that must be (slice 11).
         RestClient mfaRestClient =
                 RegistrationConfiguration.restClient(mfaProperties.origin(), mfaProperties.timeout());
-        return new HttpMfaTransactionAdapter(mfaRestClient, mfaReceiptVerifier, enrollmentCustomerLookup);
+        return new HttpMfaTransactionAdapter(mfaRestClient, mfaReceiptVerifier);
     }
 
     /** The startup failure names the setting and never echoes the key material (no cause attached). */

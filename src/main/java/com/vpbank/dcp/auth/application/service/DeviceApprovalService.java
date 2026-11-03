@@ -22,6 +22,7 @@ import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.result.ApprovalStatusResult;
 import com.vpbank.dcp.auth.application.result.ApproveEnrollmentResult;
@@ -52,15 +53,17 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * A new device trusted and made primary by the customer's current primary device (DD 20 §4, slice 6).
- * The new device, on its restricted session, registers a PENDING row and an approval request. The
+ * The new device, on a restricted session, registers a PENDING row and an approval request. The
  * primary device, on its ACTIVE session, lists the requests, approves one (FACE + OTP at the MFA
  * service) and receives a one-time authorization token to show as a QR. The new device claims that
- * token from the same restricted session; the trust commit then makes it trusted and primary, ends the
+ * token from a restricted session; the trust commit then makes it trusted and primary, ends the
  * restricted session and issues a full ACTIVE one. Auth keeps only the token's digest.
  *
  * <p>Slice 11: the caller is the session the BFF admitted ({@link AdmittedSession}). Auth reads no session
  * to learn who calls; it checks only that the kind of session fits the route, and addresses the restricted
- * session by the asserted channel and session ID when it consumes or ends it.
+ * session by the asserted channel and session ID when it consumes or ends it. A request belongs to the
+ * device, not to the restricted session that made it: one open request per device, which a later login of
+ * the same device can poll and claim.
  */
 @RequiredArgsConstructor
 public final class DeviceApprovalService implements RequestApprovalUseCase, ApprovalStatusUseCase,
@@ -72,6 +75,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
 
     @NonNull private final SessionService sessionService;
     @NonNull private final EnrollmentRepository enrollmentRepository;
+    @NonNull private final EnrollmentTransactionStore enrollmentTransactionStore;
     @NonNull private final TrustedDeviceRepository trustedDeviceRepository;
     @NonNull private final TrustedDeviceService trustedDeviceService;
     @NonNull private final MfaTransactionPort mfaTransactionPort;
@@ -90,12 +94,20 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
                 return new RequestApprovalResult.Conflict();
             }
 
-            // A repeated request from the same session gets the same answer. A primary enrollment (FACE on
-            // this device) already started on this session is found here too and answered as a conflict.
-            Optional<DeviceEnrollment> earlierRequest =
-                    enrollmentRepository.findBySession(caller.customerId(), caller.deviceId(), caller.sessionId());
-            if (earlierRequest.isPresent()) {
-                return answerForEarlier(earlierRequest.get());
+            // The primary enrollment (FACE on this device) already started on this session.
+            boolean primaryEnrollmentInFlight = enrollmentTransactionStore
+                    .find(caller.customerId(), caller.channel(), caller.deviceId())
+                    .filter(transaction -> transaction.belongsTo(caller))
+                    .isPresent();
+            if (primaryEnrollmentInFlight) {
+                return new RequestApprovalResult.Conflict();
+            }
+
+            // One open request per device: asking again, from this login or a later one, gets the same request.
+            Optional<DeviceEnrollment> latestRequest = latestRequestOf(caller);
+            boolean deviceAlreadyWaits = latestRequest.isPresent() && latestRequest.get().isOpen(clock.instant());
+            if (deviceAlreadyWaits) {
+                return new RequestApprovalResult.WaitingApproval(latestRequest.get().id(), latestRequest.get().expiresAt());
             }
 
             Optional<KnownDeviceSummary> knownDevice = trustedDeviceService.knownDevice(
@@ -135,7 +147,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
                     requestExpiresAt);
             DeviceEnrollment storedRequest = enrollmentRepository.create(freshRequest, caller.sessionId());
 
-            // A race on the one-enrollment-per-session rule returns whatever that session created first.
+            // This session already made a request that is closed now (UQ_DE_CREATION): it cannot make another.
             if (!storedRequest.id().equals(freshRequest.id())) {
                 return answerForEarlier(storedRequest);
             }
@@ -161,9 +173,8 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
                 return new ApprovalStatusResult.NoRequest();
             }
 
-            Optional<DeviceEnrollment> request =
-                    enrollmentRepository.findBySession(caller.customerId(), caller.deviceId(), caller.sessionId());
-            if (request.isEmpty() || !request.get().isApproval()) {
+            Optional<DeviceEnrollment> request = latestRequestOf(caller);
+            if (request.isEmpty()) {
                 return new ApprovalStatusResult.NoRequest();
             }
             DeviceEnrollment enrollment = request.get();
@@ -289,6 +300,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
 
             MfaCheckRequest mfaCheckRequest = MfaCheckRequest.builder()
                     .mfaTransactionId(enrollment.mfaTransactionId())
+                    .customerId(enrollment.customerId())
                     .authOperationId(enrollment.id())
                     .purpose(enrollment.purpose())
                     .factors(FACE_AND_OTP)
@@ -344,11 +356,9 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
             }
             SessionLookup restrictedSessionLookup = lookupOf(caller);
 
-            // The claim is bound to the session that made the request.
-            Optional<DeviceEnrollment> request =
-                    enrollmentRepository.findBySession(caller.customerId(), caller.deviceId(), caller.sessionId());
+            // The claim is bound to the device that made the request, from any of its restricted sessions.
+            Optional<DeviceEnrollment> request = latestRequestOf(caller);
             boolean waitingForToken = request.isPresent()
-                    && request.get().isApproval()
                     && request.get().state() == EnrollmentState.WAITING_AUTHORIZATION
                     && request.get().isOpen(clock.instant());
             if (!waitingForToken) {
@@ -418,6 +428,11 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     }
 
     // ---- shared steps ----
+
+    /** The caller device's newest approval request on the channel (slice 11: bound to the device, not the session). */
+    private Optional<DeviceEnrollment> latestRequestOf(AdmittedSession caller) {
+        return enrollmentRepository.findLatestApproval(caller.customerId(), caller.channel(), caller.deviceId());
+    }
 
     /** Where the caller's session lives; the assertion names it, so nothing is read to find it. */
     private static SessionLookup lookupOf(AdmittedSession caller) {
