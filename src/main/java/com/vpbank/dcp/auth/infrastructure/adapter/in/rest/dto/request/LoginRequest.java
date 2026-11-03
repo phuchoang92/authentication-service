@@ -42,9 +42,11 @@ public record LoginRequest(
         CaptchaDto captcha) {
 
     public record CaptchaDto(
-            @NotBlank(message = "{auth.required}") @Pattern(regexp = "[0-9a-fA-F-]{36}", message = "{auth.format}")
+            @NotBlank(message = "{auth.required}")
+            @Pattern(regexp = "[0-9a-fA-F-]{36}", message = "{auth.format}")
             String captchaId,
-            @NotBlank(message = "{auth.required}") @Pattern(regexp = "[A-Za-z0-9]{4,8}", message = "{auth.format}")
+            @NotBlank(message = "{auth.required}")
+            @Pattern(regexp = "[A-Za-z0-9]{4,8}", message = "{auth.format}")
             String answer) {
         @Override
         public String toString() {

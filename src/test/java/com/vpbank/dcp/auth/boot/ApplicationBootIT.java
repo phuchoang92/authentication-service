@@ -18,6 +18,9 @@ import com.nimbusds.jose.JWEObject;
 import com.nimbusds.jose.Payload;
 import com.nimbusds.jose.crypto.ECDHDecrypter;
 import com.nimbusds.jose.crypto.ECDHEncrypter;
+import com.nimbusds.jose.crypto.ECDSAVerifier;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jwt.SignedJWT;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
@@ -36,6 +39,7 @@ import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.UserName;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestBffAssertions;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestServiceClientAssertions;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.SecurityAuditEventEntity;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.SecurityAuditEventJpaRepository;
@@ -88,6 +92,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "auth.login.keycloak.client-id=authentication-service",
         "auth.login.keycloak.client-secret=secret",
         "auth.audit.enabled=true",
+        "auth.service-token.enabled=true",
+        "auth.service-token.lifetime=PT15M",
+        "auth.service-token.callers.onboarding-service.scopes[0]=onboarding",
         "auth.mfa.origin=https://mfa.test",
         "auth.mfa.receipt-issuer=mfa-service",
         "auth.mfa.receipt-public-jwk={\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU\","
@@ -99,6 +106,8 @@ class ApplicationBootIT {
     @Container
     static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:9.1").withExposedPorts(6379);
     private static final String ISSUER = "https://kc.test/realms/test";
+    /** The service-token signing key (slice 12), generated for this run. */
+    private static final ECKey SERVICE_TOKEN_KEY = serviceTokenKey();
     private static final String REGISTER = """
             {"customerId":"90359","userName":"alice","firstName":"Alice","lastName":"Nguyen",
              "phoneNumber":"+84901234567"}""";
@@ -115,6 +124,8 @@ class ApplicationBootIT {
         registry.add("auth.device.encryption-keys-base64.e1", () -> Base64.getEncoder().encodeToString(new byte[32]));
         registry.add("auth.bff.assertion-issuer", () -> TestBffAssertions.ISSUER);
         registry.add("auth.bff.assertion-public-jwk", TestBffAssertions::publicJwk);
+        registry.add("auth.service-token.signing-private-jwk", SERVICE_TOKEN_KEY::toJSONString);
+        registry.add("auth.service-token.callers.onboarding-service.public-jwk", TestServiceClientAssertions::publicJwk);
     }
 
     @Autowired MockMvc mvc;
@@ -377,6 +388,50 @@ class ApplicationBootIT {
         return response.serialize();
     }
 
+    /**
+     * Slice 12: the onboarding service proves itself with a client assertion and gets a scoped token; the token
+     * verifies against the public JWKS route and says exactly what was asked; the same assertion is refused a
+     * second time (replay), and a bare request is refused.
+     */
+    @Test
+    void anInternalServiceGetsAnOnboardingTokenTheBffCanVerifyAndCannotReplayItsAssertion() throws Exception {
+        String assertion = TestServiceClientAssertions.assertion();
+        MvcResult issued = mvc.perform(post("/internal/v1/service-tokens").header("Authorization", "Bearer " + assertion)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"scope\":\"onboarding\",\"businessReference\":\"onb-2026-0001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
+                .andExpect(jsonPath("$.data.scope").value("onboarding"))
+                .andReturn();
+        String token = field(issued.getResponse().getContentAsString(), "token");
+
+        String jwks = mvc.perform(get("/internal/v1/service-tokens/jwks")).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        ECKey published = (ECKey) JWKSet.parse(jwks).getKeyByKeyId(SERVICE_TOKEN_KEY.getKeyID());
+        assertThat(published.isPrivate()).isFalse();
+        SignedJWT serviceToken = SignedJWT.parse(token);
+        assertThat(serviceToken.verify(new ECDSAVerifier(published))).isTrue();
+        assertThat(serviceToken.getHeader().getType().getType()).isEqualTo("service-token+jwt");
+        assertThat(serviceToken.getJWTClaimsSet().getIssuer()).isEqualTo("authentication-service");
+        assertThat(serviceToken.getJWTClaimsSet().getSubject()).isEqualTo("onboarding-service");
+        assertThat(serviceToken.getJWTClaimsSet().getAudience()).containsExactly("mobile-bff");
+        assertThat(serviceToken.getJWTClaimsSet().getStringClaim("scope")).isEqualTo("onboarding");
+        assertThat(serviceToken.getJWTClaimsSet().getStringClaim("businessReference")).isEqualTo("onb-2026-0001");
+        assertThat(serviceToken.getJWTClaimsSet().getExpirationTime().toInstant())
+                .isEqualTo(serviceToken.getJWTClaimsSet().getIssueTime().toInstant().plus(Duration.ofMinutes(15)));
+
+        mvc.perform(post("/internal/v1/service-tokens").header("Authorization", "Bearer " + assertion)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"scope\":\"onboarding\",\"businessReference\":\"onb-2026-0001\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"));
+        mvc.perform(post("/internal/v1/service-tokens").contentType(MediaType.APPLICATION_JSON).content("{\"scope\":\"onboarding\"}"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/internal/v1/service-tokens").header("Authorization", "Bearer " + TestServiceClientAssertions.assertion())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"scope\":\"onboarding\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("REQUEST_REJECTED"));
+    }
+
     /** The customer's audit rows once at least {@code atLeast} have landed; the writer is asynchronous, so poll briefly. */
     private List<SecurityAuditEventEntity> auditTimelineOf(String customerId, int atLeast) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
@@ -411,6 +466,14 @@ class ApplicationBootIT {
         String sessionId = parts[4];
         return "{\"sessionLookup\":{\"channel\":\"" + channel + "\",\"sessionId\":\"" + sessionId + "\"},"
                 + "\"admittedAt\":\"" + java.time.Instant.now() + "\",\"routeId\":\"accounts.read\"}";
+    }
+
+    private static ECKey serviceTokenKey() {
+        try {
+            return new ECKeyGenerator(Curve.P_256).keyID("svc-boot-1").generate();
+        } catch (Exception failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     private static String field(String json, String name) {

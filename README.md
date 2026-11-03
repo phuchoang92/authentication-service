@@ -23,7 +23,9 @@ device through a QR token ([plan](docs/plans/slice-6-device-approval.md)) and th
 ([plan](docs/plans/slice-8-session-actions.md)) and the asynchronous security activity audit of login outcomes
 ([plan](docs/plans/slice-9-security-audit.md)), each off by default. Slice 11 turn 1 (2026-11-03): the
 trusted-device routes are admitted by a signed BFF assertion instead of the app's session token
-([plan](docs/plans/slice-11-bff-admitted-trust-flows.md)).
+([plan](docs/plans/slice-11-bff-admitted-trust-flows.md)). Slice 12 (2026-11-03): a scoped service token for flows
+without a customer session (onboarding), issued to an internal service that presents a client assertion
+([plan](docs/plans/slice-12-service-token.md)).
 
 | Path | Caller | Result |
 |---|---|---|
@@ -42,6 +44,8 @@ trusted-device routes are admitted by a signed BFF assertion instead of the app'
 | `GET /api/v1/devices` | app, ACTIVE session | `200 [{deviceId (masked), platform, status, trustLevel, primary, trustedAt, expiresAt, lastLoginAt}]`; `403 DEVICE_TRUST_REQUIRED` from a restricted session |
 | `POST /internal/v1/customers/{customerId}/password-unlock` | bank tooling | `204`; `404 CUSTOMER_UNKNOWN` |
 | `POST /internal/v1/sessions/extend` | BFF after admission (flow 16) | `200 {idleExpiresAt, absoluteExpiresAt}`; `400`; `410 SESSION_GONE`; `409 SESSION_CONFLICT`; `503` |
+| `POST /internal/v1/service-tokens` | internal service, `Authorization: Bearer <client assertion>` (slice 12) | `200 {token, tokenType:"Bearer", scope, expiresAt}`; `400`; `401 REQUEST_REJECTED` (bad or replayed assertion); `403 SCOPE_NOT_ALLOWED`; `503` |
+| `GET /internal/v1/service-tokens/jwks` | BFF, public | bare RFC 7517 `{keys:[…]}` with the public signing keys of the service token |
 
 The token is `s1:auth:session:<channel>:<sessionId>:<secret>` (slice 7): channel and session ID in clear,
 the secret 32 random bytes as base64url. It reaches the app only inside a compact JWE (`ECDH-ES`/`A256GCM`
@@ -60,6 +64,17 @@ against the realm JWKS.
 in Valkey `bff-assertion:used:v1:<sha256>`). A bad or replayed assertion is `401 REQUEST_REJECTED`, a replay store
 that cannot answer `503`. The use cases read no session to learn the caller; they check the asserted kind per
 route (`409 STATE_CONFLICT` / `403 NOT_PRIMARY_DEVICE`). The BFF does not mint these assertions yet.
+
+**Scoped service token (slice 12):** a flow with no customer login and no Valkey session (onboarding) runs on a
+short-lived JWT instead. The owning service calls `POST /internal/v1/service-tokens` with a client assertion
+(ES256 from its pinned key in `auth.service-token.callers.<service>.public-jwk`, `typ=service-client-assertion+jwt`,
+claims exactly `iss`=`sub`=service ID, `aud=authentication-service`, `iat`, `exp` ≤ 60 s later, `jti` used once in
+Valkey `service-client-assertion:used:v1:<sha256>`) and a body `{scope, businessReference}`. Auth answers with an
+ES256 JWT (`typ=service-token+jwt`, claims exactly `iss`, `sub` = the service, `aud` = the BFF, `scope`,
+`businessReference` when the scope requires one — `onboarding` does —, `iat`, `exp` = `auth.service-token.lifetime`
+later, `jti`). Nothing is stored for the token; the BFF verifies it with the keys at
+`GET /internal/v1/service-tokens/jwks` and forwards only the routes of its scope. The token is not a session:
+no extend, no session routes.
 
 **One Valkey read per request (slice 8):** the session filter on `/api/**` only checks that the Bearer token has
 the right shape; it reads nothing. The use case behind the route reads the session once, decides whether that
@@ -120,7 +135,8 @@ A retry with the same data returns the same `requestId`; an unfinished earlier a
 **Known gaps:**
 - Slice 2 deliberately defers DD-06 pieces: DPoP/Kreq binding, Idempotency-Key, Auth receipt
   signature, Redis guards/generation, `private_key_jwt`, lockout (phase 2), trusted device (slice 3).
-- `/api/ns` and `/internal` have no caller authentication yet.
+- `/api/ns` and `/internal` have no caller authentication yet, except `POST /internal/v1/service-tokens`, which
+  takes a client assertion (slice 12).
 - No `passwordChangeRequired` flag: the password-change flow was removed, so the SMS password is
   a normal password.
 - The endpoint has no caller authentication yet; enable it only on an internal network.
@@ -180,6 +196,8 @@ three devices). No real Customer, Keycloak, Notification or MFA service was call
 | `AUTH_KC_LOGIN_CLIENT_ID`, `AUTH_KC_LOGIN_CLIENT_SECRET` | Direct Grant client (`authentication-service`) |
 | `AUTH_CAPTCHA_ANSWER_HMAC_KEY_BASE64` | ≥32-byte HMAC key for the stored CAPTCHA answers |
 | `AUTH_DEVICE_LOOKUP_HMAC_KEY_D1_BASE64`, `AUTH_DEVICE_ENCRYPTION_KEY_E1_BASE64` | ≥32-byte keys protecting the stored device ID (`d1` lookup HMAC, `e1` AES-256-GCM) |
+| `AUTH_SERVICE_TOKEN_ENABLED` | `true` to expose the service-token routes (default `false`); `AUTH_SERVICE_TOKEN_LIFETIME` (required, `PT1M`–`PT30M`), `AUTH_SERVICE_TOKEN_ISSUER` (`authentication-service`), `AUTH_SERVICE_TOKEN_AUDIENCE` (`mobile-bff`) |
+| `AUTH_SERVICE_TOKEN_SIGNING_PRIVATE_JWK`, `AUTH_SERVICE_TOKEN_ONBOARDING_PUBLIC_JWK` | private P-256 JWK (with `kid`) that signs service tokens; the onboarding service's pinned public JWK (with `kid`); more callers under `auth.service-token.callers.<service>` |
 | `AUTH_AUDIT_ENABLED` | `true` to write login outcomes and completed device trust to `SECURITY_AUDIT_EVENT` from a background thread (default `false`); `auth.audit.queue-capacity` 10000, `batch-size` 100, `shutdown-drain` PT2S |
 
 Timeouts default to 3 s per partner; no call is retried.

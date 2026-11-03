@@ -37,6 +37,8 @@ class DomainEnumCodesTest {
                 .containsExactly("FACE", "OTP");
         assertThat(names(PrimaryMode.values()))
                 .containsExactly("DIRECT_PRIMARY", "FACE_CONFIRMED", "OLD_DEVICE_APPROVAL");
+        assertThat(names(ServiceScope.values()))
+                .containsExactly("ONBOARDING");
     }
 
     @Test

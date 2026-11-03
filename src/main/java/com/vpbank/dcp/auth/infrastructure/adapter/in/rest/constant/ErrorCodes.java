@@ -32,6 +32,7 @@ public final class ErrorCodes {
     public static final String CUSTOMER_UNKNOWN = "CUSTOMER_UNKNOWN";
     public static final String INTERNAL_ERROR = "INTERNAL_ERROR";
     public static final String TEMPORARILY_UNAVAILABLE = "TEMPORARILY_UNAVAILABLE";
+    public static final String SCOPE_NOT_ALLOWED = "SCOPE_NOT_ALLOWED";
 
     private ErrorCodes() {
     }

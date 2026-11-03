@@ -29,7 +29,8 @@ public class LoginController {
     @NonNull
     private final LoginRestMapper loginRestMapper;
 
-    @PostMapping(path = "/api/ns/v1/login", consumes = MediaType.APPLICATION_JSON_VALUE,
+    @PostMapping(path = "/api/ns/v1/login",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<LoginResponse>> login(@Valid @RequestBody LoginRequest body) {
         LoginCommand command = loginRestMapper.toCommand(body);

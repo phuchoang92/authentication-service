@@ -1,55 +1,34 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.command.ApprovalStatusCommand;
-import com.vpbank.dcp.auth.application.command.ApproveEnrollmentCommand;
-import com.vpbank.dcp.auth.application.command.AuthorizeEnrollmentCommand;
-import com.vpbank.dcp.auth.application.command.ClaimEnrollmentCommand;
-import com.vpbank.dcp.auth.application.command.ListPendingDevicesCommand;
-import com.vpbank.dcp.auth.application.command.RequestApprovalCommand;
-import com.vpbank.dcp.auth.application.port.in.ApprovalStatusUseCase;
-import com.vpbank.dcp.auth.application.port.in.ApproveEnrollmentUseCase;
-import com.vpbank.dcp.auth.application.port.in.AuthorizeEnrollmentUseCase;
-import com.vpbank.dcp.auth.application.port.in.ClaimEnrollmentUseCase;
-import com.vpbank.dcp.auth.application.port.in.ListPendingDevicesUseCase;
-import com.vpbank.dcp.auth.application.port.in.RequestApprovalUseCase;
+import com.vpbank.dcp.auth.application.command.*;
+import com.vpbank.dcp.auth.application.port.in.*;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.gateway.AuthorizationTokenGenerator;
+import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CreateResult;
-import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
-import com.vpbank.dcp.auth.application.result.ApprovalStatusResult;
-import com.vpbank.dcp.auth.application.result.ApproveEnrollmentResult;
-import com.vpbank.dcp.auth.application.result.AuthorizeEnrollmentResult;
-import com.vpbank.dcp.auth.application.result.ClaimEnrollmentResult;
-import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
-import com.vpbank.dcp.auth.application.result.ListPendingDevicesResult;
-import com.vpbank.dcp.auth.application.result.PendingDeviceSummary;
-import com.vpbank.dcp.auth.application.result.RequestApprovalResult;
+import com.vpbank.dcp.auth.application.result.*;
 import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.MfaFactor;
-import com.vpbank.dcp.auth.domain.model.AdmittedSession;
-import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
-import com.vpbank.dcp.auth.domain.model.EnrollmentId;
-import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
-import com.vpbank.dcp.auth.domain.model.TrustedDevice;
-import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
+import com.vpbank.dcp.auth.domain.model.*;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
 
 /**
  * A new device trusted and made primary by the customer's current primary device (DD 20 §4, slice 6).
@@ -68,21 +47,35 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public final class DeviceApprovalService implements RequestApprovalUseCase, ApprovalStatusUseCase,
         ListPendingDevicesUseCase, ApproveEnrollmentUseCase, AuthorizeEnrollmentUseCase, ClaimEnrollmentUseCase {
-    /** The approving device confirms with FACE and OTP (decision 2026-10-25). */
+    /**
+     * The approving device confirms with FACE and OTP (decision 2026-10-25).
+     */
     private static final List<MfaFactor> FACE_AND_OTP = List.of(MfaFactor.FACE, MfaFactor.OTP);
-    /** The last wrong token leaves no attempt; the enrollment is already failed when it is reported. */
+    /**
+     * The last wrong token leaves no attempt; the enrollment is already failed when it is reported.
+     */
     private static final int NO_ATTEMPTS_LEFT = 0;
 
-    @NonNull private final SessionService sessionService;
-    @NonNull private final EnrollmentRepository enrollmentRepository;
-    @NonNull private final EnrollmentTransactionStore enrollmentTransactionStore;
-    @NonNull private final TrustedDeviceRepository trustedDeviceRepository;
-    @NonNull private final TrustedDeviceService trustedDeviceService;
-    @NonNull private final MfaTransactionPort mfaTransactionPort;
-    @NonNull private final AuthorizationTokenGenerator authorizationTokenGenerator;
-    @NonNull private final Supplier<EnrollmentId> enrollmentIdGenerator;
-    @NonNull private final EnrollmentPolicy enrollmentPolicy;
-    @NonNull private final Clock clock;
+    @NonNull
+    private final SessionService sessionService;
+    @NonNull
+    private final EnrollmentRepository enrollmentRepository;
+    @NonNull
+    private final EnrollmentTransactionStore enrollmentTransactionStore;
+    @NonNull
+    private final TrustedDeviceRepository trustedDeviceRepository;
+    @NonNull
+    private final TrustedDeviceService trustedDeviceService;
+    @NonNull
+    private final MfaTransactionPort mfaTransactionPort;
+    @NonNull
+    private final AuthorizationTokenGenerator authorizationTokenGenerator;
+    @NonNull
+    private final Supplier<EnrollmentId> enrollmentIdGenerator;
+    @NonNull
+    private final EnrollmentPolicy enrollmentPolicy;
+    @NonNull
+    private final Clock clock;
 
     // ---- the new device ----
 
@@ -328,7 +321,9 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
         }
     }
 
-    /** The token is handed out once; Auth keeps its digest, its deadline and which factors the approver passed. */
+    /**
+     * The token is handed out once; Auth keeps its digest, its deadline and which factors the approver passed.
+     */
     private AuthorizeEnrollmentResult issueAuthorizationToken(DeviceEnrollment enrollment, MfaCheckRequest mfaCheckRequest) {
         Instant now = clock.instant();
 
@@ -429,12 +424,16 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
 
     // ---- shared steps ----
 
-    /** The caller device's newest approval request on the channel (slice 11: bound to the device, not the session). */
+    /**
+     * The caller device's newest approval request on the channel (slice 11: bound to the device, not the session).
+     */
     private Optional<DeviceEnrollment> latestRequestOf(AdmittedSession caller) {
         return enrollmentRepository.findLatestApproval(caller.customerId(), caller.channel(), caller.deviceId());
     }
 
-    /** Where the caller's session lives; the assertion names it, so nothing is read to find it. */
+    /**
+     * Where the caller's session lives; the assertion names it, so nothing is read to find it.
+     */
     private static SessionLookup lookupOf(AdmittedSession caller) {
         return new SessionLookup(caller.channel(), caller.sessionId());
     }
@@ -450,7 +449,8 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
         return trustedDeviceService.primaryDeviceId(caller.customerId(), caller.channel(), caller.deviceId());
     }
 
-    private Optional<DeviceEnrollment> findOpenApproval(EnrollmentId enrollmentId, AdmittedSession caller,
+    private Optional<DeviceEnrollment> findOpenApproval(EnrollmentId enrollmentId,
+                                                        AdmittedSession caller,
                                                         EnrollmentState expectedState) {
         Instant now = clock.instant();
         return enrollmentRepository.findApproval(enrollmentId, caller.customerId(), caller.channel())
@@ -459,7 +459,9 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
                 .filter(enrollment -> enrollment.state() == expectedState);
     }
 
-    /** A terminal enrollment state is written first, then the restricted session is dropped. */
+    /**
+     * A terminal enrollment state is written first, then the restricted session is dropped.
+     */
     private void endRestrictedSession(SessionLookup restrictedSessionLookup, DeviceEnrollment terminalEnrollment) {
         enrollmentRepository.saveIfCurrent(terminalEnrollment);
         sessionService.end(restrictedSessionLookup);

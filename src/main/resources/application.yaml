@@ -73,6 +73,22 @@ auth:
     # (ES256, typ bff-assertion+jwt). The pinned public JWK must carry its kid. No default.
     assertion-issuer: ${AUTH_BFF_ASSERTION_ISSUER:mobile-bff}
     assertion-public-jwk: ${AUTH_BFF_ASSERTION_PUBLIC_JWK:}
+  service-token:
+    # Slice 12: a scoped JWT for flows without a customer session (onboarding), issued to an internal service
+    # that presents a client assertion (ES256, typ service-client-assertion+jwt) signed with its pinned key.
+    # The lifetime is policy: no default, 1 to 30 minutes. Off by default.
+    enabled: ${AUTH_SERVICE_TOKEN_ENABLED:false}
+    issuer: ${AUTH_SERVICE_TOKEN_ISSUER:authentication-service}
+    audience: ${AUTH_SERVICE_TOKEN_AUDIENCE:mobile-bff}
+    lifetime: ${AUTH_SERVICE_TOKEN_LIFETIME:}
+    # Private P-256 JWK (with kid) that signs the tokens; its public half is served at GET /internal/v1/service-tokens/jwks.
+    signing-private-jwk: ${AUTH_SERVICE_TOKEN_SIGNING_PRIVATE_JWK:}
+    # One entry per calling service: its pinned public P-256 JWK (with kid) and the scopes it may ask for.
+    callers:
+      onboarding-service:
+        public-jwk: ${AUTH_SERVICE_TOKEN_ONBOARDING_PUBLIC_JWK:}
+        scopes:
+          - onboarding
   mfa:
     origin: ${AUTH_MFA_ORIGIN:}
     receipt-issuer: ${AUTH_MFA_RECEIPT_ISSUER:mfa-service}
