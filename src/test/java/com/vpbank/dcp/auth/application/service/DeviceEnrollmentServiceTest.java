@@ -24,6 +24,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.ServerKeyPairGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.port.out.model.CacheTransaction;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.OpenedChallenge;
 import com.vpbank.dcp.auth.application.port.out.model.ServerKeyPair;
@@ -78,7 +79,7 @@ class DeviceEnrollmentServiceTest {
     private static final Duration ENROLLMENT_LIFETIME = Duration.ofMinutes(10);
 
     private final InMemorySessionStore sessions = new InMemorySessionStore();
-    private final InMemoryEnrollmentTransactionStore transactions = new InMemoryEnrollmentTransactionStore();
+    private final InMemoryTransactionStore transactions = new InMemoryTransactionStore();
     private final InMemoryTrustedDeviceRepository devices = new InMemoryTrustedDeviceRepository();
     private final MfaTransactionPort mfa = mock(MfaTransactionPort.class);
     private final ServerKeyPairGenerator serverKeys = mock(ServerKeyPairGenerator.class);
@@ -122,12 +123,15 @@ class DeviceEnrollmentServiceTest {
         assertThat(exchange.challenge()).isEqualTo("jwe.challenge");
         assertThat(exchange.expiresAt()).isEqualTo(NOW.plus(ENROLLMENT_LIFETIME));
 
-        EnrollmentTransaction transaction = transactions.only();
-        assertThat(transaction.state()).isEqualTo(EnrollmentState.KEY_EXCHANGE);
-        assertThat(transaction.serverPrivateJwk()).isEqualTo("{srv-priv}");
-        assertThat(transaction.platform()).isEqualTo(DevicePlatform.IOS);
-        assertThat(transaction.belongsTo(TABLET_SESSION)).isTrue();
-        assertThat(transaction.challengeDigest()).isEqualTo(EnrollmentDigests.digest(CHALLENGE));
+        CacheTransaction<EnrollmentTransaction> transaction = transactions.only();
+        assertThat(transaction.kind()).isEqualTo(EnrollmentTransactions.KIND);
+        assertThat(transaction.id()).isEqualTo("MOBILE:90359:tablet-2");
+        assertThat(transaction.expiresAt()).isEqualTo(NOW.plus(ENROLLMENT_LIFETIME));
+        assertThat(transaction.payload().state()).isEqualTo(EnrollmentState.KEY_EXCHANGE);
+        assertThat(transaction.payload().serverPrivateJwk()).isEqualTo("{srv-priv}");
+        assertThat(transaction.payload().platform()).isEqualTo(DevicePlatform.IOS);
+        assertThat(transaction.payload().belongsTo(TABLET_SESSION)).isTrue();
+        assertThat(transaction.payload().challengeDigest()).isEqualTo(EnrollmentDigests.digest(CHALLENGE));
         // The restricted session is left as it was; nothing goes to SQL before the commit.
         assertThat(sessions.findByToken(RESTRICTED).orElseThrow().session().sessionVersion()).isZero();
         assertThat(devices.confirmations).isEmpty();
@@ -150,8 +154,8 @@ class DeviceEnrollmentServiceTest {
 
         assertThat(restarted).isInstanceOf(InitEnrollmentResult.KeyExchange.class);
         assertThat(transactions.rows).hasSize(1);
-        assertThat(transactions.only().id()).isEqualTo(secondEnrollment);
-        assertThat(transactions.only().belongsTo(laterLogin)).isTrue();
+        assertThat(payload(transactions).id()).isEqualTo(secondEnrollment);
+        assertThat(payload(transactions).belongsTo(laterLogin)).isTrue();
         assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer")))
                 .isInstanceOf(VerifyEnrollmentResult.Conflict.class);
         verifyNoInteractions(mfa);
@@ -173,8 +177,8 @@ class DeviceEnrollmentServiceTest {
         when(challenges.sealChallenge(eq("{stored-key}"), eq(ENROLLMENT), eq(CHALLENGE))).thenReturn("jwe.stored");
         InitEnrollmentResult result = service.init(new InitEnrollmentCommand(TABLET_SESSION, null, null));
         assertThat(((InitEnrollmentResult.KeyExchange) result).challenge()).isEqualTo("jwe.stored");
-        assertThat(transactions.only().targetDeviceId()).isEqualTo(knownTablet.id());
-        assertThat(transactions.only().devicePublicJwk()).isEqualTo("{stored-key}");
+        assertThat(payload(transactions).targetDeviceId()).isEqualTo(knownTablet.id());
+        assertThat(payload(transactions).devicePublicJwk()).isEqualTo("{stored-key}");
     }
 
     @Test
@@ -184,12 +188,12 @@ class DeviceEnrollmentServiceTest {
         VerifyEnrollmentResult wrong = service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.garbage"));
         assertThat(wrong).isEqualTo(new VerifyEnrollmentResult.WrongChallenge(2));
         verifyNoInteractions(mfa);
-        assertThat(transactions.only().verifyAttempts()).isEqualTo(1);
+        assertThat(payload(transactions).verifyAttempts()).isEqualTo(1);
 
         VerifyEnrollmentResult ok = service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
         assertThat(ok).isEqualTo(new VerifyEnrollmentResult.MfaRequired("mfa-1", NOW.plus(Duration.ofMinutes(5))));
-        assertThat(transactions.only().state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
-        assertThat(transactions.only().mfaTransactionId()).isEqualTo("mfa-1");
+        assertThat(payload(transactions).state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
+        assertThat(payload(transactions).mfaTransactionId()).isEqualTo("mfa-1");
         var request = org.mockito.ArgumentCaptor.forClass(MfaTransactionRequest.class);
         verify(mfa).create(request.capture());
         assertThat(request.getValue().customerId()).isEqualTo(ALICE);
@@ -220,8 +224,8 @@ class DeviceEnrollmentServiceTest {
         doThrow(new PartnerUnavailableException("MFA")).when(mfa).create(any());
         assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer")))
                 .isInstanceOf(VerifyEnrollmentResult.Unavailable.class);
-        assertThat(transactions.only().state()).isEqualTo(EnrollmentState.KEY_EXCHANGE); // the attempt is counted, nothing else
-        assertThat(transactions.only().verifyAttempts()).isEqualTo(1);
+        assertThat(payload(transactions).state()).isEqualTo(EnrollmentState.KEY_EXCHANGE); // the attempt is counted, nothing else
+        assertThat(payload(transactions).verifyAttempts()).isEqualTo(1);
 
         doReturn(new CreateResult.NoUsableFactor()).when(mfa).create(any());
         assertThat(service.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer")))
@@ -326,7 +330,7 @@ class DeviceEnrollmentServiceTest {
         doThrow(new PartnerUnavailableException("MFA")).when(mfa).check(any());
         assertThat(service.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"))).isInstanceOf(ConfirmEnrollmentResult.Unavailable.class);
         assertThat(sessions.findByToken(RESTRICTED)).isPresent();
-        assertThat(transactions.only().state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
+        assertThat(payload(transactions).state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
         verify(tokens, never()).next(any(), any());
 
         doReturn(new CheckResult.Expired()).when(mfa).check(any());
@@ -390,5 +394,10 @@ class DeviceEnrollmentServiceTest {
                 .isInstanceOf(ConfirmEnrollmentResult.Unavailable.class);
         assertThat(sessions.findByToken(RESTRICTED)).isPresent();
         verifyNoInteractions(mfa);
+    }
+
+    private static EnrollmentTransaction payload(InMemoryTransactionStore store) {
+        CacheTransaction<EnrollmentTransaction> transaction = store.only();
+        return transaction.payload();
     }
 }

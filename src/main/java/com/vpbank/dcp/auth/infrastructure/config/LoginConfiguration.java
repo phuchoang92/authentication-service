@@ -18,7 +18,7 @@ import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
-import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore;
+import com.vpbank.dcp.auth.application.port.out.repository.TransactionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.LoginProofReplayStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
@@ -192,7 +192,7 @@ public class LoginConfiguration {
     /** One bean, three use-case views (init/verify/confirm), like SessionService. */
     @Bean
     DeviceEnrollmentService deviceEnrollmentService(SessionService sessionService,
-                                                    EnrollmentTransactionStore enrollmentTransactionStore,
+                                                    TransactionStore transactionStore,
                                                     TrustedDeviceService trustedDeviceService,
                                                     MfaTransactionPort mfaTransactionPort,
                                                     ServerKeyPairGenerator serverKeyPairGenerator,
@@ -205,7 +205,7 @@ public class LoginConfiguration {
         Duration enrollmentLifetime = devicePolicy.restrictedSessionTtl();
         return new DeviceEnrollmentService(
                 sessionService,
-                enrollmentTransactionStore,
+                transactionStore,
                 trustedDeviceService,
                 mfaTransactionPort,
                 serverKeyPairGenerator,
@@ -231,7 +231,7 @@ public class LoginConfiguration {
     @Bean
     DeviceApprovalService deviceApprovalService(SessionService sessionService,
                                                 EnrollmentRepository enrollmentRepository,
-                                                EnrollmentTransactionStore enrollmentTransactionStore,
+                                                TransactionStore transactionStore,
                                                 TrustedDeviceRepository trustedDeviceRepository,
                                                 TrustedDeviceService trustedDeviceService,
                                                 MfaTransactionPort mfaTransactionPort,
@@ -242,7 +242,7 @@ public class LoginConfiguration {
         return new DeviceApprovalService(
                 sessionService,
                 enrollmentRepository,
-                enrollmentTransactionStore,
+                transactionStore,
                 trustedDeviceRepository,
                 trustedDeviceService,
                 mfaTransactionPort,

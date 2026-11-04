@@ -70,7 +70,7 @@ class LoginConfigurationTest {
                 .hasSingleBean(com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.class)
                 .hasSingleBean(SessionFilter.class).hasSingleBean(LoginController.class)
                 .hasSingleBean(BffAssertionFilter.class).hasSingleBean(ValkeyAssertionReplayStore.class)
-                .hasSingleBean(com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore.class));
+                .hasSingleBean(com.vpbank.dcp.auth.application.port.out.repository.TransactionStore.class));
     }
 
     @Test

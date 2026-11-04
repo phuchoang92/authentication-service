@@ -12,7 +12,7 @@ import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
-import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore;
+import com.vpbank.dcp.auth.application.port.out.repository.TransactionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.result.*;
 import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
@@ -61,7 +61,7 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
     @NonNull
     private final EnrollmentRepository enrollmentRepository;
     @NonNull
-    private final EnrollmentTransactionStore enrollmentTransactionStore;
+    private final TransactionStore transactionStore;
     @NonNull
     private final TrustedDeviceRepository trustedDeviceRepository;
     @NonNull
@@ -88,9 +88,9 @@ public final class DeviceApprovalService implements RequestApprovalUseCase, Appr
             }
 
             // The primary enrollment (FACE on this device) already started on this session.
-            boolean primaryEnrollmentInFlight = enrollmentTransactionStore
-                    .find(caller.customerId(), caller.channel(), caller.deviceId())
-                    .filter(transaction -> transaction.belongsTo(caller))
+            boolean primaryEnrollmentInFlight = transactionStore
+                    .find(EnrollmentTransactions.KIND, EnrollmentTransactions.idOf(caller))
+                    .filter(transaction -> transaction.payload().belongsTo(caller))
                     .isPresent();
             if (primaryEnrollmentInFlight) {
                 return new RequestApprovalResult.Conflict();

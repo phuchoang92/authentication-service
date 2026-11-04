@@ -100,7 +100,7 @@ class DeviceEnrollmentTest {
                 TrustedDeviceId.random(), "{dev}", DevicePlatform.IOS, "{pub}", "{priv}", "digest", T0.plusSeconds(600));
         EnrollmentTransaction passed = started.countVerifyAttempt().markMfaRequired("mfa-1");
 
-        DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed);
+        DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed, T0.plusSeconds(600));
 
         assertThat(enrollment.id()).isEqualTo(passed.id());
         assertThat(enrollment.purpose()).isEqualTo(com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose.TRUST_DEVICE);
@@ -110,10 +110,10 @@ class DeviceEnrollmentTest {
         assertThat(enrollment.targetDeviceId()).isEqualTo(passed.targetDeviceId());
         assertThat(enrollment.mfaTransactionId()).isEqualTo("mfa-1");
         assertThat(enrollment.verifyAttempts()).isEqualTo(1);
-        assertThat(enrollment.expiresAt()).isEqualTo(passed.expiresAt());
+        assertThat(enrollment.expiresAt()).isEqualTo(T0.plusSeconds(600));
         assertThat(enrollment.version()).isZero();
         assertThat(enrollment.complete().state()).isEqualTo(EnrollmentState.COMPLETED);
 
-        assertThatThrownBy(() -> DeviceEnrollment.fromTransaction(started)).isInstanceOf(EnrollmentStateException.class);
+        assertThatThrownBy(() -> DeviceEnrollment.fromTransaction(started, T0.plusSeconds(600))).isInstanceOf(EnrollmentStateException.class);
     }
 }

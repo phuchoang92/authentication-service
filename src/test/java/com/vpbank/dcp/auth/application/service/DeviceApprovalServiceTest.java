@@ -23,6 +23,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.Creat
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
+import com.vpbank.dcp.auth.application.port.out.model.CacheTransaction;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.result.ApprovalStatusResult;
@@ -89,7 +90,7 @@ class DeviceApprovalServiceTest {
 
     private final InMemorySessionStore sessions = new InMemorySessionStore();
     private final InMemoryEnrollmentRepository enrollments = new InMemoryEnrollmentRepository();
-    private final InMemoryEnrollmentTransactionStore transactions = new InMemoryEnrollmentTransactionStore();
+    private final InMemoryTransactionStore transactions = new InMemoryTransactionStore();
     private final InMemoryTrustedDeviceRepository devices = new InMemoryTrustedDeviceRepository();
     private final MfaTransactionPort mfa = mock(MfaTransactionPort.class);
     private final AuthorizationTokenGenerator qrTokens = mock(AuthorizationTokenGenerator.class);
@@ -419,8 +420,9 @@ class DeviceApprovalServiceTest {
     @Test
     void aSessionThatStartedThePrimaryEnrollmentCannotAlsoAskForApproval() {
         EnrollmentTransaction startedOnThisSession = EnrollmentTransaction.keyExchange(EnrollmentId.random(), WATCH_SESSION,
-                null, WATCH_KEY, DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest", NOW.plusSeconds(600));
-        transactions.createIfAbsent(startedOnThisSession);
+                null, WATCH_KEY, DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest");
+        transactions.createIfAbsent(CacheTransaction.open(EnrollmentTransactions.KIND, EnrollmentTransactions.idOf(WATCH_SESSION),
+                NOW.plusSeconds(600), startedOnThisSession));
 
         assertThat(service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS)))
                 .isInstanceOf(RequestApprovalResult.Conflict.class);

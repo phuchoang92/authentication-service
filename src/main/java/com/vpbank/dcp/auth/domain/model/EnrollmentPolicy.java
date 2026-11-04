@@ -8,8 +8,11 @@ import java.util.Objects;
  * (approval by the primary device): how long a request waits, how long the QR token lives, how many
  * wrong claims it survives and how many devices may wait at once per customer and channel.
  */
-public record EnrollmentPolicy(int maxVerifyAttempts, Duration pendingWindow, Duration approvalTokenLifetime,
-                               int maxClaimAttempts, int maxPendingDevices) {
+public record EnrollmentPolicy(int maxVerifyAttempts,
+                               Duration pendingWindow,
+                               Duration approvalTokenLifetime,
+                               int maxClaimAttempts,
+                               int maxPendingDevices) {
     public EnrollmentPolicy {
         Objects.requireNonNull(pendingWindow, "pendingWindow");
         Objects.requireNonNull(approvalTokenLifetime, "approvalTokenLifetime");

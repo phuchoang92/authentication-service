@@ -4,25 +4,23 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.exception.EnrollmentStateException;
-import java.time.Instant;
 import java.util.Objects;
 import lombok.Builder;
 
 /**
- * A primary enrollment between init and confirm (slice 11), kept in the cache instead of the restricted
- * session: whose it is (customer, channel, device and the restricted session that started it), the device key
- * and platform to trust, the server key pair of this transaction (Ksrv; its private part lives only here,
- * DD 20 §4), the digest of the challenge sent, the attempts made and, after the key proof, the MFA transaction.
- * One per customer, channel and device. KEY_EXCHANGE after init, MFA_REQUIRED after verify; failure, expiry and
- * the trust commit end it by removing it, so it has no terminal state. {@code version} is the compare-and-set
- * revision the store must still see when it saves or removes it.
+ * A primary enrollment between init and confirm (slice 11), the payload of its cache transaction: whose it is
+ * (customer, channel, device and the restricted session that started it), the device key and platform to
+ * trust, the server key pair of this transaction (Ksrv; its private part lives only here, DD 20 §4), the digest
+ * of the challenge sent, the attempts made and, after the key proof, the MFA transaction. KEY_EXCHANGE after
+ * init, MFA_REQUIRED after verify; failure, expiry and the trust commit end it by removing the transaction, so
+ * it has no terminal state. The deadline and the compare-and-set version belong to the transaction envelope.
  */
 @Builder(toBuilder = true)
 public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Channel channel, DeviceId deviceId,
                                     SessionId sessionId, EnrollmentState state, TrustedDeviceId targetDeviceId,
                                     String devicePublicJwk, DevicePlatform platform, String serverPublicJwk,
                                     String serverPrivateJwk, String challengeDigest, int verifyAttempts,
-                                    String mfaTransactionId, Instant expiresAt, long version) {
+                                    String mfaTransactionId) {
     public EnrollmentTransaction {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(customerId, "customerId");
@@ -35,7 +33,6 @@ public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Chan
         Objects.requireNonNull(serverPublicJwk, "serverPublicJwk");
         Objects.requireNonNull(serverPrivateJwk, "serverPrivateJwk");
         Objects.requireNonNull(challengeDigest, "challengeDigest");
-        Objects.requireNonNull(expiresAt, "expiresAt");
         if (state != EnrollmentState.KEY_EXCHANGE && state != EnrollmentState.MFA_REQUIRED) {
             throw new IllegalArgumentException("An enrollment transaction is KEY_EXCHANGE or MFA_REQUIRED");
         }
@@ -44,19 +41,19 @@ public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Chan
         if (hasMfaTransaction != (state == EnrollmentState.MFA_REQUIRED)) {
             throw new IllegalArgumentException("MFA_REQUIRED, and only MFA_REQUIRED, carries the MFA transaction ID");
         }
-        if (verifyAttempts < 0 || version < 0) {
-            throw new IllegalArgumentException("Attempts and version cannot be negative");
+        if (verifyAttempts < 0) {
+            throw new IllegalArgumentException("Attempts cannot be negative");
         }
     }
 
     /**
      * Init: the device is challenged to prove its key. {@code targetDeviceId} is the device row a known device
-     * already has (null for a new device); {@code expiresAt} is the latest moment confirm may still commit.
+     * already has (null for a new device).
      */
     public static EnrollmentTransaction keyExchange(EnrollmentId id, AdmittedSession owner, TrustedDeviceId targetDeviceId,
                                                     String devicePublicJwk, DevicePlatform platform,
                                                     String serverPublicJwk, String serverPrivateJwk,
-                                                    String challengeDigest, Instant expiresAt) {
+                                                    String challengeDigest) {
         Objects.requireNonNull(owner, "owner");
         return EnrollmentTransaction.builder()
                 .id(id)
@@ -72,13 +69,7 @@ public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Chan
                 .serverPrivateJwk(serverPrivateJwk)
                 .challengeDigest(challengeDigest)
                 .verifyAttempts(0)
-                .expiresAt(expiresAt)
-                .version(0)
                 .build();
-    }
-
-    public boolean isOpen(Instant now) {
-        return now.isBefore(expiresAt);
     }
 
     /** Started by this admitted session: same session, customer, channel and device. */
@@ -109,10 +100,6 @@ public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Chan
                 .build();
     }
 
-    public EnrollmentTransaction withVersion(long storedVersion) {
-        return toBuilder().version(storedVersion).build();
-    }
-
     private void requireState(EnrollmentState expected) {
         if (state != expected) {
             throw new EnrollmentStateException("Enrollment transaction is " + state);
@@ -121,7 +108,6 @@ public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Chan
 
     @Override
     public String toString() {
-        return "EnrollmentTransaction[id=" + id + ", state=" + state + ", verifyAttempts=" + verifyAttempts
-                + ", version=" + version + ", redacted]";
+        return "EnrollmentTransaction[id=" + id + ", state=" + state + ", verifyAttempts=" + verifyAttempts + ", redacted]";
     }
 }

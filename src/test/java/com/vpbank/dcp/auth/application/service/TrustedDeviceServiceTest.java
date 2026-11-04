@@ -130,8 +130,8 @@ class TrustedDeviceServiceTest {
         com.vpbank.dcp.auth.domain.model.DeviceEnrollment enrollment = com.vpbank.dcp.auth.domain.model.DeviceEnrollment
                 .fromTransaction(com.vpbank.dcp.auth.domain.model.EnrollmentTransaction.keyExchange(
                         com.vpbank.dcp.auth.domain.model.EnrollmentId.random(), tabletSession, oldTablet.id(), "{new}",
-                        DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest", NOW.plusSeconds(600))
-                        .markMfaRequired("mfa-1"));
+                        DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest")
+                        .markMfaRequired("mfa-1"), NOW.plusSeconds(600));
 
         TrustedDevice trusted = service.confirmTrust(enrollment, restrictedSession, DevicePlatform.IOS, "{new}", "receipt", "corr-c");
 

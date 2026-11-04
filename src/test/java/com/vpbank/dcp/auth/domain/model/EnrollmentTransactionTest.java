@@ -8,12 +8,10 @@ import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.exception.EnrollmentStateException;
-import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 /** The primary enrollment between init and confirm: KEY_EXCHANGE → MFA_REQUIRED, attempts, owner, redaction. */
 class EnrollmentTransactionTest {
-    private static final Instant NOW = Instant.parse("2026-11-03T10:00:00Z");
     private static final AdmittedSession TABLET = new AdmittedSession(SessionId.random(), new CustomerId("90359"),
             Channel.MOBILE, new DeviceId("tablet-2"), SessionStatus.NEED_TRUSTED_DEVICE);
 
@@ -25,14 +23,12 @@ class EnrollmentTransactionTest {
             DevicePlatform.IOS,
             "{srv-pub}",
             "{srv-priv}",
-            "challenge-digest",
-            NOW.plusSeconds(600));
+            "challenge-digest");
 
     @Test
     void initStartsInKeyExchangeOwnedByTheAdmittedSession() {
         assertThat(started.state()).isEqualTo(EnrollmentState.KEY_EXCHANGE);
         assertThat(started.verifyAttempts()).isZero();
-        assertThat(started.version()).isZero();
         assertThat(started.mfaTransactionId()).isNull();
         assertThat(started.customerId()).isEqualTo(TABLET.customerId());
         assertThat(started.deviceId()).isEqualTo(TABLET.deviceId());
@@ -69,13 +65,6 @@ class EnrollmentTransactionTest {
         assertThatThrownBy(mfaRequired::countVerifyAttempt).isInstanceOf(EnrollmentStateException.class);
         assertThatThrownBy(() -> mfaRequired.markMfaRequired("mfa-2")).isInstanceOf(EnrollmentStateException.class);
         assertThatThrownBy(() -> started.markMfaRequired(null)).isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    void itIsOpenUntilItsDeadline() {
-        assertThat(started.isOpen(NOW)).isTrue();
-        assertThat(started.isOpen(NOW.plusSeconds(599))).isTrue();
-        assertThat(started.isOpen(NOW.plusSeconds(600))).isFalse();
     }
 
     @Test

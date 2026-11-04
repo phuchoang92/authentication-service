@@ -14,12 +14,13 @@ import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CreateResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.ServerKeyPairGenerator;
+import com.vpbank.dcp.auth.application.port.out.model.CacheTransaction;
 import com.vpbank.dcp.auth.application.port.out.model.MfaCheckRequest;
 import com.vpbank.dcp.auth.application.port.out.model.MfaTransactionRequest;
 import com.vpbank.dcp.auth.application.port.out.model.OpenedChallenge;
 import com.vpbank.dcp.auth.application.port.out.model.ServerKeyPair;
 import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
-import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore;
+import com.vpbank.dcp.auth.application.port.out.repository.TransactionStore;
 import com.vpbank.dcp.auth.application.result.ConfirmEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.InitEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
@@ -52,10 +53,10 @@ import lombok.RequiredArgsConstructor;
  * session and issues a full ACTIVE one. Steps run once each, in order.
  *
  * <p>Slice 11: the caller is the session the BFF admitted ({@link AdmittedSession}); only a restricted one may
- * run these steps, and no session is read. The steps share an {@link EnrollmentTransaction} in the cache (Ksrv,
- * challenge digest, attempts, MFA transaction), one per device, bound to the restricted session that ran init.
- * Nothing is written to SQL before the commit: the enrollment row is inserted, already COMPLETED, with the trust.
- * A failure or an MFA expiry removes the transaction and ends the restricted session.
+ * run these steps, and no session is read. The steps share one cache transaction per device
+ * ({@link EnrollmentTransactions}) whose payload is the {@link EnrollmentTransaction}: Ksrv, challenge digest,
+ * attempts, MFA transaction. Nothing is written to SQL before the commit: the enrollment row is inserted, already
+ * COMPLETED, with the trust. A failure or an MFA expiry removes the transaction and ends the restricted session.
  */
 @RequiredArgsConstructor
 public final class DeviceEnrollmentService
@@ -71,7 +72,7 @@ public final class DeviceEnrollmentService
     @NonNull
     private final SessionService sessionService;
     @NonNull
-    private final EnrollmentTransactionStore enrollmentTransactionStore;
+    private final TransactionStore transactionStore;
     @NonNull
     private final TrustedDeviceService trustedDeviceService;
     @NonNull
@@ -99,15 +100,13 @@ public final class DeviceEnrollmentService
             }
 
             // init runs once per restricted session; a new login on the same device starts over.
-            Optional<EnrollmentTransaction> earlierTransaction = enrollmentTransactionStore.find(
-                    caller.customerId(),
-                    caller.channel(),
-                    caller.deviceId());
+            Optional<CacheTransaction<EnrollmentTransaction>> earlierTransaction =
+                    transactionStore.find(EnrollmentTransactions.KIND, EnrollmentTransactions.idOf(caller));
             if (earlierTransaction.isPresent()) {
-                if (earlierTransaction.get().belongsTo(caller)) {
+                if (earlierTransaction.get().payload().belongsTo(caller)) {
                     return new InitEnrollmentResult.Conflict();
                 }
-                boolean supersededTheEarlierLogin = enrollmentTransactionStore.deleteIfCurrent(earlierTransaction.get());
+                boolean supersededTheEarlierLogin = transactionStore.deleteIfCurrent(earlierTransaction.get());
                 if (!supersededTheEarlierLogin) {
                     return new InitEnrollmentResult.Conflict();
                 }
@@ -143,8 +142,7 @@ public final class DeviceEnrollmentService
 
             ServerKeyPair serverKeyPair = serverKeyPairGenerator.next();
             TrustedDeviceId targetDeviceId = knownDevice.map(KnownDeviceSummary::id).orElse(null);
-            Instant expiresAt = clock.instant().plus(enrollmentLifetime);
-            EnrollmentTransaction freshTransaction = EnrollmentTransaction.keyExchange(
+            EnrollmentTransaction keyExchange = EnrollmentTransaction.keyExchange(
                     enrollmentId,
                     caller,
                     targetDeviceId,
@@ -152,11 +150,16 @@ public final class DeviceEnrollmentService
                     platform,
                     serverKeyPair.publicJwk(),
                     serverKeyPair.privateJwk(),
-                    EnrollmentDigests.digest(challenge),
-                    expiresAt);
+                    EnrollmentDigests.digest(challenge));
+            Instant expiresAt = clock.instant().plus(enrollmentLifetime);
+            CacheTransaction<EnrollmentTransaction> freshTransaction = CacheTransaction.open(
+                    EnrollmentTransactions.KIND,
+                    EnrollmentTransactions.idOf(caller),
+                    expiresAt,
+                    keyExchange);
 
             // A racing init of the same device got there first.
-            boolean created = enrollmentTransactionStore.createIfAbsent(freshTransaction);
+            boolean created = transactionStore.createIfAbsent(freshTransaction);
             if (!created) {
                 return new InitEnrollmentResult.Conflict();
             }
@@ -179,36 +182,39 @@ public final class DeviceEnrollmentService
                 return new VerifyEnrollmentResult.Conflict();
             }
 
-            Optional<EnrollmentTransaction> openTransaction = findOpenTransaction(caller, EnrollmentState.KEY_EXCHANGE);
+            Optional<CacheTransaction<EnrollmentTransaction>> openTransaction =
+                    findOpenTransaction(caller, EnrollmentState.KEY_EXCHANGE);
             if (openTransaction.isEmpty()) {
                 return new VerifyEnrollmentResult.Conflict();
             }
 
             // The attempt is counted before the answer is checked, so a lost race cannot grant a free try.
-            EnrollmentTransaction transactionWithAttempt = openTransaction.get().countVerifyAttempt();
-            Optional<EnrollmentTransaction> savedTransaction = enrollmentTransactionStore.saveIfCurrent(transactionWithAttempt);
+            EnrollmentTransaction enrollmentWithAttempt = openTransaction.get().payload().countVerifyAttempt();
+            Optional<CacheTransaction<EnrollmentTransaction>> savedTransaction =
+                    transactionStore.saveIfCurrent(openTransaction.get().withPayload(enrollmentWithAttempt));
             if (savedTransaction.isEmpty()) {
                 return new VerifyEnrollmentResult.Conflict();
             }
-            EnrollmentTransaction transaction = savedTransaction.get();
+            CacheTransaction<EnrollmentTransaction> transaction = savedTransaction.get();
+            EnrollmentTransaction enrollment = transaction.payload();
 
             Optional<OpenedChallenge> openedResponse = challengeSealer.openResponse(
-                    transaction.serverPrivateJwk(),
+                    enrollment.serverPrivateJwk(),
                     command.challengeResponse());
             boolean keyProven = openedResponse.isPresent()
-                    && answersThisEnrollment(openedResponse.get(), transaction);
+                    && answersThisEnrollment(openedResponse.get(), enrollment);
             if (!keyProven) {
                 return wrongChallenge(caller, transaction);
             }
 
             MfaTransactionRequest mfaTransactionRequest = MfaTransactionRequest.builder()
-                    .customerId(transaction.customerId())
-                    .channel(transaction.channel())
-                    .authOperationId(transaction.id())
+                    .customerId(enrollment.customerId())
+                    .channel(enrollment.channel())
+                    .authOperationId(enrollment.id())
                     .purpose(PRIMARY_ENROLLMENT)
                     .factors(FACE_ONLY)
                     .notAfter(transaction.expiresAt())
-                    .contextDigest(EnrollmentDigests.contextDigest(transaction))
+                    .contextDigest(EnrollmentDigests.contextDigest(enrollment))
                     .build();
             CreateResult createResult = mfaTransactionPort.create(mfaTransactionRequest);
 
@@ -225,19 +231,21 @@ public final class DeviceEnrollmentService
         }
     }
 
-    private VerifyEnrollmentResult wrongChallenge(AdmittedSession caller, EnrollmentTransaction transaction) {
-        if (transaction.attemptsExhausted(enrollmentPolicy)) {
+    private VerifyEnrollmentResult wrongChallenge(AdmittedSession caller, CacheTransaction<EnrollmentTransaction> transaction) {
+        EnrollmentTransaction enrollment = transaction.payload();
+        if (enrollment.attemptsExhausted(enrollmentPolicy)) {
             endEnrollment(caller, transaction);
             return new VerifyEnrollmentResult.WrongChallenge(NO_ATTEMPTS_LEFT);
         }
-        int attemptsLeft = enrollmentPolicy.maxVerifyAttempts() - transaction.verifyAttempts();
+        int attemptsLeft = enrollmentPolicy.maxVerifyAttempts() - enrollment.verifyAttempts();
         return new VerifyEnrollmentResult.WrongChallenge(attemptsLeft);
     }
 
-    private VerifyEnrollmentResult recordMfaRequired(EnrollmentTransaction transaction, String mfaTransactionId,
-                                                     Instant mfaExpiresAt) {
-        EnrollmentTransaction mfaRequiredTransaction = transaction.markMfaRequired(mfaTransactionId);
-        Optional<EnrollmentTransaction> savedTransaction = enrollmentTransactionStore.saveIfCurrent(mfaRequiredTransaction);
+    private VerifyEnrollmentResult recordMfaRequired(CacheTransaction<EnrollmentTransaction> transaction,
+                                                     String mfaTransactionId, Instant mfaExpiresAt) {
+        EnrollmentTransaction mfaRequired = transaction.payload().markMfaRequired(mfaTransactionId);
+        Optional<CacheTransaction<EnrollmentTransaction>> savedTransaction =
+                transactionStore.saveIfCurrent(transaction.withPayload(mfaRequired));
         if (savedTransaction.isEmpty()) {
             return new VerifyEnrollmentResult.Conflict();
         }
@@ -258,19 +266,21 @@ public final class DeviceEnrollmentService
                 return new ConfirmEnrollmentResult.Conflict();
             }
 
-            Optional<EnrollmentTransaction> openTransaction = findOpenTransaction(caller, EnrollmentState.MFA_REQUIRED);
+            Optional<CacheTransaction<EnrollmentTransaction>> openTransaction =
+                    findOpenTransaction(caller, EnrollmentState.MFA_REQUIRED);
             if (openTransaction.isEmpty()) {
                 return new ConfirmEnrollmentResult.Conflict();
             }
-            EnrollmentTransaction transaction = openTransaction.get();
+            CacheTransaction<EnrollmentTransaction> transaction = openTransaction.get();
+            EnrollmentTransaction enrollment = transaction.payload();
 
             MfaCheckRequest mfaCheckRequest = MfaCheckRequest.builder()
-                    .mfaTransactionId(transaction.mfaTransactionId())
-                    .customerId(transaction.customerId())
-                    .authOperationId(transaction.id())
+                    .mfaTransactionId(enrollment.mfaTransactionId())
+                    .customerId(enrollment.customerId())
+                    .authOperationId(enrollment.id())
                     .purpose(PRIMARY_ENROLLMENT)
                     .factors(FACE_ONLY)
-                    .contextDigest(EnrollmentDigests.contextDigest(transaction))
+                    .contextDigest(EnrollmentDigests.contextDigest(enrollment))
                     .build();
             CheckResult checkResult = mfaTransactionPort.check(mfaCheckRequest);
 
@@ -294,9 +304,9 @@ public final class DeviceEnrollmentService
     }
 
     private ConfirmEnrollmentResult commitTrust(ConfirmEnrollmentCommand command, AdmittedSession caller,
-                                                EnrollmentTransaction transaction, String receiptDigest) {
+                                                CacheTransaction<EnrollmentTransaction> transaction, String receiptDigest) {
         // Only one confirm may commit: the transaction is removed first, compare-and-set on its version.
-        boolean transactionClaimed = enrollmentTransactionStore.deleteIfCurrent(transaction);
+        boolean transactionClaimed = transactionStore.deleteIfCurrent(transaction);
         if (!transactionClaimed) {
             return new ConfirmEnrollmentResult.Conflict();
         }
@@ -307,13 +317,14 @@ public final class DeviceEnrollmentService
             return new ConfirmEnrollmentResult.Conflict();
         }
 
-        DeviceEnrollment passedEnrollment = DeviceEnrollment.fromTransaction(transaction);
+        EnrollmentTransaction enrollment = transaction.payload();
+        DeviceEnrollment passedEnrollment = DeviceEnrollment.fromTransaction(enrollment, transaction.expiresAt());
         String correlationId = caller.sessionId().toString();
         TrustedDevice trustedDevice = trustedDeviceService.confirmTrust(
                 passedEnrollment,
                 caller.sessionId(),
-                transaction.platform(),
-                transaction.devicePublicJwk(),
+                enrollment.platform(),
+                enrollment.devicePublicJwk(),
                 receiptDigest,
                 correlationId);
 
@@ -331,17 +342,18 @@ public final class DeviceEnrollmentService
     }
 
     /** The device's transaction, when this restricted session started it, it is still open and at this step. */
-    private Optional<EnrollmentTransaction> findOpenTransaction(AdmittedSession caller, EnrollmentState expectedState) {
+    private Optional<CacheTransaction<EnrollmentTransaction>> findOpenTransaction(AdmittedSession caller,
+                                                                                  EnrollmentState expectedState) {
         Instant now = clock.instant();
-        return enrollmentTransactionStore.find(caller.customerId(), caller.channel(), caller.deviceId())
-                .filter(transaction -> transaction.belongsTo(caller))
+        return transactionStore.find(EnrollmentTransactions.KIND, EnrollmentTransactions.idOf(caller))
+                .filter(transaction -> transaction.payload().belongsTo(caller))
                 .filter(transaction -> transaction.isOpen(now))
-                .filter(transaction -> transaction.state() == expectedState);
+                .filter(transaction -> transaction.payload().state() == expectedState);
     }
 
     /** A failed or expired enrollment leaves nothing behind: the transaction goes, then the restricted session. */
-    private void endEnrollment(AdmittedSession caller, EnrollmentTransaction transaction) {
-        enrollmentTransactionStore.deleteIfCurrent(transaction);
+    private void endEnrollment(AdmittedSession caller, CacheTransaction<EnrollmentTransaction> transaction) {
+        transactionStore.deleteIfCurrent(transaction);
         sessionService.end(restrictedSessionOf(caller));
     }
 
@@ -352,11 +364,11 @@ public final class DeviceEnrollmentService
     /**
      * The response must echo this enrollment and the exact challenge; compared in constant time.
      */
-    private static boolean answersThisEnrollment(OpenedChallenge openedResponse, EnrollmentTransaction transaction) {
-        if (!openedResponse.enrollmentId().equals(transaction.id())) {
+    private static boolean answersThisEnrollment(OpenedChallenge openedResponse, EnrollmentTransaction enrollment) {
+        if (!openedResponse.enrollmentId().equals(enrollment.id())) {
             return false;
         }
         String answeredDigest = EnrollmentDigests.digest(openedResponse.challenge());
-        return EnrollmentDigests.sameDigest(transaction.challengeDigest(), answeredDigest);
+        return EnrollmentDigests.sameDigest(enrollment.challengeDigest(), answeredDigest);
     }
 }

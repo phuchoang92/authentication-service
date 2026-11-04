@@ -149,10 +149,10 @@ class DeviceEnrollmentPersistenceAdapterIT {
         AdmittedSession tabletSession = new AdmittedSession(restrictedSession, ALICE, Channel.MOBILE, TABLET,
                 SessionStatus.NEED_TRUSTED_DEVICE);
         EnrollmentTransaction passed = EnrollmentTransaction.keyExchange(EnrollmentId.random(), tabletSession, oldTablet.id(),
-                "{new}", DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest", now.plusSeconds(600))
+                "{new}", DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest")
                 .countVerifyAttempt()
                 .markMfaRequired("mfa-1");
-        DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed);
+        DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed, T0.plusSeconds(600));
         assertThat(enrollmentRows.findById(enrollment.id().value())).isEmpty();
         TrustedDevice newTablet = TrustedDevice.trustedByEnrollment(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
                 DevicePlatform.IOS, "{new}", now, DevicePolicy.standard());

@@ -2,17 +2,18 @@ package com.vpbank.dcp.auth.infrastructure.config;
 
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
-import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentTransactionStore;
+import com.vpbank.dcp.auth.application.port.out.repository.TransactionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.BffAssertionKeys;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.CaptchaKeys;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.EnrollmentTransactionKeys;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.TransactionHashCodec;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.TransactionKeys;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.RandomOpaqueTokenGenerator;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.SessionKeys;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyAssertionReplayStore;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyCaptchaStore;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyEnrollmentTransactionAdapter;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyTransactionAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeySessionAdapter;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -51,10 +52,11 @@ public class ValkeyConfiguration {
         return new ValkeyCaptchaStore(stringRedisTemplate, captchaKeys, clock);
     }
 
-    /** Primary enrollments in flight (slice 11): init → verify → confirm share one HASH per device. */
+    /** Transactions in flight (slice 11): one store for every flow, each flow bringing only its payload. */
     @Bean
-    EnrollmentTransactionStore enrollmentTransactionStore(StringRedisTemplate stringRedisTemplate) {
-        return new ValkeyEnrollmentTransactionAdapter(stringRedisTemplate, new EnrollmentTransactionKeys());
+    TransactionStore transactionStore(StringRedisTemplate stringRedisTemplate) {
+        TransactionHashCodec transactionHashCodec = new TransactionHashCodec(TransactionHashCodec.strictPayloadJson());
+        return new ValkeyTransactionAdapter(stringRedisTemplate, new TransactionKeys(), transactionHashCodec);
     }
 
     /** Used BFF assertion IDs (slice 11): one SET NX per admitted trusted-device request. */
