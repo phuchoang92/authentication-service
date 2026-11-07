@@ -8,7 +8,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-/** Test double with the store's contract: one record per kind and ID, compare-and-set on version, version + 1 per save. */
+/**
+ * Test double with the store's contract: one record per kind and ID; a save or a removal succeeds only while the
+ * store still holds exactly the transaction the caller read; version + 1 per save.
+ */
 final class InMemoryTransactionStore implements TransactionStore {
     record Key(String purpose, String id) {
     }
@@ -30,22 +33,20 @@ final class InMemoryTransactionStore implements TransactionStore {
     }
 
     @Override
-    public <P> Optional<CacheTransaction<P>> saveIfCurrent(CacheTransaction<P> changed) {
+    public <P> Optional<CacheTransaction<P>> saveIfCurrent(CacheTransaction<P> current, P changedPayload) {
         check();
-        CacheTransaction<?> stored = rows.get(keyOf(changed));
-        if (stored == null || stored.version() != changed.version()) {
+        if (!current.equals(rows.get(keyOf(current)))) {
             return Optional.empty();
         }
-        CacheTransaction<P> saved = changed.withVersion(changed.version() + 1);
-        rows.put(keyOf(changed), saved);
+        CacheTransaction<P> saved = current.next(changedPayload);
+        rows.put(keyOf(current), saved);
         return Optional.of(saved);
     }
 
     @Override
     public <P> boolean deleteIfCurrent(CacheTransaction<P> current) {
         check();
-        CacheTransaction<?> stored = rows.get(keyOf(current));
-        if (stored == null || stored.version() != current.version()) {
+        if (!current.equals(rows.get(keyOf(current)))) {
             return false;
         }
         rows.remove(keyOf(current));

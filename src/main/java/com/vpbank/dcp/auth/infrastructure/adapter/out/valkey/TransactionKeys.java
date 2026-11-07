@@ -2,15 +2,15 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.valkey;
 
 import com.vpbank.dcp.auth.application.port.out.model.CacheTransaction;
 import com.vpbank.dcp.auth.application.port.out.model.TransactionKind;
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
- * Key factory for cache transactions: {@code <namespace><purpose>:<id>}, default namespace {@code tx:v1:}. The
+ * Key factory for cache transactions: {@code <namespace><purpose>:<id>}, default namespace {@code tx:v2:} (v2: the record became one JSON STRING). The
  * purpose and the ID are validated by {@link TransactionKind} and {@link CacheTransaction}; the namespace lets
  * two services share one Valkey without sharing keys. No key material, no I/O, no clock, no TTL decisions here.
  */
 public final class TransactionKeys {
-    static final String DEFAULT_NAMESPACE = "tx:v1:";
+    static final String DEFAULT_NAMESPACE = "tx:v2:";
 
     private final String namespace;
 
@@ -18,16 +18,14 @@ public final class TransactionKeys {
         this(DEFAULT_NAMESPACE);
     }
 
-    public TransactionKeys(String namespace) {
-        this.namespace = Objects.requireNonNull(namespace, "namespace");
+    public TransactionKeys(@NonNull String namespace) {
+        this.namespace = namespace;
         if (namespace.isBlank() || !namespace.endsWith(":")) {
             throw new IllegalArgumentException("A key namespace ends with ':'");
         }
     }
 
-    public String forTransaction(TransactionKind<?> kind, String id) {
-        Objects.requireNonNull(kind, "kind");
-        Objects.requireNonNull(id, "id");
+    public String forTransaction(@NonNull TransactionKind<?> kind, @NonNull String id) {
         return namespace + kind.purpose() + ":" + id;
     }
 

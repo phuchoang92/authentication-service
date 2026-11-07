@@ -7,8 +7,9 @@ import java.util.Optional;
 
 /**
  * Transactions in flight, in the cache (Valkey): any flow, any payload. One record per kind and ID, gone at its
- * {@code expiresAt}. Every write is compare-and-set on {@code version}, so two callers moving the same
- * transaction cannot both win and a removal can serve as a one-shot. The store carries no business rule: it
+ * {@code expiresAt}. Every write is compare-and-set: it succeeds only while the store still holds exactly the
+ * transaction the caller read (each save moves {@code version} on, so an earlier state never comes back). Two
+ * callers moving the same transaction cannot both win, and a removal can serve as a one-shot. The store carries no business rule: it
  * does not know what a step, an attempt or a deadline means; the flow decides that on the payload. Every method
  * throws {@link RepositoryUnavailableException} when the store cannot answer; an uncertain write is reported as
  * unavailable, never as success.
@@ -21,14 +22,14 @@ public interface TransactionStore {
     <P> Optional<CacheTransaction<P>> find(TransactionKind<P> kind, String id);
 
     /**
-     * Saves a changed transaction only if the stored version still equals {@code changed.version()}; returns the
-     * stored transaction (version + 1). Empty = stale or gone.
+     * Replaces the payload only if the store still holds {@code current}; returns the stored transaction
+     * (version + 1). Empty = stale or gone.
      */
-    <P> Optional<CacheTransaction<P>> saveIfCurrent(CacheTransaction<P> changed);
+    <P> Optional<CacheTransaction<P>> saveIfCurrent(CacheTransaction<P> current, P changedPayload);
 
     /**
-     * Removes the transaction only if the stored version still equals {@code current.version()}. Of two racing
-     * callers exactly one gets true.
+     * Removes the transaction only if the store still holds {@code current}. Of two racing callers exactly one
+     * gets true.
      */
     <P> boolean deleteIfCurrent(CacheTransaction<P> current);
 }

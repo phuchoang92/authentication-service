@@ -14,10 +14,10 @@ class TransactionKeysTest {
     @Test
     void theKeyIsNamespacePurposeAndIdInClear() {
         assertThat(new TransactionKeys().forTransaction(KIND, "MOBILE:90359:tablet-2"))
-                .isEqualTo("tx:v1:enrollment:MOBILE:90359:tablet-2");
-        assertThat(new TransactionKeys("auth:tx:v1:").forTransaction(KIND, "abc")).isEqualTo("auth:tx:v1:enrollment:abc");
-        CacheTransaction<String> transaction = CacheTransaction.open(KIND, "abc", Instant.now(), "payload");
-        assertThat(new TransactionKeys().forTransaction(transaction)).isEqualTo("tx:v1:enrollment:abc");
+                .isEqualTo("tx:v2:enrollment:MOBILE:90359:tablet-2");
+        assertThat(new TransactionKeys("auth:tx:v2:").forTransaction(KIND, "abc")).isEqualTo("auth:tx:v2:enrollment:abc");
+        CacheTransaction<String> transaction = KIND.open("abc", Instant.now(), "payload");
+        assertThat(new TransactionKeys().forTransaction(transaction)).isEqualTo("tx:v2:enrollment:abc");
     }
 
     @Test
@@ -28,6 +28,7 @@ class TransactionKeysTest {
         assertThat(new TransactionKeys().forTransaction(KIND, "abd")).isNotEqualTo(enrollment);
         assertThatThrownBy(() -> new TransactionKeys("tx")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new TransactionKind<>("Enrollment", String.class)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> CacheTransaction.open(KIND, "has space", Instant.now(), "p")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> KIND.open("has space", Instant.now(), "p"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

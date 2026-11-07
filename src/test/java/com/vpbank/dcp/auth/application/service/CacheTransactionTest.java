@@ -14,16 +14,16 @@ class CacheTransactionTest {
     private static final TransactionKind<String> NOTES = new TransactionKind<>("notes", String.class);
 
     @Test
-    void opensAtVersionZeroAndMovesPayloadAndVersionWithoutTouchingTheRest() {
-        CacheTransaction<String> opened = CacheTransaction.open(NOTES, "abc", NOW.plusSeconds(60), "first");
+    void opensAtVersionZeroAndEachChangeIsOneVersionLaterWithoutTouchingTheRest() {
+        CacheTransaction<String> opened = NOTES.open("abc", NOW.plusSeconds(60), "first");
 
         assertThat(opened.version()).isZero();
         assertThat(opened.isOpen(NOW)).isTrue();
         assertThat(opened.isOpen(NOW.plusSeconds(60))).isFalse();
 
-        CacheTransaction<String> changed = opened.withPayload("second").withVersion(4);
-        assertThat(changed.payload()).isEqualTo("second");
-        assertThat(changed.version()).isEqualTo(4);
+        CacheTransaction<String> changed = opened.next("second").next("third");
+        assertThat(changed.payload()).isEqualTo("third");
+        assertThat(changed.version()).isEqualTo(2);
         assertThat(changed.id()).isEqualTo("abc");
         assertThat(changed.expiresAt()).isEqualTo(opened.expiresAt());
         assertThat(changed.kind()).isEqualTo(NOTES);
@@ -31,18 +31,18 @@ class CacheTransactionTest {
 
     @Test
     void refusesABadIdANegativeVersionOrAPayloadOfAnotherType() {
-        assertThatThrownBy(() -> CacheTransaction.open(NOTES, "", NOW, "p")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> CacheTransaction.open(NOTES, "a b", NOW, "p")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> CacheTransaction.open(NOTES, "x".repeat(201), NOW, "p")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> NOTES.open("", NOW, "p")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> NOTES.open("a b", NOW, "p")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> NOTES.open("x".repeat(201), NOW, "p")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new CacheTransaction<>(NOTES, "abc", NOW, -1, "p")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> CacheTransaction.open(NOTES, "abc", NOW, null)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> NOTES.open("abc", NOW, null)).isInstanceOf(NullPointerException.class);
         TransactionKind<Object> loose = new TransactionKind<>("loose", Object.class);
-        assertThat(CacheTransaction.open(loose, "abc", NOW, 42).payload()).isEqualTo(42);
+        assertThat(loose.open("abc", NOW, 42).payload()).isEqualTo(42);
     }
 
     @Test
     void printsTheAddressNeverThePayload() {
-        assertThat(CacheTransaction.open(NOTES, "abc", NOW, "a secret").toString())
+        assertThat(NOTES.open("abc", NOW, "a secret").toString())
                 .contains("notes").contains("abc").doesNotContain("secret");
     }
 }
