@@ -1,5 +1,8 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter;
 
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
+import com.vpbank.dcp.auth.domain.model.NewDevice;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
@@ -58,6 +61,8 @@ class TrustedDevicePersistenceAdapterIT {
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
     private static final CustomerId ALICE = new CustomerId("90359");
     private static final DeviceId PHONE = new DeviceId("dev-1");
+    private static final DeviceInstallation ALICE_WATCH =
+            new DeviceInstallation(ALICE, Channel.MOBILE, new DeviceId("watch-3"));
 
     @DynamicPropertySource
     static void settings(DynamicPropertyRegistry registry) {
@@ -103,8 +108,8 @@ class TrustedDevicePersistenceAdapterIT {
 
     @Test
     void aPendingRowIsRegisteredOnceWithItsEventAndCountsAsWaiting() {
-        TrustedDevice watch = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE, new DeviceId("watch-3"),
-                DevicePlatform.IOS, "{watch-key}", now, Duration.ofMinutes(10));
+        NewDevice watchRow = DomainFixtures.newDevice(ALICE_WATCH, DevicePlatform.IOS, "{watch-key}", now);
+        TrustedDevice watch = TrustedDevice.pending(watchRow, Duration.ofMinutes(10));
 
         TrustedDeviceRepository.RegisterPendingResult registered = devices.registerPending(watch, "corr-r1");
 
@@ -120,8 +125,8 @@ class TrustedDevicePersistenceAdapterIT {
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("DEVICE_REGISTERED", "APPROVAL_REQUESTED"));
 
         // A second login of the same installation loses the live-slot race and leaves nothing behind.
-        TrustedDevice again = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE, new DeviceId("watch-3"),
-                DevicePlatform.IOS, "{other-key}", now, Duration.ofMinutes(10));
+        NewDevice againRow = DomainFixtures.newDevice(ALICE_WATCH, DevicePlatform.IOS, "{other-key}", now);
+        TrustedDevice again = TrustedDevice.pending(againRow, Duration.ofMinutes(10));
         assertThat(devices.registerPending(again, "corr-r2"))
                 .isInstanceOf(TrustedDeviceRepository.RegisterPendingResult.InstallationAlreadyLive.class);
         assertThat(rows.count()).isEqualTo(1);
@@ -139,8 +144,8 @@ class TrustedDevicePersistenceAdapterIT {
 
     /** A row an earlier enrollment trusted, and the primary row pointing at it (a login never writes these, slice 13). */
     private TrustedDevice seedTrustedPrimary(DeviceId deviceId) {
-        TrustedDevice device = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, deviceId,
-                DevicePlatform.ANDROID, null, now, DevicePolicy.standard());
+        TrustedDevice device = DomainFixtures.trustedDevice(new DeviceInstallation(ALICE, Channel.MOBILE, deviceId),
+                DevicePlatform.ANDROID, null, now);
         rows.saveAndFlush(TrustedDevicePersistenceMapper.toEntity(device, protection));
         primaries.saveAndFlush(TrustedDevicePersistenceMapper.toPrimary(device, now));
         return device;

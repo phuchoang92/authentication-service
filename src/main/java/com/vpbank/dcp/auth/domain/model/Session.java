@@ -4,10 +4,10 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.exception.SessionStateException;
 import lombok.Builder;
+import lombok.NonNull;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Objects;
 
 /**
  * One login session. An ACTIVE session's idle expiry slides with eligible activity up to the
@@ -17,58 +17,55 @@ import java.util.Objects;
  * still see when it saves a change; each saved change increments it in the store.
  */
 @Builder(toBuilder = true)
-public record Session(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
-                      SessionStatus status, Instant createdAt, Instant idleExpiresAt,
-                      Instant absoluteExpiresAt, long sessionVersion) {
+public record Session(@NonNull SessionId id,
+                      @NonNull CustomerId customerId,
+                      DeviceId deviceId,
+                      @NonNull Channel channel,
+                      @NonNull SessionStatus status,
+                      @NonNull Instant createdAt,
+                      @NonNull Instant idleExpiresAt,
+                      @NonNull Instant absoluteExpiresAt,
+                      long sessionVersion) {
     public Session {
-        Objects.requireNonNull(id, "id");
-        Objects.requireNonNull(customerId, "customerId");
-        Objects.requireNonNull(channel, "channel");
-        Objects.requireNonNull(status, "status");
-        Objects.requireNonNull(createdAt, "createdAt");
-        Objects.requireNonNull(idleExpiresAt, "idleExpiresAt");
-        Objects.requireNonNull(absoluteExpiresAt, "absoluteExpiresAt");
         if (idleExpiresAt.isAfter(absoluteExpiresAt)) {
             throw new IllegalArgumentException("Idle expiry cannot pass the absolute expiry");
         }
     }
 
     /**
-     * A fresh ACTIVE session: idle = now + idle, absolute = now + absolute, version 0.
+     * A fresh ACTIVE session: idle = start + idle, absolute = start + absolute, version 0.
      */
-    public static Session start(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
-                                Instant now, SessionPolicy policy) {
-        return Session.builder()
-                .id(id)
-                .customerId(customerId)
-                .deviceId(deviceId)
-                .channel(channel)
+    public static Session start(@NonNull NewSession newSession, @NonNull SessionPolicy policy) {
+        Instant startedAt = newSession.startedAt();
+        return sessionOf(newSession)
                 .status(SessionStatus.ACTIVE)
-                .createdAt(now)
-                .idleExpiresAt(now.plus(policy.idle()))
-                .absoluteExpiresAt(now.plus(policy.absolute()))
-                .sessionVersion(0)
+                .idleExpiresAt(startedAt.plus(policy.idle()))
+                .absoluteExpiresAt(startedAt.plus(policy.absolute()))
                 .build();
     }
 
     /**
-     * A restricted session for a device that still needs trust: idle = absolute = now + TTL.
+     * A restricted session for a device that still needs trust: idle = absolute = start + TTL.
      */
-    public static Session startRestricted(SessionId id, CustomerId customerId, DeviceId deviceId, Channel channel,
-                                          Instant now, DevicePolicy policy) {
+    public static Session startRestricted(@NonNull NewSession newSession, @NonNull DevicePolicy policy) {
         // A restricted session has one fixed deadline: idle and absolute expiry are the same instant.
-        Instant restrictedExpiresAt = now.plus(policy.restrictedSessionTtl());
-        return Session.builder()
-                .id(id)
-                .customerId(customerId)
-                .deviceId(deviceId)
-                .channel(channel)
+        Instant restrictedExpiresAt = newSession.startedAt().plus(policy.restrictedSessionTtl());
+        return sessionOf(newSession)
                 .status(SessionStatus.NEED_TRUSTED_DEVICE)
-                .createdAt(now)
                 .idleExpiresAt(restrictedExpiresAt)
                 .absoluteExpiresAt(restrictedExpiresAt)
-                .sessionVersion(0)
                 .build();
+    }
+
+    /** The fields every new session starts with: who and where, when it was created, version 0. */
+    private static SessionBuilder sessionOf(NewSession newSession) {
+        return Session.builder()
+                .id(newSession.id())
+                .customerId(newSession.customerId())
+                .deviceId(newSession.deviceId())
+                .channel(newSession.channel())
+                .createdAt(newSession.startedAt())
+                .sessionVersion(0);
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.jose;
 
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
+import com.vpbank.dcp.auth.domain.model.NewSession;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -22,9 +24,13 @@ import org.junit.jupiter.api.Test;
 class NimbusTokenEnvelopeSealerTest {
     private static final OpaqueToken TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     private final NimbusTokenEnvelopeSealer sealer = new NimbusTokenEnvelopeSealer();
-    private final Session session = Session.start(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE,
-            Instant.parse("2026-10-25T10:00:00Z"), new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20),
-                    Duration.ofSeconds(30)));
+    private final NewSession sessionStart = DomainFixtures.mobileSession(
+            SessionId.random(),
+            new CustomerId("90359"),
+            null,
+            Instant.parse("2026-10-25T10:00:00Z"));
+    private final Session session = Session.start(sessionStart,
+            new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20), Duration.ofSeconds(30)));
 
     @Test
     void onlyTheHolderOfThePrivateKencCanReadTheToken() throws Exception {

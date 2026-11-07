@@ -1,5 +1,8 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
+import com.vpbank.dcp.auth.domain.model.NewSession;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
@@ -48,13 +51,14 @@ class DeviceManagementServiceTest {
 
     @Test
     void listsFromAnActiveSessionRefusesARestrictedOneAndReportsAGoneOne() {
-        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, PHONE,
-                DevicePlatform.ANDROID, null, NOW.minusSeconds(60), DevicePolicy.standard());
+        TrustedDevice phone = DomainFixtures.trustedDevice(new DeviceInstallation(ALICE, Channel.MOBILE, PHONE),
+                DevicePlatform.ANDROID, null, NOW.minusSeconds(60));
         devices.rows.put(phone.id(), phone);
         devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), phone.id());
-        sessions.create(Session.start(ACTIVE_ID, ALICE, PHONE, Channel.MOBILE, NOW, sessionPolicy), ACTIVE_TOKEN);
-        sessions.create(Session.startRestricted(RESTRICTED_ID, ALICE, new DeviceId("tablet-2"), Channel.MOBILE, NOW,
-                DevicePolicy.standard()), RESTRICTED_TOKEN);
+        NewSession phoneStart = DomainFixtures.mobileSession(ACTIVE_ID, ALICE, PHONE, NOW);
+        sessions.create(Session.start(phoneStart, sessionPolicy), ACTIVE_TOKEN);
+        NewSession tabletStart = DomainFixtures.mobileSession(RESTRICTED_ID, ALICE, new DeviceId("tablet-2"), NOW);
+        sessions.create(Session.startRestricted(tabletStart, DevicePolicy.standard()), RESTRICTED_TOKEN);
 
         ListDevicesResult listed = service.list(new ListDevicesCommand(ACTIVE_TOKEN));
         assertThat(listed).isInstanceOf(ListDevicesResult.Devices.class);

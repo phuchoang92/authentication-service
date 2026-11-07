@@ -15,15 +15,16 @@ class EnrollmentTransactionTest {
     private static final AdmittedSession TABLET = new AdmittedSession(SessionId.random(), new CustomerId("90359"),
             Channel.MOBILE, new DeviceId("tablet-2"), SessionStatus.NEED_TRUSTED_DEVICE);
 
-    private final EnrollmentTransaction started = EnrollmentTransaction.keyExchange(
-            EnrollmentId.random(),
-            TABLET,
-            null,
-            "{dev}",
-            DevicePlatform.IOS,
-            "{srv-pub}",
-            "{srv-priv}",
-            "challenge-digest");
+    private static final KeyExchangeStart TABLET_START = KeyExchangeStart.builder()
+            .enrollmentId(EnrollmentId.random())
+            .newDeviceSession(TABLET)
+            .deviceKey(new DeviceKey("{dev}", DevicePlatform.IOS))
+            .serverPublicJwk("{srv-pub}")
+            .serverPrivateJwk("{srv-priv}")
+            .challengeDigest("challenge-digest")
+            .build();
+
+    private final EnrollmentTransaction started = EnrollmentTransaction.keyExchange(TABLET_START);
 
     @Test
     void initStartsInKeyExchangeOwnedByTheAdmittedSession() {

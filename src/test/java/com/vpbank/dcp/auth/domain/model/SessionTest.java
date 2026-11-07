@@ -14,8 +14,12 @@ class SessionTest {
     private static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
     private final SessionPolicy policy = new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20),
             Duration.ofSeconds(30));
-    private final Session session = Session.start(SessionId.random(), new CustomerId("90359"),
-            new DeviceId("dev-1"), Channel.MOBILE, T0, policy);
+    private final NewSession sessionStart = DomainFixtures.mobileSession(
+            SessionId.random(),
+            new CustomerId("90359"),
+            new DeviceId("dev-1"),
+            T0);
+    private final Session session = Session.start(sessionStart, policy);
 
     @Test
     void startsActiveWithIdleAndAbsoluteDeadlines() {

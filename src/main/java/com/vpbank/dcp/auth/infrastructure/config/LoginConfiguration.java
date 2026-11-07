@@ -22,15 +22,24 @@ import com.vpbank.dcp.auth.application.port.out.repository.TransactionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.LoginProofReplayStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
+import com.vpbank.dcp.auth.application.service.ApprovalRequests;
+import com.vpbank.dcp.auth.application.service.ApprovalStatusService;
+import com.vpbank.dcp.auth.application.service.ApproveEnrollmentService;
+import com.vpbank.dcp.auth.application.service.AuthorizeEnrollmentService;
 import com.vpbank.dcp.auth.application.service.CaptchaService;
-import com.vpbank.dcp.auth.application.service.DeviceApprovalService;
-import com.vpbank.dcp.auth.application.service.DeviceEnrollmentService;
+import com.vpbank.dcp.auth.application.service.ClaimEnrollmentService;
+import com.vpbank.dcp.auth.application.service.ConfirmEnrollmentService;
 import com.vpbank.dcp.auth.application.service.DeviceManagementService;
+import com.vpbank.dcp.auth.application.service.EnrollmentTransactions;
+import com.vpbank.dcp.auth.application.service.InitEnrollmentService;
+import com.vpbank.dcp.auth.application.service.ListPendingDevicesService;
 import com.vpbank.dcp.auth.application.service.LoginService;
 import com.vpbank.dcp.auth.application.service.PasswordUnlockService;
+import com.vpbank.dcp.auth.application.service.RequestApprovalService;
 import com.vpbank.dcp.auth.application.service.SessionManagementService;
 import com.vpbank.dcp.auth.application.service.SessionService;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService;
+import com.vpbank.dcp.auth.application.service.VerifyEnrollmentService;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
@@ -189,31 +198,56 @@ public class LoginConfiguration {
         return new PasswordUnlockRestMapper(errorMessages);
     }
 
-    /** One bean, three use-case views (init/verify/confirm), like SessionService. */
+    /** The primary enrollment's transactions, shared by init/verify/confirm and by the approval request check. */
     @Bean
-    DeviceEnrollmentService deviceEnrollmentService(SessionService sessionService,
-                                                    TransactionStore transactionStore,
-                                                    TrustedDeviceService trustedDeviceService,
-                                                    MfaTransactionPort mfaTransactionPort,
-                                                    ServerKeyPairGenerator serverKeyPairGenerator,
-                                                    ChallengeSealer challengeSealer,
-                                                    LoginProperties properties,
-                                                    DevicePolicy devicePolicy,
-                                                    Clock clock) {
-        EnrollmentPolicy enrollmentPolicy = enrollmentPolicy(properties);
+    EnrollmentTransactions enrollmentTransactions(TransactionStore transactionStore,
+                                                  DevicePolicy devicePolicy,
+                                                  Clock clock) {
         // The transaction cannot outlive the restricted session that runs it (slice 11).
         Duration enrollmentLifetime = devicePolicy.restrictedSessionTtl();
-        return new DeviceEnrollmentService(
-                sessionService,
-                transactionStore,
+        return new EnrollmentTransactions(transactionStore, enrollmentLifetime, clock);
+    }
+
+    /** Primary enrollment, step 1: Ksrv and the sealed challenge. */
+    @Bean
+    InitEnrollmentService initEnrollmentService(EnrollmentTransactions enrollmentTransactions,
+                                                TrustedDeviceService trustedDeviceService,
+                                                ServerKeyPairGenerator serverKeyPairGenerator,
+                                                ChallengeSealer challengeSealer) {
+        return new InitEnrollmentService(
+                enrollmentTransactions,
                 trustedDeviceService,
-                mfaTransactionPort,
                 serverKeyPairGenerator,
                 challengeSealer,
-                EnrollmentId::random,
-                enrollmentPolicy,
-                enrollmentLifetime,
-                clock);
+                EnrollmentId::random);
+    }
+
+    /** Primary enrollment, step 2: the key proof, then the FACE check. */
+    @Bean
+    VerifyEnrollmentService verifyEnrollmentService(SessionService sessionService,
+                                                    EnrollmentTransactions enrollmentTransactions,
+                                                    ChallengeSealer challengeSealer,
+                                                    MfaTransactionPort mfaTransactionPort,
+                                                    LoginProperties properties) {
+        return new VerifyEnrollmentService(
+                sessionService,
+                enrollmentTransactions,
+                challengeSealer,
+                mfaTransactionPort,
+                enrollmentPolicy(properties));
+    }
+
+    /** Primary enrollment, step 3: the FACE outcome and the trust commit. */
+    @Bean
+    ConfirmEnrollmentService confirmEnrollmentService(SessionService sessionService,
+                                                      EnrollmentTransactions enrollmentTransactions,
+                                                      TrustedDeviceService trustedDeviceService,
+                                                      MfaTransactionPort mfaTransactionPort) {
+        return new ConfirmEnrollmentService(
+                sessionService,
+                enrollmentTransactions,
+                trustedDeviceService,
+                mfaTransactionPort);
     }
 
     /** Policy bounds are the domain's; a bad setting stops the application with the record's message. */
@@ -227,28 +261,79 @@ public class LoginConfiguration {
                 approval.maxPendingDevices());
     }
 
-    /** One bean, six use-case views (request/status/pending/approve/authorize/claim), like DeviceEnrollmentService. */
+    /** The approval flow's requests, shared by its six use cases. */
     @Bean
-    DeviceApprovalService deviceApprovalService(SessionService sessionService,
-                                                EnrollmentRepository enrollmentRepository,
-                                                TransactionStore transactionStore,
-                                                TrustedDeviceRepository trustedDeviceRepository,
-                                                TrustedDeviceService trustedDeviceService,
-                                                MfaTransactionPort mfaTransactionPort,
-                                                AuthorizationTokenGenerator authorizationTokenGenerator,
-                                                LoginProperties properties,
-                                                Clock clock) {
-        EnrollmentPolicy enrollmentPolicy = enrollmentPolicy(properties);
-        return new DeviceApprovalService(
-                sessionService,
-                enrollmentRepository,
-                transactionStore,
-                trustedDeviceRepository,
+    ApprovalRequests approvalRequests(EnrollmentRepository enrollmentRepository, Clock clock) {
+        return new ApprovalRequests(enrollmentRepository, clock);
+    }
+
+    /** Approval by the primary device, the new device's side: ask to be trusted. */
+    @Bean
+    RequestApprovalService requestApprovalService(ApprovalRequests approvalRequests,
+                                                  EnrollmentTransactions enrollmentTransactions,
+                                                  TrustedDeviceService trustedDeviceService,
+                                                  LoginProperties properties,
+                                                  Clock clock) {
+        return new RequestApprovalService(
+                approvalRequests,
+                enrollmentTransactions,
                 trustedDeviceService,
+                EnrollmentId::random,
+                enrollmentPolicy(properties),
+                clock);
+    }
+
+    /** The new device's side: poll the latest request. */
+    @Bean
+    ApprovalStatusService approvalStatusService(ApprovalRequests approvalRequests, Clock clock) {
+        return new ApprovalStatusService(approvalRequests, clock);
+    }
+
+    /** The primary device's side: list the waiting devices. */
+    @Bean
+    ListPendingDevicesService listPendingDevicesService(TrustedDeviceService trustedDeviceService,
+                                                        ApprovalRequests approvalRequests,
+                                                        TrustedDeviceRepository trustedDeviceRepository) {
+        return new ListPendingDevicesService(trustedDeviceService, approvalRequests, trustedDeviceRepository);
+    }
+
+    /** The primary device's side: approve one request (FACE + OTP). */
+    @Bean
+    ApproveEnrollmentService approveEnrollmentService(TrustedDeviceService trustedDeviceService,
+                                                      ApprovalRequests approvalRequests,
+                                                      MfaTransactionPort mfaTransactionPort) {
+        return new ApproveEnrollmentService(trustedDeviceService, approvalRequests, mfaTransactionPort);
+    }
+
+    /** The primary device's side: collect the one-time token after FACE + OTP passed. */
+    @Bean
+    AuthorizeEnrollmentService authorizeEnrollmentService(TrustedDeviceService trustedDeviceService,
+                                                          ApprovalRequests approvalRequests,
+                                                          MfaTransactionPort mfaTransactionPort,
+                                                          AuthorizationTokenGenerator authorizationTokenGenerator,
+                                                          LoginProperties properties,
+                                                          Clock clock) {
+        return new AuthorizeEnrollmentService(
+                trustedDeviceService,
+                approvalRequests,
                 mfaTransactionPort,
                 authorizationTokenGenerator,
-                EnrollmentId::random,
-                enrollmentPolicy,
+                enrollmentPolicy(properties),
+                clock);
+    }
+
+    /** The new device's side again: claim the token and become trusted. */
+    @Bean
+    ClaimEnrollmentService claimEnrollmentService(SessionService sessionService,
+                                                  ApprovalRequests approvalRequests,
+                                                  TrustedDeviceService trustedDeviceService,
+                                                  LoginProperties properties,
+                                                  Clock clock) {
+        return new ClaimEnrollmentService(
+                sessionService,
+                approvalRequests,
+                trustedDeviceService,
+                enrollmentPolicy(properties),
                 clock);
     }
 

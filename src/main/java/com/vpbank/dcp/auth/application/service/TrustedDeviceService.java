@@ -1,20 +1,25 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.application.command.ConfirmTrustCommand;
+import com.vpbank.dcp.auth.application.command.RegisterPendingDeviceCommand;
+import com.vpbank.dcp.auth.application.command.RouteAfterPasswordCommand;
 import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository.RegisterPendingResult;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
 import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
 import com.vpbank.dcp.auth.domain.enums.Channel;
-import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.PrimaryMode;
 import com.vpbank.dcp.auth.domain.exception.DeviceStateException;
+import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
+import com.vpbank.dcp.auth.domain.model.DeviceKey;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
-import com.vpbank.dcp.auth.domain.model.SessionId;
+import com.vpbank.dcp.auth.domain.model.NewDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.time.Clock;
@@ -69,38 +74,27 @@ public final class TrustedDeviceService {
      * device: a new one, a trusted one that is not primary, an expired one, and a primary device that
      * cannot prove its key (a reinstalled app, or a copied device ID) all wait for the trust flow.
      */
-    public DeviceRouting routeAfterPassword(CustomerId customerId, Channel channel, DeviceId deviceId,
-                                            DevicePossession possession, String correlationId) {
-        if (channel != Channel.MOBILE) {
+    public DeviceRouting routeAfterPassword(@NonNull RouteAfterPasswordCommand command,
+                                            @NonNull DevicePossession possession) {
+        if (command.channel() != Channel.MOBILE) {
             return new DeviceRouting.FullSession();
         }
         Instant now = clock.instant();
-
-        Optional<TrustedDevice> liveDevice = trustedDeviceRepository.findLive(customerId, channel, deviceId);
-        if (liveDevice.isEmpty()) {
-            return new DeviceRouting.NeedTrust();
-        }
-        TrustedDevice device = liveDevice.get();
-
-        if (!device.isTrusted(now)) {
-            return new DeviceRouting.NeedTrust();
-        }
-
-        Optional<TrustedDeviceId> primaryDeviceId = trustedDeviceRepository.findPrimary(customerId, channel);
-        boolean isPrimary = primaryDeviceId.isPresent() && primaryDeviceId.get().equals(device.id());
-        if (!isPrimary) {
+        DeviceInstallation installation =
+                new DeviceInstallation(command.customerId(), command.channel(), command.deviceId());
+        Optional<TrustedDevice> primaryDevice = findTrustedPrimary(installation, now);
+        if (primaryDevice.isEmpty()) {
             return new DeviceRouting.NeedTrust();
         }
 
         // The row's key is what trust means: a login that cannot prove it is not this installation.
-        if (!possession.provenFor(device)) {
+        if (!possession.provenFor(primaryDevice.get())) {
             return new DeviceRouting.NeedTrust();
         }
 
         // Display data only: a lost race against another login is harmless.
-        TrustedDevice deviceWithLogin = device.recordLogin(now);
-        trustedDeviceRepository.saveIfCurrent(deviceWithLogin, correlationId);
-
+        TrustedDevice deviceWithLogin = primaryDevice.get().recordLogin(now);
+        trustedDeviceRepository.saveIfCurrent(deviceWithLogin, command.correlationId());
         return new DeviceRouting.FullSession();
     }
 
@@ -134,52 +128,40 @@ public final class TrustedDeviceService {
      * proved and the customer's primary on the channel. A previous live row of the same installation
      * is replaced (a reinstall or a re-trust), the device cap is enforced, and everything is written in
      * one transaction with the enrollment and its audit trail. The old primary stays trusted (§7).
-     * The enrollment row is written here for the first time (slice 11), bound to {@code restrictedSessionId}.
+     * The enrollment row is written here for the first time (slice 11), bound to the restricted session.
      */
-    public TrustedDevice confirmTrust(DeviceEnrollment enrollment, SessionId restrictedSessionId, DevicePlatform platform,
-                                      String devicePublicJwk, String receiptDigest, String correlationId) {
-        Instant now = clock.instant();
-
+    public TrustedDevice confirmTrust(@NonNull ConfirmTrustCommand command) {
+        DeviceEnrollment enrollment = command.enrollment();
         List<TrustedDevice> liveTrustedDevices =
                 trustedDeviceRepository.findLive(enrollment.customerId(), enrollment.channel());
 
         Optional<TrustedDevice> replacedDevice = findByDeviceId(liveTrustedDevices, enrollment.deviceId());
-
         List<TrustedDevice> otherLiveDevices = new ArrayList<>(liveTrustedDevices);
         replacedDevice.ifPresent(otherLiveDevices::remove);
-
         List<TrustedDevice> devicesExpiredByCap = expireOldestBeyondCap(otherLiveDevices);
 
-        TrustedDevice newTrustedDevice = TrustedDevice.trustedByEnrollment(
-                trustedDeviceIdGenerator.get(),
-                enrollment.customerId(),
-                enrollment.channel(),
-                enrollment.deviceId(),
-                platform,
-                devicePublicJwk,
-                now,
-                devicePolicy);
-
-        TrustedDevice expiredReplacedDevice = replacedDevice
-                .map(TrustedDevice::expire)
-                .orElse(null);
-
-        DeviceEnrollment completedEnrollment = enrollment.complete();
-
         TrustConfirmation trustConfirmation = TrustConfirmation.builder()
-                .device(newTrustedDevice)
-                .replaced(expiredReplacedDevice)
+                .device(newlyTrustedDevice(command))
+                .replaced(replacedDevice.map(TrustedDevice::expire).orElse(null))
                 .expiredByCap(devicesExpiredByCap)
-                .enrollment(completedEnrollment)
+                .enrollment(enrollment.complete())
                 .primaryMode(PrimaryMode.FACE_CONFIRMED)
                 .faceAuthenticated(true)
-                .receiptDigest(receiptDigest)
-                .creationSessionId(restrictedSessionId)
+                .receiptDigest(command.receiptDigest())
+                .creationSessionId(command.restrictedSessionId())
                 .build();
+        return trustedDeviceRepository.trustConfirmed(trustConfirmation, command.correlationId());
+    }
 
-        return trustedDeviceRepository.trustConfirmed(
-                trustConfirmation,
-                correlationId);
+    /** The new row for the installation, trusted now with the key the enrollment proved. */
+    private TrustedDevice newlyTrustedDevice(ConfirmTrustCommand command) {
+        NewDevice newDevice = NewDevice.builder()
+                .id(trustedDeviceIdGenerator.get())
+                .installation(command.enrollment().requester())
+                .key(command.deviceKey())
+                .createdAt(clock.instant())
+                .build();
+        return TrustedDevice.trustedByEnrollment(newDevice, devicePolicy);
     }
 
     /**
@@ -187,53 +169,84 @@ public final class TrustedDeviceService {
      * kept on a PENDING live row until the claim; a known live row of the same installation is reused as is.
      * Empty when the customer already has the maximum number of installations waiting.
      */
-    public Optional<TrustedDevice> registerPendingDevice(CustomerId customerId, Channel channel, DeviceId deviceId,
-                                                         DevicePlatform platform, String devicePublicJwk,
-                                                         EnrollmentPolicy enrollmentPolicy, String correlationId) {
-        Optional<TrustedDevice> knownLiveDevice = trustedDeviceRepository.findLive(customerId, channel, deviceId);
+    public Optional<TrustedDevice> registerPendingDevice(@NonNull RegisterPendingDeviceCommand command) {
+        AdmittedSession newDeviceSession = command.newDeviceSession();
+        Optional<TrustedDevice> knownLiveDevice = findLiveRowOf(newDeviceSession);
         if (knownLiveDevice.isPresent()) {
             return knownLiveDevice;
         }
 
-        int pendingDevices = trustedDeviceRepository.countPending(customerId, channel);
+        EnrollmentPolicy enrollmentPolicy = command.enrollmentPolicy();
+        int pendingDevices =
+                trustedDeviceRepository.countPending(newDeviceSession.customerId(), newDeviceSession.channel());
         if (pendingDevices >= enrollmentPolicy.maxPendingDevices()) {
             return Optional.empty();
         }
 
-        TrustedDevice pendingDevice = TrustedDevice.pending(
-                trustedDeviceIdGenerator.get(),
-                customerId,
-                channel,
-                deviceId,
-                platform,
-                devicePublicJwk,
-                clock.instant(),
-                enrollmentPolicy.pendingWindow());
-
-        RegisterPendingResult registerResult = trustedDeviceRepository.registerPending(pendingDevice, correlationId);
+        RegisterPendingResult registerResult =
+                trustedDeviceRepository.registerPending(pendingDevice(command), command.correlationId());
         return switch (registerResult) {
             case RegisterPendingResult.Registered(TrustedDevice registeredDevice) -> Optional.of(registeredDevice);
             // another login of the same installation registered first: its row is the target
-            case RegisterPendingResult.InstallationAlreadyLive() ->
-                    trustedDeviceRepository.findLive(customerId, channel, deviceId);
+            case RegisterPendingResult.InstallationAlreadyLive() -> findLiveRowOf(newDeviceSession);
         };
     }
 
-    /** This installation's row ID when it is the customer's trusted primary on the channel; empty otherwise. */
-    public Optional<TrustedDeviceId> primaryDeviceId(CustomerId customerId, Channel channel, DeviceId deviceId) {
-        Instant now = clock.instant();
+    /** The PENDING row of the installation, waiting as long as the approval window. */
+    private TrustedDevice pendingDevice(RegisterPendingDeviceCommand command) {
+        NewDevice newDevice = NewDevice.builder()
+                .id(trustedDeviceIdGenerator.get())
+                .installation(command.newDeviceSession().installation())
+                .key(new DeviceKey(command.devicePublicJwk(), command.platform()))
+                .createdAt(clock.instant())
+                .build();
+        return TrustedDevice.pending(newDevice, command.enrollmentPolicy().pendingWindow());
+    }
 
-        Optional<TrustedDevice> liveDevice = trustedDeviceRepository.findLive(customerId, channel, deviceId);
-        if (liveDevice.isEmpty() || !liveDevice.get().isTrusted(now)) {
+    private Optional<TrustedDevice> findLiveRowOf(AdmittedSession newDeviceSession) {
+        return trustedDeviceRepository.findLive(
+                newDeviceSession.customerId(),
+                newDeviceSession.channel(),
+                newDeviceSession.deviceId());
+    }
+
+    /**
+     * The device row of this session when it may act as the primary device: a full ACTIVE session (a restricted one
+     * never approves) on the customer's trusted primary installation; empty otherwise.
+     */
+    public Optional<TrustedDeviceId> primaryDeviceIdOf(@NonNull AdmittedSession primaryDeviceSession) {
+        if (!primaryDeviceSession.full()) {
+            return Optional.empty();
+        }
+        Optional<TrustedDevice> primaryDevice =
+                findTrustedPrimary(primaryDeviceSession.installation(), clock.instant());
+        return primaryDevice.map(TrustedDevice::id);
+    }
+
+    /**
+     * The installation's live row when it is trusted at {@code now} and the customer's primary on the channel;
+     * empty for a new, only registered, expired or non-primary installation.
+     */
+    private Optional<TrustedDevice> findTrustedPrimary(DeviceInstallation installation, Instant now) {
+        Optional<TrustedDevice> liveDevice = trustedDeviceRepository.findLive(
+                installation.customerId(),
+                installation.channel(),
+                installation.deviceId());
+        if (liveDevice.isEmpty()) {
+            return Optional.empty();
+        }
+        TrustedDevice device = liveDevice.get();
+        if (!device.isTrusted(now)) {
             return Optional.empty();
         }
 
-        Optional<TrustedDeviceId> primaryDeviceId = trustedDeviceRepository.findPrimary(customerId, channel);
-        boolean isPrimary = primaryDeviceId.isPresent() && primaryDeviceId.get().equals(liveDevice.get().id());
+        Optional<TrustedDeviceId> primaryDeviceId =
+                trustedDeviceRepository.findPrimary(installation.customerId(), installation.channel());
+        boolean isPrimary = primaryDeviceId.isPresent() && primaryDeviceId.get().equals(device.id());
         if (!isPrimary) {
             return Optional.empty();
         }
-        return Optional.of(liveDevice.get().id());
+        return liveDevice;
     }
 
     /**
@@ -241,26 +254,19 @@ public final class TrustedDeviceService {
      * (PENDING, or a known live row) becomes trusted and the customer's primary on the channel in one
      * transaction with the completed enrollment and the audit trail. The old primary stays trusted (§7).
      */
-    public TrustedDevice confirmTrustByApproval(DeviceEnrollment consumedEnrollment, String correlationId) {
+    public TrustedDevice confirmTrustByApproval(@NonNull DeviceEnrollment consumedEnrollment,
+                                                @NonNull String correlationId) {
         Instant now = clock.instant();
-
         List<TrustedDevice> liveDevices =
                 trustedDeviceRepository.findLive(consumedEnrollment.customerId(), consumedEnrollment.channel());
 
-        TrustedDevice targetDevice = liveDevices.stream()
-                .filter(device -> device.id().equals(consumedEnrollment.targetDeviceId()))
-                .findFirst()
-                .orElseThrow(() -> new DeviceStateException("The approved device row is no longer live"));
-
+        TrustedDevice targetDevice = findApprovedRow(liveDevices, consumedEnrollment);
         List<TrustedDevice> otherLiveDevices = new ArrayList<>(liveDevices);
         otherLiveDevices.remove(targetDevice);
-
         List<TrustedDevice> devicesExpiredByCap = expireOldestBeyondCap(otherLiveDevices);
 
-        TrustedDevice approvedDevice = targetDevice.trustByApproval(now, devicePolicy);
-
         TrustConfirmation trustConfirmation = TrustConfirmation.builder()
-                .device(approvedDevice)
+                .device(targetDevice.trustByApproval(now, devicePolicy))
                 .replaced(null)
                 .expiredByCap(devicesExpiredByCap)
                 .enrollment(consumedEnrollment)
@@ -268,10 +274,15 @@ public final class TrustedDeviceService {
                 .faceAuthenticated(false)
                 .actorDeviceId(consumedEnrollment.actorDeviceId())
                 .build();
+        return trustedDeviceRepository.trustConfirmed(trustConfirmation, correlationId);
+    }
 
-        return trustedDeviceRepository.trustConfirmed(
-                trustConfirmation,
-                correlationId);
+    /** The row the approval targets; the request kept it live, so a missing row is a broken invariant. */
+    private static TrustedDevice findApprovedRow(List<TrustedDevice> liveDevices, DeviceEnrollment consumedEnrollment) {
+        return liveDevices.stream()
+                .filter(device -> device.id().equals(consumedEnrollment.targetDeviceId()))
+                .findFirst()
+                .orElseThrow(() -> new DeviceStateException("The approved device row is no longer live"));
     }
 
     /** The expired copies of the rows that must go so that one more device fits under the cap. */

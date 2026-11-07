@@ -1,5 +1,12 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
+import com.vpbank.dcp.auth.application.command.RouteAfterPasswordCommand;
+import com.vpbank.dcp.auth.application.command.ConfirmTrustCommand;
+import com.vpbank.dcp.auth.domain.model.EnrollmentTransaction;
+import com.vpbank.dcp.auth.domain.model.DeviceKey;
+import com.vpbank.dcp.auth.domain.model.KeyExchangeStart;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vpbank.dcp.auth.application.result.DeviceSummary;
@@ -38,13 +45,13 @@ class TrustedDeviceServiceTest {
     /** A login never trusts: a new device, and a customer with no device at all, wait for the trust flow. */
     @Test
     void aNewDeviceNeedsTrustAndIsNeverRegisteredByALogin() {
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, ANY_KEY, "corr-1"))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE, "corr-1"), ANY_KEY))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(devices.rows).isEmpty();
         assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).isEmpty();
 
         seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, TABLET, ANY_KEY, "corr-2"))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, TABLET, "corr-2"), ANY_KEY))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(devices.rows).hasSize(1);
     }
@@ -55,7 +62,8 @@ class TrustedDeviceServiceTest {
         TrustedDeviceService later = new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random,
                 Clock.fixed(NOW.plusSeconds(600), ZoneOffset.UTC));
 
-        assertThat(later.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, device -> device.id().equals(phone.id()), "corr-2"))
+        DevicePossession phoneKeyProven = device -> device.id().equals(phone.id());
+        assertThat(later.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE, "corr-2"), phoneKeyProven))
                 .isInstanceOf(DeviceRouting.FullSession.class);
         assertThat(devices.only().lastLoginAt()).isEqualTo(NOW.plusSeconds(600));
         assertThat(devices.only().version()).isEqualTo(1);
@@ -66,7 +74,7 @@ class TrustedDeviceServiceTest {
     void thePrimaryDeviceThatCannotProveItsKeyNeedsTrustAndNothingIsRecorded() {
         seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
 
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, NO_KEY, "corr-2"))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE, "corr-2"), NO_KEY))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(devices.only().lastLoginAt()).isEqualTo(NOW);
         assertThat(devices.only().version()).isZero();
@@ -75,18 +83,18 @@ class TrustedDeviceServiceTest {
     @Test
     void aTrustedButNotPrimaryOrExpiredDeviceNeedsTrustBeforeTheKeyIsEvenAsked() {
         TrustedDevice phone = seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
-        TrustedDevice tablet = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
-                DevicePlatform.IOS, null, NOW, DevicePolicy.standard());
+        TrustedDevice tablet = DomainFixtures.trustedDevice(new DeviceInstallation(ALICE, Channel.MOBILE, TABLET),
+                DevicePlatform.IOS, null, NOW);
         devices.rows.put(tablet.id(), tablet); // trusted by a later flow, but the phone stays primary
         List<TrustedDevice> asked = new java.util.ArrayList<>();
         DevicePossession recording = device -> asked.add(device);
 
-        assertThat(service.routeAfterPassword(ALICE, Channel.MOBILE, TABLET, recording, "corr-2"))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, TABLET, "corr-2"), recording))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
 
         TrustedDeviceService muchLater = new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random,
                 Clock.fixed(NOW.plus(Duration.ofDays(181)), ZoneOffset.UTC));
-        assertThat(muchLater.routeAfterPassword(ALICE, Channel.MOBILE, PHONE, recording, "corr-3"))
+        assertThat(muchLater.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE, "corr-3"), recording))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(asked).isEmpty();
         assertThat(devices.rows.get(phone.id()).status()).isEqualTo(DeviceStatus.ACTIVE); // expiry is judged, not written here
@@ -94,7 +102,7 @@ class TrustedDeviceServiceTest {
 
     @Test
     void webHasNoDeviceTrust() {
-        assertThat(service.routeAfterPassword(ALICE, Channel.WEB, null, NO_KEY, "corr-1"))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.WEB, null, "corr-1"), NO_KEY))
                 .isInstanceOf(DeviceRouting.FullSession.class);
         assertThat(devices.rows).isEmpty();
     }
@@ -103,8 +111,9 @@ class TrustedDeviceServiceTest {
     void theCapExpiresTheOldestDevicesByLastLogin() {
         List<TrustedDevice> live = new java.util.ArrayList<>();
         for (int i = 0; i < 5; i++) {
-            TrustedDevice d = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE,
-                    new DeviceId("d" + i), DevicePlatform.ANDROID, null, NOW.minus(Duration.ofDays(i)), DevicePolicy.standard());
+            DeviceInstallation installation = new DeviceInstallation(ALICE, Channel.MOBILE, new DeviceId("d" + i));
+            TrustedDevice d = DomainFixtures.trustedDevice(installation, DevicePlatform.ANDROID, null,
+                    NOW.minus(Duration.ofDays(i)));
             devices.rows.put(d.id(), d);
             live.add(d);
         }
@@ -117,23 +126,38 @@ class TrustedDeviceServiceTest {
     @Test
     void confirmTrustReplacesTheSameInstallationEnforcesTheCapAndMakesTheDevicePrimary() {
         for (int i = 0; i < 5; i++) {
-            TrustedDevice d = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, new DeviceId("d" + i),
-                    DevicePlatform.ANDROID, null, NOW.minus(Duration.ofDays(i)), DevicePolicy.standard());
+            DeviceInstallation installation = new DeviceInstallation(ALICE, Channel.MOBILE, new DeviceId("d" + i));
+            TrustedDevice d = DomainFixtures.trustedDevice(installation, DevicePlatform.ANDROID, null,
+                    NOW.minus(Duration.ofDays(i)));
             devices.rows.put(d.id(), d);
         }
-        TrustedDevice oldTablet = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
-                DevicePlatform.IOS, "{old}", NOW.minus(Duration.ofDays(9)), DevicePolicy.standard());
+        TrustedDevice oldTablet = DomainFixtures.trustedDevice(new DeviceInstallation(ALICE, Channel.MOBILE, TABLET),
+                DevicePlatform.IOS, "{old}", NOW.minus(Duration.ofDays(9)));
         devices.rows.put(oldTablet.id(), oldTablet);
         com.vpbank.dcp.auth.domain.model.SessionId restrictedSession = com.vpbank.dcp.auth.domain.model.SessionId.random();
         com.vpbank.dcp.auth.domain.model.AdmittedSession tabletSession = new com.vpbank.dcp.auth.domain.model.AdmittedSession(
                 restrictedSession, ALICE, Channel.MOBILE, TABLET, com.vpbank.dcp.auth.domain.enums.SessionStatus.NEED_TRUSTED_DEVICE);
-        com.vpbank.dcp.auth.domain.model.DeviceEnrollment enrollment = com.vpbank.dcp.auth.domain.model.DeviceEnrollment
-                .fromTransaction(com.vpbank.dcp.auth.domain.model.EnrollmentTransaction.keyExchange(
-                        com.vpbank.dcp.auth.domain.model.EnrollmentId.random(), tabletSession, oldTablet.id(), "{new}",
-                        DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest")
-                        .markMfaRequired("mfa-1"), NOW.plusSeconds(600));
+        KeyExchangeStart start = KeyExchangeStart.builder()
+                .enrollmentId(com.vpbank.dcp.auth.domain.model.EnrollmentId.random())
+                .newDeviceSession(tabletSession)
+                .targetDeviceId(oldTablet.id())
+                .deviceKey(new DeviceKey("{new}", DevicePlatform.IOS))
+                .serverPublicJwk("{srv-pub}")
+                .serverPrivateJwk("{srv-priv}")
+                .challengeDigest("digest")
+                .build();
+        EnrollmentTransaction passed = EnrollmentTransaction.keyExchange(start).markMfaRequired("mfa-1");
+        com.vpbank.dcp.auth.domain.model.DeviceEnrollment enrollment =
+                com.vpbank.dcp.auth.domain.model.DeviceEnrollment.fromTransaction(passed, NOW.plusSeconds(600));
 
-        TrustedDevice trusted = service.confirmTrust(enrollment, restrictedSession, DevicePlatform.IOS, "{new}", "receipt", "corr-c");
+        ConfirmTrustCommand trust = ConfirmTrustCommand.builder()
+                .enrollment(enrollment)
+                .restrictedSessionId(restrictedSession)
+                .deviceKey(new DeviceKey("{new}", DevicePlatform.IOS))
+                .receiptDigest("receipt")
+                .correlationId("corr-c")
+                .build();
+        TrustedDevice trusted = service.confirmTrust(trust);
 
         assertThat(trusted.publicKey()).isEqualTo("{new}");
         assertThat(devices.rows.get(oldTablet.id()).status()).isEqualTo(DeviceStatus.EXPIRED); // replaced, not counted as a peer
@@ -162,10 +186,20 @@ class TrustedDeviceServiceTest {
 
     /** A row trusted by an earlier enrollment, and the customer's primary on the channel. */
     private TrustedDevice seedTrustedPrimary(DeviceId deviceId, DevicePlatform platform) {
-        TrustedDevice device = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, deviceId, platform,
-                "{\"alg\":\"ML-DSA-65\",\"kty\":\"AKP\",\"pub\":\"" + deviceId.value() + "\"}", NOW, DevicePolicy.standard());
+        TrustedDevice device = DomainFixtures.trustedDevice(new DeviceInstallation(ALICE, Channel.MOBILE, deviceId),
+                platform, "{\"alg\":\"ML-DSA-65\",\"kty\":\"AKP\",\"pub\":\"" + deviceId.value() + "\"}", NOW);
         devices.rows.put(device.id(), device);
         devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), device.id());
         return device;
+    }
+
+    /** Alice's login on this channel and installation, as the login hands it to the device routing. */
+    private static RouteAfterPasswordCommand passwordLogin(Channel channel, DeviceId deviceId, String correlationId) {
+        return RouteAfterPasswordCommand.builder()
+                .customerId(ALICE)
+                .channel(channel)
+                .deviceId(deviceId)
+                .correlationId(correlationId)
+                .build();
     }
 }

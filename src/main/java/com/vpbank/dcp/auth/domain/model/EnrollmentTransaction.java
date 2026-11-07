@@ -4,8 +4,8 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.exception.EnrollmentStateException;
-import java.util.Objects;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * A primary enrollment between init and confirm (slice 11), the payload of its cache transaction: whose it is
@@ -16,23 +16,21 @@ import lombok.Builder;
  * it has no terminal state. The deadline and the compare-and-set version belong to the transaction envelope.
  */
 @Builder(toBuilder = true)
-public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Channel channel, DeviceId deviceId,
-                                    SessionId sessionId, EnrollmentState state, TrustedDeviceId targetDeviceId,
-                                    String devicePublicJwk, DevicePlatform platform, String serverPublicJwk,
-                                    String serverPrivateJwk, String challengeDigest, int verifyAttempts,
+public record EnrollmentTransaction(@NonNull EnrollmentId id,
+                                    @NonNull CustomerId customerId,
+                                    @NonNull Channel channel,
+                                    @NonNull DeviceId deviceId,
+                                    @NonNull SessionId sessionId,
+                                    @NonNull EnrollmentState state,
+                                    TrustedDeviceId targetDeviceId,
+                                    @NonNull String devicePublicJwk,
+                                    @NonNull DevicePlatform platform,
+                                    @NonNull String serverPublicJwk,
+                                    @NonNull String serverPrivateJwk,
+                                    @NonNull String challengeDigest,
+                                    int verifyAttempts,
                                     String mfaTransactionId) {
     public EnrollmentTransaction {
-        Objects.requireNonNull(id, "id");
-        Objects.requireNonNull(customerId, "customerId");
-        Objects.requireNonNull(channel, "channel");
-        Objects.requireNonNull(deviceId, "deviceId");
-        Objects.requireNonNull(sessionId, "sessionId");
-        Objects.requireNonNull(state, "state");
-        Objects.requireNonNull(devicePublicJwk, "devicePublicJwk");
-        Objects.requireNonNull(platform, "platform");
-        Objects.requireNonNull(serverPublicJwk, "serverPublicJwk");
-        Objects.requireNonNull(serverPrivateJwk, "serverPrivateJwk");
-        Objects.requireNonNull(challengeDigest, "challengeDigest");
         if (state != EnrollmentState.KEY_EXCHANGE && state != EnrollmentState.MFA_REQUIRED) {
             throw new IllegalArgumentException("An enrollment transaction is KEY_EXCHANGE or MFA_REQUIRED");
         }
@@ -46,38 +44,33 @@ public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Chan
         }
     }
 
-    /**
-     * Init: the device is challenged to prove its key. {@code targetDeviceId} is the device row a known device
-     * already has (null for a new device).
-     */
-    public static EnrollmentTransaction keyExchange(EnrollmentId id, AdmittedSession owner, TrustedDeviceId targetDeviceId,
-                                                    String devicePublicJwk, DevicePlatform platform,
-                                                    String serverPublicJwk, String serverPrivateJwk,
-                                                    String challengeDigest) {
-        Objects.requireNonNull(owner, "owner");
+    /** Init: the new device is challenged to prove its key; no attempt is made yet. */
+    public static EnrollmentTransaction keyExchange(@NonNull KeyExchangeStart start) {
+        AdmittedSession newDeviceSession = start.newDeviceSession();
+        DeviceKey deviceKey = start.deviceKey();
         return EnrollmentTransaction.builder()
-                .id(id)
-                .customerId(owner.customerId())
-                .channel(owner.channel())
-                .deviceId(owner.deviceId())
-                .sessionId(owner.sessionId())
+                .id(start.enrollmentId())
+                .customerId(newDeviceSession.customerId())
+                .channel(newDeviceSession.channel())
+                .deviceId(newDeviceSession.deviceId())
+                .sessionId(newDeviceSession.sessionId())
                 .state(EnrollmentState.KEY_EXCHANGE)
-                .targetDeviceId(targetDeviceId)
-                .devicePublicJwk(devicePublicJwk)
-                .platform(platform)
-                .serverPublicJwk(serverPublicJwk)
-                .serverPrivateJwk(serverPrivateJwk)
-                .challengeDigest(challengeDigest)
+                .targetDeviceId(start.targetDeviceId())
+                .devicePublicJwk(deviceKey.publicJwk())
+                .platform(deviceKey.platform())
+                .serverPublicJwk(start.serverPublicJwk())
+                .serverPrivateJwk(start.serverPrivateJwk())
+                .challengeDigest(start.challengeDigest())
                 .verifyAttempts(0)
                 .build();
     }
 
-    /** Started by this admitted session: same session, customer, channel and device. */
-    public boolean belongsTo(AdmittedSession caller) {
-        return sessionId.equals(caller.sessionId())
-                && customerId.equals(caller.customerId())
-                && channel == caller.channel()
-                && deviceId.equals(caller.deviceId());
+    /** Started by this restricted session: same session, customer, channel and device. */
+    public boolean belongsTo(AdmittedSession newDeviceSession) {
+        return sessionId.equals(newDeviceSession.sessionId())
+                && customerId.equals(newDeviceSession.customerId())
+                && channel == newDeviceSession.channel()
+                && deviceId.equals(newDeviceSession.deviceId());
     }
 
     /** Counted before the answer is checked, so a lost race cannot grant a free try. */
@@ -91,9 +84,8 @@ public record EnrollmentTransaction(EnrollmentId id, CustomerId customerId, Chan
     }
 
     /** The device proved its key; the MFA service now holds a FACE transaction for this enrollment. */
-    public EnrollmentTransaction markMfaRequired(String mfaTransactionId) {
+    public EnrollmentTransaction markMfaRequired(@NonNull String mfaTransactionId) {
         requireState(EnrollmentState.KEY_EXCHANGE);
-        Objects.requireNonNull(mfaTransactionId, "mfaTransactionId");
         return toBuilder()
                 .state(EnrollmentState.MFA_REQUIRED)
                 .mfaTransactionId(mfaTransactionId)

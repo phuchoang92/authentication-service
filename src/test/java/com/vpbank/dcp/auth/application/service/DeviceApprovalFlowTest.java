@@ -1,5 +1,11 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
+import com.vpbank.dcp.auth.domain.model.NewSession;
+import com.vpbank.dcp.auth.domain.model.NewDevice;
+import com.vpbank.dcp.auth.domain.model.DeviceKey;
+import com.vpbank.dcp.auth.domain.model.KeyExchangeStart;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -67,7 +73,7 @@ import org.junit.jupiter.api.Test;
  * Alice has a trusted primary phone (ACTIVE session) and a trusted tablet that is not primary. A new watch logs
  * in and gets a restricted session; the phone approves it with FACE + OTP and shows the QR; the watch claims it.
  */
-class DeviceApprovalServiceTest {
+class DeviceApprovalFlowTest {
     private static final Instant NOW = Instant.parse("2026-10-25T10:00:00Z");
     private static final CustomerId ALICE = new CustomerId("90359");
     private static final DeviceId PHONE = new DeviceId("phone-1");
@@ -97,30 +103,42 @@ class DeviceApprovalServiceTest {
     private final TokenEnvelopeSealer sealer = mock(TokenEnvelopeSealer.class);
     private final OpaqueTokenGenerator tokens = mock(OpaqueTokenGenerator.class);
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+    private final EnrollmentTransactions enrollmentTransactions =
+            new EnrollmentTransactions(transactions, Duration.ofMinutes(10), clock);
     private final TrustedDeviceService trustedDevices = new TrustedDeviceService(devices, DevicePolicy.standard(),
             TrustedDeviceId::random, clock);
     private final SessionService sessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
             sessionPolicy(), DevicePolicy.standard(), clock);
-    private final DeviceApprovalService service = new DeviceApprovalService(sessionService, enrollments, transactions, devices,
-            trustedDevices, mfa, qrTokens, () -> ENROLLMENT, EnrollmentPolicy.standard(), clock);
+    private final ApprovalRequests approvalRequests = new ApprovalRequests(enrollments, clock);
+    private final RequestApprovalService requestApproval = new RequestApprovalService(approvalRequests,
+            enrollmentTransactions, trustedDevices, () -> ENROLLMENT, EnrollmentPolicy.standard(), clock);
+    private final ApprovalStatusService approvalStatus = new ApprovalStatusService(approvalRequests, clock);
+    private final ListPendingDevicesService listPendingDevices = new ListPendingDevicesService(trustedDevices,
+            approvalRequests, devices);
+    private final ApproveEnrollmentService approveEnrollment = new ApproveEnrollmentService(trustedDevices,
+            approvalRequests, mfa);
+    private final AuthorizeEnrollmentService authorizeEnrollment = new AuthorizeEnrollmentService(trustedDevices,
+            approvalRequests, mfa, qrTokens, EnrollmentPolicy.standard(), clock);
+    private final ClaimEnrollmentService claimEnrollment = new ClaimEnrollmentService(sessionService,
+            approvalRequests, trustedDevices, EnrollmentPolicy.standard(), clock);
 
     private TrustedDevice phone;
 
     @BeforeEach
     void aliceHasAPrimaryPhoneATrustedTabletAndAWatchOnARestrictedSession() {
-        phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, PHONE, DevicePlatform.ANDROID,
-                "{phone-key}", NOW.minusSeconds(3600), DevicePolicy.standard());
-        TrustedDevice tablet = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE, TABLET,
-                DevicePlatform.IOS, "{tablet-key}", NOW.minusSeconds(1800), DevicePolicy.standard());
+        phone = DomainFixtures.trustedDevice(new DeviceInstallation(ALICE, Channel.MOBILE, PHONE),
+                DevicePlatform.ANDROID, "{phone-key}", NOW.minusSeconds(3600));
+        TrustedDevice tablet = DomainFixtures.trustedDevice(new DeviceInstallation(ALICE, Channel.MOBILE, TABLET),
+                DevicePlatform.IOS, "{tablet-key}", NOW.minusSeconds(1800));
         devices.rows.put(phone.id(), phone);
         devices.rows.put(tablet.id(), tablet);
         devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), phone.id());
-        sessions.create(Session.start(PHONE_TOKEN.sessionId(), ALICE, PHONE, Channel.MOBILE, NOW, sessionPolicy()),
-                PHONE_TOKEN);
-        sessions.create(Session.start(TABLET_TOKEN.sessionId(), ALICE, TABLET, Channel.MOBILE, NOW, sessionPolicy()),
-                TABLET_TOKEN);
-        sessions.create(Session.startRestricted(WATCH_TOKEN.sessionId(), ALICE, WATCH, Channel.MOBILE, NOW,
-                DevicePolicy.standard()), WATCH_TOKEN);
+        NewSession phoneStart = DomainFixtures.mobileSession(PHONE_TOKEN.sessionId(), ALICE, PHONE, NOW);
+        sessions.create(Session.start(phoneStart, sessionPolicy()), PHONE_TOKEN);
+        NewSession tabletStart = DomainFixtures.mobileSession(TABLET_TOKEN.sessionId(), ALICE, TABLET, NOW);
+        sessions.create(Session.start(tabletStart, sessionPolicy()), TABLET_TOKEN);
+        NewSession watchStart = DomainFixtures.mobileSession(WATCH_TOKEN.sessionId(), ALICE, WATCH, NOW);
+        sessions.create(Session.startRestricted(watchStart, DevicePolicy.standard()), WATCH_TOKEN);
         when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-7", NOW.plus(Duration.ofMinutes(5))));
         when(qrTokens.next()).thenReturn(QR_TOKEN);
         when(tokens.next(any(), any())).thenReturn(NEW_TOKEN);
@@ -129,7 +147,7 @@ class DeviceApprovalServiceTest {
 
     @Test
     void theWatchRequestsApprovalAndGetsAPendingRowThatIsNotTrusted() {
-        RequestApprovalResult result = service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        RequestApprovalResult result = requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
 
         assertThat(result).isInstanceOf(RequestApprovalResult.WaitingApproval.class);
         RequestApprovalResult.WaitingApproval waiting = (RequestApprovalResult.WaitingApproval) result;
@@ -146,28 +164,29 @@ class DeviceApprovalServiceTest {
                 .session().id() + ":DEVICE_REGISTERED");
 
         // The same session asking again gets the same request; the status poll says it waits.
-        assertThat(service.request(new RequestApprovalCommand(WATCH_SESSION, null, null)))
+        assertThat(requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, null, null)))
                 .isEqualTo(new RequestApprovalResult.WaitingApproval(ENROLLMENT, stored.expiresAt()));
         assertThat(enrollments.rows).hasSize(1);
-        assertThat(service.status(new ApprovalStatusCommand(WATCH_SESSION)))
+        assertThat(approvalStatus.status(new ApprovalStatusCommand(WATCH_SESSION)))
                 .isEqualTo(new ApprovalStatusResult.Status(ENROLLMENT, EnrollmentState.WAITING_APPROVAL, stored.expiresAt()));
     }
 
     @Test
     void anUnknownDeviceMustSendItsKeyAndTheQuotaAndSessionKindAreEnforced() {
-        assertThat(service.request(new RequestApprovalCommand(WATCH_SESSION, null, DevicePlatform.IOS)))
+        assertThat(requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, null, DevicePlatform.IOS)))
                 .isInstanceOf(RequestApprovalResult.DeviceKeyRequired.class);
-        assertThat(service.request(new RequestApprovalCommand(PHONE_SESSION, WATCH_KEY, DevicePlatform.IOS)))
+        assertThat(requestApproval.request(new RequestApprovalCommand(PHONE_SESSION, WATCH_KEY, DevicePlatform.IOS)))
                 .isInstanceOf(RequestApprovalResult.Conflict.class); // an ACTIVE session is not a restricted one
-        assertThat(service.status(new ApprovalStatusCommand(WATCH_SESSION))).isInstanceOf(ApprovalStatusResult.NoRequest.class);
+        assertThat(approvalStatus.status(new ApprovalStatusCommand(WATCH_SESSION))).isInstanceOf(ApprovalStatusResult.NoRequest.class);
 
         // Three installations already wait: the fourth is refused before any row is written.
         for (int i = 0; i < 3; i++) {
-            TrustedDevice waiting = TrustedDevice.pending(TrustedDeviceId.random(), ALICE, Channel.MOBILE,
-                    new DeviceId("other-" + i), DevicePlatform.IOS, "{k}", NOW, Duration.ofMinutes(10));
+            DeviceInstallation other = new DeviceInstallation(ALICE, Channel.MOBILE, new DeviceId("other-" + i));
+            NewDevice otherRow = DomainFixtures.newDevice(other, DevicePlatform.IOS, "{k}", NOW);
+            TrustedDevice waiting = TrustedDevice.pending(otherRow, Duration.ofMinutes(10));
             devices.rows.put(waiting.id(), waiting);
         }
-        assertThat(service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS)))
+        assertThat(requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS)))
                 .isInstanceOf(RequestApprovalResult.TooManyPending.class);
         assertThat(enrollments.rows).isEmpty();
         assertThat(devices.findLive(ALICE, Channel.MOBILE, WATCH)).isEmpty();
@@ -175,17 +194,17 @@ class DeviceApprovalServiceTest {
 
     @Test
     void onlyThePrimaryDeviceSeesAndApprovesTheRequestWithFaceAndOtp() {
-        service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
 
-        assertThat(service.pending(new ListPendingDevicesCommand(TABLET_SESSION)))
+        assertThat(listPendingDevices.pending(new ListPendingDevicesCommand(TABLET_SESSION)))
                 .isInstanceOf(ListPendingDevicesResult.NotPrimaryDevice.class);
-        assertThat(service.pending(new ListPendingDevicesCommand(WATCH_SESSION)))
+        assertThat(listPendingDevices.pending(new ListPendingDevicesCommand(WATCH_SESSION)))
                 .isInstanceOf(ListPendingDevicesResult.NotPrimaryDevice.class); // restricted sessions never list
-        assertThat(service.approve(new ApproveEnrollmentCommand(TABLET_SESSION, ENROLLMENT)))
+        assertThat(approveEnrollment.approve(new ApproveEnrollmentCommand(TABLET_SESSION, ENROLLMENT)))
                 .isInstanceOf(ApproveEnrollmentResult.NotPrimaryDevice.class);
         verifyNoInteractions(mfa);
 
-        ListPendingDevicesResult listed = service.pending(new ListPendingDevicesCommand(PHONE_SESSION));
+        ListPendingDevicesResult listed = listPendingDevices.pending(new ListPendingDevicesCommand(PHONE_SESSION));
         assertThat(listed).isInstanceOf(ListPendingDevicesResult.Pending.class);
         List<com.vpbank.dcp.auth.application.result.PendingDeviceSummary> pendingDevices =
                 ((ListPendingDevicesResult.Pending) listed).devices();
@@ -194,7 +213,7 @@ class DeviceApprovalServiceTest {
         assertThat(pendingDevices.get(0).deviceId()).isEqualTo(WATCH);
         assertThat(pendingDevices.get(0).platform()).isEqualTo(DevicePlatform.IOS);
 
-        ApproveEnrollmentResult approved = service.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        ApproveEnrollmentResult approved = approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         assertThat(approved).isEqualTo(new ApproveEnrollmentResult.MfaRequired("mfa-7", NOW.plus(Duration.ofMinutes(5))));
         verify(mfa).create(argThat((MfaTransactionRequest request) -> request.purpose() == EnrollmentPurpose.TRUST_DEVICE_APPROVAL
                 && request.factors().equals(List.of(MfaFactor.FACE, MfaFactor.OTP))
@@ -204,21 +223,21 @@ class DeviceApprovalServiceTest {
         assertThat(stored.mfaTransactionId()).isEqualTo("mfa-7");
 
         // Approving twice, or claiming before the token exists, is a conflict.
-        assertThat(service.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+        assertThat(approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
                 .isInstanceOf(ApproveEnrollmentResult.Conflict.class);
-        assertThat(service.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
     }
 
     @Test
     void theTokenIsIssuedOnlyAfterMfaPassedAndOnlyToTheApprovingDevice() {
-        service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
-        assertThat(service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.Conflict.class); // not approved yet
-        service.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
 
         when(mfa.check(any())).thenReturn(new CheckResult.Pending());
-        assertThat(service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.MfaPending.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.WAITING_APPROVAL);
 
@@ -226,40 +245,40 @@ class DeviceApprovalServiceTest {
                 check.mfaTransactionId().equals("mfa-7") && check.factorClaim().equals("FACE+OTP")
                         && check.purpose() == EnrollmentPurpose.TRUST_DEVICE_APPROVAL
                         && check.customerId().equals(ALICE)));
-        AuthorizeEnrollmentResult authorized = service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        AuthorizeEnrollmentResult authorized = authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         assertThat(authorized).isEqualTo(new AuthorizeEnrollmentResult.Authorized(ENROLLMENT, QR_TOKEN, NOW.plusSeconds(180)));
         DeviceEnrollment stored = enrollments.only();
         assertThat(stored.state()).isEqualTo(EnrollmentState.WAITING_AUTHORIZATION);
         assertThat(stored.authorizationTokenDigest()).isNotEqualTo(QR_TOKEN).hasSize(43);
         assertThat(stored.mfaMethod()).isEqualTo("FACE+OTP");
-        assertThat(service.status(new ApprovalStatusCommand(WATCH_SESSION)))
+        assertThat(approvalStatus.status(new ApprovalStatusCommand(WATCH_SESSION)))
                 .isEqualTo(new ApprovalStatusResult.Status(ENROLLMENT, EnrollmentState.WAITING_AUTHORIZATION, stored.expiresAt()));
 
         // A second authorize finds no approval in progress any more.
-        assertThat(service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.Conflict.class);
     }
 
     @Test
     void mfaFailureOrExpiryEndsTheRequestAndAnMfaOutageChangesNothing() {
-        service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
-        service.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         doReturn(new CheckResult.Failed()).when(mfa).check(any());
-        assertThat(service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.MfaFailed.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.FAILED);
-        assertThat(service.status(new ApprovalStatusCommand(WATCH_SESSION)))
+        assertThat(approvalStatus.status(new ApprovalStatusCommand(WATCH_SESSION)))
                 .isEqualTo(new ApprovalStatusResult.Status(ENROLLMENT, EnrollmentState.FAILED, enrollments.only().expiresAt()));
 
         enrollments.rows.clear();
         enrollments.bySession.clear();
-        service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
-        service.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         doReturn(new CheckResult.Rejected()).when(mfa).check(any());
-        assertThat(service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.Rejected.class);
         org.mockito.Mockito.doThrow(new PartnerUnavailableException("MFA")).when(mfa).check(any());
-        assertThat(service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.Unavailable.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.WAITING_APPROVAL);
         assertThat(enrollments.only().hasApprovalInProgress()).isTrue();
@@ -269,7 +288,7 @@ class DeviceApprovalServiceTest {
     void theClaimMakesTheWatchTrustedAndPrimaryAndOpensAnActiveSessionWhileThePhoneStaysTrusted() {
         authorizeTheWatch();
 
-        ClaimEnrollmentResult result = service.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}"));
+        ClaimEnrollmentResult result = claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}"));
 
         assertThat(result).isInstanceOf(ClaimEnrollmentResult.Trusted.class);
         ClaimEnrollmentResult.Trusted trusted = (ClaimEnrollmentResult.Trusted) result;
@@ -296,7 +315,7 @@ class DeviceApprovalServiceTest {
         assertThat(active.status()).isEqualTo(SessionStatus.ACTIVE);
         assertThat(active.deviceId()).isEqualTo(WATCH);
         // The BFF would no longer admit that session; if it did, the completed request cannot be claimed again.
-        assertThat(service.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
     }
 
@@ -305,11 +324,11 @@ class DeviceApprovalServiceTest {
         authorizeTheWatch();
 
         for (int attemptsLeft = 4; attemptsLeft >= 1; attemptsLeft--) {
-            assertThat(service.claim(new ClaimEnrollmentCommand(WATCH_SESSION, "wrong", "{watch-kenc}")))
+            assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, "wrong", "{watch-kenc}")))
                     .isEqualTo(new ClaimEnrollmentResult.WrongAuthorization(attemptsLeft));
         }
         assertThat(enrollments.only().authorizationAttempts()).isEqualTo(4);
-        assertThat(service.claim(new ClaimEnrollmentCommand(WATCH_SESSION, "wrong", "{watch-kenc}")))
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, "wrong", "{watch-kenc}")))
                 .isEqualTo(new ClaimEnrollmentResult.WrongAuthorization(0));
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.FAILED);
         assertThat(sessions.findByToken(WATCH_TOKEN)).isEmpty();
@@ -323,16 +342,16 @@ class DeviceApprovalServiceTest {
         // The tablet is another device: the watch's request is not its request, even with the right token.
         AdmittedSession restrictedTablet = new AdmittedSession(SessionId.random(), ALICE, Channel.MOBILE, TABLET,
                 SessionStatus.NEED_TRUSTED_DEVICE);
-        assertThat(service.claim(new ClaimEnrollmentCommand(restrictedTablet, QR_TOKEN, "{tablet-kenc}")))
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(restrictedTablet, QR_TOKEN, "{tablet-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
         assertThat(enrollments.only().authorizationAttempts()).isZero();
 
         Clock later = Clock.fixed(NOW.plusSeconds(180), ZoneOffset.UTC);
         SessionService laterSessionService = new SessionService(sessions, sealer, tokens, SessionId::random,
                 sessionPolicy(), DevicePolicy.standard(), later);
-        DeviceApprovalService laterService = new DeviceApprovalService(laterSessionService, enrollments, transactions, devices,
-                trustedDevices, mfa, qrTokens, () -> ENROLLMENT, EnrollmentPolicy.standard(), later);
-        assertThat(laterService.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+        ClaimEnrollmentService laterClaim = new ClaimEnrollmentService(laterSessionService,
+                new ApprovalRequests(enrollments, later), trustedDevices, EnrollmentPolicy.standard(), later);
+        assertThat(laterClaim.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.AuthorizationExpired.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.EXPIRED);
         assertThat(sessions.findByToken(WATCH_TOKEN)).isEmpty();
@@ -340,30 +359,30 @@ class DeviceApprovalServiceTest {
 
     @Test
     void theRequestBelongsToTheDeviceSoALaterLoginSeesItAndClaimsIt() {
-        service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
 
         // The watch's restricted session ran out; the customer logs in on the watch again.
         OpaqueToken laterWatchToken = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000044:" + "E".repeat(43));
-        sessions.create(Session.startRestricted(laterWatchToken.sessionId(), ALICE, WATCH, Channel.MOBILE, NOW,
-                DevicePolicy.standard()), laterWatchToken);
+        NewSession laterWatchStart = DomainFixtures.mobileSession(laterWatchToken.sessionId(), ALICE, WATCH, NOW);
+        sessions.create(Session.startRestricted(laterWatchStart, DevicePolicy.standard()), laterWatchToken);
         AdmittedSession laterWatchLogin = new AdmittedSession(laterWatchToken.sessionId(), ALICE, Channel.MOBILE, WATCH,
                 SessionStatus.NEED_TRUSTED_DEVICE);
 
         // Asking again gives the same request: one open request per device. (A service that would mint a new ID shows
         // that nothing new is created.)
-        DeviceApprovalService laterLoginService = new DeviceApprovalService(sessionService, enrollments, transactions,
-                devices, trustedDevices, mfa, qrTokens, EnrollmentId::random, EnrollmentPolicy.standard(), clock);
-        assertThat(laterLoginService.request(new RequestApprovalCommand(laterWatchLogin, null, null)))
+        RequestApprovalService laterLoginRequest = new RequestApprovalService(approvalRequests, enrollmentTransactions,
+                trustedDevices, EnrollmentId::random, EnrollmentPolicy.standard(), clock);
+        assertThat(laterLoginRequest.request(new RequestApprovalCommand(laterWatchLogin, null, null)))
                 .isEqualTo(new RequestApprovalResult.WaitingApproval(ENROLLMENT, NOW.plus(Duration.ofHours(24))));
         assertThat(enrollments.rows).hasSize(1);
 
-        service.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         when(mfa.check(any())).thenReturn(new CheckResult.Passed("receipt"));
-        service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
-        assertThat(service.status(new ApprovalStatusCommand(laterWatchLogin))).isEqualTo(new ApprovalStatusResult.Status(
+        authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        assertThat(approvalStatus.status(new ApprovalStatusCommand(laterWatchLogin))).isEqualTo(new ApprovalStatusResult.Status(
                 ENROLLMENT, EnrollmentState.WAITING_AUTHORIZATION, NOW.plus(Duration.ofHours(24))));
 
-        ClaimEnrollmentResult claimed = service.claim(new ClaimEnrollmentCommand(laterWatchLogin, QR_TOKEN, "{watch-kenc}"));
+        ClaimEnrollmentResult claimed = claimEnrollment.claim(new ClaimEnrollmentCommand(laterWatchLogin, QR_TOKEN, "{watch-kenc}"));
 
         assertThat(claimed).isInstanceOf(ClaimEnrollmentResult.Trusted.class);
         assertThat(sessions.findByToken(laterWatchToken)).isEmpty(); // the session that claimed is consumed
@@ -375,19 +394,19 @@ class DeviceApprovalServiceTest {
 
     @Test
     void aClosedRequestIsReportedAndALaterLoginMayAskAgain() {
-        service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
-        service.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         doReturn(new CheckResult.Failed()).when(mfa).check(any());
-        service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.FAILED);
 
         // The same login cannot ask twice (one request per session, as the store keeps it); its status says why.
         EnrollmentId secondRequest = EnrollmentId.random();
-        DeviceApprovalService secondRequestService = new DeviceApprovalService(sessionService, enrollments, transactions,
-                devices, trustedDevices, mfa, qrTokens, () -> secondRequest, EnrollmentPolicy.standard(), clock);
+        RequestApprovalService secondRequestService = new RequestApprovalService(approvalRequests, enrollmentTransactions,
+                trustedDevices, () -> secondRequest, EnrollmentPolicy.standard(), clock);
         assertThat(secondRequestService.request(new RequestApprovalCommand(WATCH_SESSION, null, null)))
                 .isInstanceOf(RequestApprovalResult.Conflict.class);
-        assertThat(service.status(new ApprovalStatusCommand(WATCH_SESSION)))
+        assertThat(approvalStatus.status(new ApprovalStatusCommand(WATCH_SESSION)))
                 .isEqualTo(new ApprovalStatusResult.Status(ENROLLMENT, EnrollmentState.FAILED, NOW.plus(Duration.ofHours(24))));
 
         // A later login of the watch opens a new request, which is now the device's request.
@@ -395,7 +414,7 @@ class DeviceApprovalServiceTest {
                 SessionStatus.NEED_TRUSTED_DEVICE);
         assertThat(secondRequestService.request(new RequestApprovalCommand(laterWatchLogin, null, null)))
                 .isEqualTo(new RequestApprovalResult.WaitingApproval(secondRequest, NOW.plus(Duration.ofHours(24))));
-        assertThat(service.status(new ApprovalStatusCommand(WATCH_SESSION)))
+        assertThat(approvalStatus.status(new ApprovalStatusCommand(WATCH_SESSION)))
                 .isEqualTo(new ApprovalStatusResult.Status(secondRequest, EnrollmentState.WAITING_APPROVAL,
                         NOW.plus(Duration.ofHours(24))));
     }
@@ -403,13 +422,15 @@ class DeviceApprovalServiceTest {
     @Test
     void theOldestDeviceExpiresWhenTheApprovedOneWouldExceedTheCap() {
         for (int i = 0; i < 3; i++) {
-            TrustedDevice extra = TrustedDevice.trustedNow(TrustedDeviceId.random(), ALICE, Channel.MOBILE,
-                    new DeviceId("extra-" + i), DevicePlatform.IOS, "{k}", NOW.minusSeconds(7200 + i), DevicePolicy.standard());
+            DeviceInstallation extraInstallation =
+                    new DeviceInstallation(ALICE, Channel.MOBILE, new DeviceId("extra-" + i));
+            TrustedDevice extra = DomainFixtures.trustedDevice(extraInstallation, DevicePlatform.IOS, "{k}",
+                    NOW.minusSeconds(7200 + i));
             devices.rows.put(extra.id(), extra);
         }
         authorizeTheWatch(); // phone, tablet, 3 extras and the pending watch: 6 live rows
 
-        service.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}"));
+        claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}"));
 
         TrustConfirmation confirmation = devices.confirmations.get(0);
         assertThat(confirmation.expiredByCap()).hasSize(1);
@@ -419,12 +440,18 @@ class DeviceApprovalServiceTest {
 
     @Test
     void aSessionThatStartedThePrimaryEnrollmentCannotAlsoAskForApproval() {
-        EnrollmentTransaction startedOnThisSession = EnrollmentTransaction.keyExchange(EnrollmentId.random(), WATCH_SESSION,
-                null, WATCH_KEY, DevicePlatform.IOS, "{srv-pub}", "{srv-priv}", "digest");
-        transactions.createIfAbsent(CacheTransaction.open(EnrollmentTransactions.KIND, EnrollmentTransactions.idOf(WATCH_SESSION),
-                NOW.plusSeconds(600), startedOnThisSession));
+        KeyExchangeStart start = KeyExchangeStart.builder()
+                .enrollmentId(EnrollmentId.random())
+                .newDeviceSession(WATCH_SESSION)
+                .deviceKey(new DeviceKey(WATCH_KEY, DevicePlatform.IOS))
+                .serverPublicJwk("{srv-pub}")
+                .serverPrivateJwk("{srv-priv}")
+                .challengeDigest("digest")
+                .build();
+        EnrollmentTransaction startedOnThisSession = EnrollmentTransaction.keyExchange(start);
+        enrollmentTransactions.open(startedOnThisSession);
 
-        assertThat(service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS)))
+        assertThat(requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS)))
                 .isInstanceOf(RequestApprovalResult.Conflict.class);
         assertThat(enrollments.rows).isEmpty();
         assertThat(devices.findLive(ALICE, Channel.MOBILE, WATCH)).isEmpty();
@@ -432,7 +459,7 @@ class DeviceApprovalServiceTest {
         // A later login of the same watch is another session: the earlier login's transaction does not block it.
         AdmittedSession laterWatchLogin = new AdmittedSession(SessionId.random(), ALICE, Channel.MOBILE, WATCH,
                 SessionStatus.NEED_TRUSTED_DEVICE);
-        assertThat(service.request(new RequestApprovalCommand(laterWatchLogin, WATCH_KEY, DevicePlatform.IOS)))
+        assertThat(requestApproval.request(new RequestApprovalCommand(laterWatchLogin, WATCH_KEY, DevicePlatform.IOS)))
                 .isInstanceOf(RequestApprovalResult.WaitingApproval.class);
     }
 
@@ -443,28 +470,28 @@ class DeviceApprovalServiceTest {
         // The primary phone on a restricted session (its trust lapsed after the BFF admitted it) never approves.
         AdmittedSession restrictedPhone = new AdmittedSession(PHONE_TOKEN.sessionId(), ALICE, Channel.MOBILE, PHONE,
                 SessionStatus.NEED_TRUSTED_DEVICE);
-        assertThat(service.pending(new ListPendingDevicesCommand(restrictedPhone)))
+        assertThat(listPendingDevices.pending(new ListPendingDevicesCommand(restrictedPhone)))
                 .isInstanceOf(ListPendingDevicesResult.NotPrimaryDevice.class);
-        assertThat(service.approve(new ApproveEnrollmentCommand(restrictedPhone, ENROLLMENT)))
+        assertThat(approveEnrollment.approve(new ApproveEnrollmentCommand(restrictedPhone, ENROLLMENT)))
                 .isInstanceOf(ApproveEnrollmentResult.NotPrimaryDevice.class);
-        assertThat(service.authorize(new AuthorizeEnrollmentCommand(restrictedPhone, ENROLLMENT)))
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(restrictedPhone, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.NotPrimaryDevice.class);
 
         // The watch's request seen from an ACTIVE session of the same session ID: not the new-device routes.
         AdmittedSession activeWatch = new AdmittedSession(WATCH_TOKEN.sessionId(), ALICE, Channel.MOBILE, WATCH,
                 SessionStatus.ACTIVE);
-        assertThat(service.status(new ApprovalStatusCommand(activeWatch))).isInstanceOf(ApprovalStatusResult.NoRequest.class);
-        assertThat(service.claim(new ClaimEnrollmentCommand(activeWatch, QR_TOKEN, "{watch-kenc}")))
+        assertThat(approvalStatus.status(new ApprovalStatusCommand(activeWatch))).isInstanceOf(ApprovalStatusResult.NoRequest.class);
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(activeWatch, QR_TOKEN, "{watch-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
         assertThat(enrollments.only().authorizationAttempts()).isZero();
         assertThat(sessions.findByToken(WATCH_TOKEN)).isPresent();
     }
 
     private void authorizeTheWatch() {
-        service.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
-        service.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
         when(mfa.check(any())).thenReturn(new CheckResult.Passed("receipt"));
-        assertThat(service.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.Authorized.class);
     }
 

@@ -6,8 +6,8 @@ import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.MfaFactor;
 import com.vpbank.dcp.auth.domain.exception.EnrollmentStateException;
 import java.time.Instant;
-import java.util.Objects;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * One trust transaction of an installation (phase 4). Two paths share the aggregate: the primary
@@ -23,20 +23,24 @@ import lombok.Builder;
  * authorization token itself is never kept: only its SHA-256 digest, its expiry and the claim count.
  */
 @Builder(toBuilder = true)
-public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel channel, DeviceId deviceId,
-                               EnrollmentPurpose purpose, EnrollmentState state, TrustedDeviceId targetDeviceId,
-                               TrustedDeviceId actorDeviceId, String mfaTransactionId, String mfaMethod,
-                               int verifyAttempts, String authorizationTokenDigest, Instant authorizationExpiresAt,
-                               int authorizationAttempts, Instant authorizationConsumedAt, Instant expiresAt,
+public record DeviceEnrollment(@NonNull EnrollmentId id,
+                               @NonNull CustomerId customerId,
+                               @NonNull Channel channel,
+                               @NonNull DeviceId deviceId,
+                               @NonNull EnrollmentPurpose purpose,
+                               @NonNull EnrollmentState state,
+                               TrustedDeviceId targetDeviceId,
+                               TrustedDeviceId actorDeviceId,
+                               String mfaTransactionId,
+                               String mfaMethod,
+                               int verifyAttempts,
+                               String authorizationTokenDigest,
+                               Instant authorizationExpiresAt,
+                               int authorizationAttempts,
+                               Instant authorizationConsumedAt,
+                               @NonNull Instant expiresAt,
                                long version) {
     public DeviceEnrollment {
-        Objects.requireNonNull(id, "id");
-        Objects.requireNonNull(customerId, "customerId");
-        Objects.requireNonNull(channel, "channel");
-        Objects.requireNonNull(deviceId, "deviceId");
-        Objects.requireNonNull(purpose, "purpose");
-        Objects.requireNonNull(state, "state");
-        Objects.requireNonNull(expiresAt, "expiresAt");
         if (verifyAttempts < 0 || authorizationAttempts < 0) {
             throw new IllegalArgumentException("Attempt counts cannot be negative");
         }
@@ -49,21 +53,25 @@ public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel c
         }
     }
 
-    /** Slice 6: the request waits for the primary device; {@code targetDeviceId} is the PENDING or known live row. */
-    public static DeviceEnrollment requestApproval(EnrollmentId id, CustomerId customerId, Channel channel, DeviceId deviceId,
-                                                   TrustedDeviceId targetDeviceId, Instant expiresAt) {
-        Objects.requireNonNull(targetDeviceId, "targetDeviceId");
+    /** The installation that asked for trust. */
+    public DeviceInstallation requester() {
+        return new DeviceInstallation(customerId, channel, deviceId);
+    }
+
+    /** Slice 6: the request waits for the primary device to approve its target row. */
+    public static DeviceEnrollment requestApproval(@NonNull ApprovalRequestStart start) {
+        DeviceInstallation requester = start.requester();
         return DeviceEnrollment.builder()
-                .id(id)
-                .customerId(customerId)
-                .channel(channel)
-                .deviceId(deviceId)
+                .id(start.enrollmentId())
+                .customerId(requester.customerId())
+                .channel(requester.channel())
+                .deviceId(requester.deviceId())
                 .purpose(EnrollmentPurpose.TRUST_DEVICE_APPROVAL)
                 .state(EnrollmentState.WAITING_APPROVAL)
-                .targetDeviceId(targetDeviceId)
+                .targetDeviceId(start.targetDeviceId())
                 .verifyAttempts(0)
                 .authorizationAttempts(0)
-                .expiresAt(expiresAt)
+                .expiresAt(start.expiresAt())
                 .version(0)
                 .build();
     }
@@ -73,9 +81,8 @@ public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel c
      * writes for the first time. It carries the attempts and the MFA transaction it had there, and the deadline
      * of its cache transaction.
      */
-    public static DeviceEnrollment fromTransaction(EnrollmentTransaction transaction, Instant expiresAt) {
-        Objects.requireNonNull(transaction, "transaction");
-        Objects.requireNonNull(expiresAt, "expiresAt");
+    public static DeviceEnrollment fromTransaction(@NonNull EnrollmentTransaction transaction,
+                                                   @NonNull Instant expiresAt) {
         if (transaction.state() != EnrollmentState.MFA_REQUIRED) {
             throw new EnrollmentStateException("Only a transaction past its key proof becomes an enrollment row");
         }
@@ -116,10 +123,8 @@ public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel c
     // ---- slice 6 path ----
 
     /** The primary device picked this request and an MFA transaction (FACE + OTP) was opened for it. */
-    public DeviceEnrollment approveBy(TrustedDeviceId approvingDeviceId, String mfaTransactionId) {
+    public DeviceEnrollment approveBy(@NonNull TrustedDeviceId approvingDeviceId, @NonNull String mfaTransactionId) {
         requireState(EnrollmentState.WAITING_APPROVAL);
-        Objects.requireNonNull(approvingDeviceId, "approvingDeviceId");
-        Objects.requireNonNull(mfaTransactionId, "mfaTransactionId");
         if (this.mfaTransactionId != null) {
             throw new EnrollmentStateException("Enrollment already has an approval in progress");
         }
@@ -134,14 +139,13 @@ public record DeviceEnrollment(EnrollmentId id, CustomerId customerId, Channel c
     }
 
     /** The approver's MFA passed: the one-time token is issued; only its digest and deadline are kept. */
-    public DeviceEnrollment authorize(String tokenDigest, Instant tokenExpiresAt, String confirmedMfaMethod) {
+    public DeviceEnrollment authorize(@NonNull String tokenDigest,
+                                      @NonNull Instant tokenExpiresAt,
+                                      @NonNull String confirmedMfaMethod) {
         requireState(EnrollmentState.WAITING_APPROVAL);
         if (!hasApprovalInProgress()) {
             throw new EnrollmentStateException("Enrollment was not approved yet");
         }
-        Objects.requireNonNull(tokenDigest, "tokenDigest");
-        Objects.requireNonNull(tokenExpiresAt, "tokenExpiresAt");
-        Objects.requireNonNull(confirmedMfaMethod, "confirmedMfaMethod");
         return toBuilder()
                 .state(EnrollmentState.WAITING_AUTHORIZATION)
                 .authorizationTokenDigest(tokenDigest)

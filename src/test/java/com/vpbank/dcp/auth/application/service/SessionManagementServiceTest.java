@@ -1,5 +1,7 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
+import com.vpbank.dcp.auth.domain.model.NewSession;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
@@ -38,7 +40,8 @@ class SessionManagementServiceTest {
     private final SessionManagementService service = new SessionManagementService(sessionService);
 
     SessionManagementServiceTest() {
-        sessions.create(Session.start(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE, T0, policy), TOKEN);
+        NewSession activeStart = DomainFixtures.mobileSession(SessionId.random(), new CustomerId("90359"), null, T0);
+        sessions.create(Session.start(activeStart, policy), TOKEN);
     }
 
     @Test
@@ -82,8 +85,12 @@ class SessionManagementServiceTest {
     @Test
     void aRestrictedSessionResolvesButIsNeverExtended() {
         OpaqueToken restrictedToken = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000002:" + "B".repeat(43));
-        sessions.create(Session.startRestricted(SessionId.random(), new CustomerId("90359"), null, Channel.MOBILE, T0,
-                DevicePolicy.standard()), restrictedToken);
+        NewSession restrictedStart = DomainFixtures.mobileSession(
+                SessionId.random(),
+                new CustomerId("90359"),
+                null,
+                T0);
+        sessions.create(Session.startRestricted(restrictedStart, DevicePolicy.standard()), restrictedToken);
 
         assertThat(service.resolve(restrictedToken)).hasValueSatisfying(summary ->
                 assertThat(summary.status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE));

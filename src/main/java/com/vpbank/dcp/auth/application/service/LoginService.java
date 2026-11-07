@@ -1,7 +1,9 @@
 package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.command.CaptchaSolution;
+import com.vpbank.dcp.auth.application.command.IssueSessionCommand;
 import com.vpbank.dcp.auth.application.command.LoginCommand;
+import com.vpbank.dcp.auth.application.command.RouteAfterPasswordCommand;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
@@ -137,26 +139,24 @@ public final class LoginService implements LoginUseCase {
 
         SessionId sessionId = sessionService.newSessionId();
         String correlationId = sessionId.toString();
-        DeviceRouting deviceRouting = trustedDeviceService.routeAfterPassword(
-                identity.customerId(),
-                command.channel(),
-                command.deviceId(),
-                devicePossession(command),
-                correlationId);
+        RouteAfterPasswordCommand routing = RouteAfterPasswordCommand.builder()
+                .customerId(identity.customerId())
+                .channel(command.channel())
+                .deviceId(command.deviceId())
+                .correlationId(correlationId)
+                .build();
+        DeviceRouting deviceRouting = trustedDeviceService.routeAfterPassword(routing, devicePossession(command));
 
+        IssueSessionCommand newSession = IssueSessionCommand.builder()
+                .sessionId(sessionId)
+                .customerId(identity.customerId())
+                .channel(command.channel())
+                .deviceId(command.deviceId())
+                .tokenEncryptionKey(command.tokenEncryptionKey())
+                .build();
         IssuedSession issuedSession = switch (deviceRouting) {
-            case DeviceRouting.FullSession() -> sessionService.issueActive(
-                    sessionId,
-                    identity.customerId(),
-                    command.deviceId(),
-                    command.channel(),
-                    command.tokenEncryptionKey());
-            case DeviceRouting.NeedTrust() -> sessionService.issueRestricted(
-                    sessionId,
-                    identity.customerId(),
-                    command.deviceId(),
-                    command.channel(),
-                    command.tokenEncryptionKey());
+            case DeviceRouting.FullSession() -> sessionService.issueActive(newSession);
+            case DeviceRouting.NeedTrust() -> sessionService.issueRestricted(newSession);
         };
         Session session = issuedSession.session();
 

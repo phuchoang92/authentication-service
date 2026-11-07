@@ -15,8 +15,11 @@ import org.junit.jupiter.api.Test;
 
 class TrustedDeviceTest {
     private static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
-    private final TrustedDevice device = TrustedDevice.trustedNow(TrustedDeviceId.random(), new CustomerId("90359"),
-            Channel.MOBILE, new DeviceId("dev-1"), DevicePlatform.ANDROID, null, T0, DevicePolicy.standard());
+    private static final DeviceInstallation PHONE =
+            new DeviceInstallation(new CustomerId("90359"), Channel.MOBILE, new DeviceId("dev-1"));
+    private static final DeviceInstallation WATCH =
+            new DeviceInstallation(new CustomerId("90359"), Channel.MOBILE, new DeviceId("watch-3"));
+    private final TrustedDevice device = DomainFixtures.trustedDevice(PHONE, DevicePlatform.ANDROID, null, T0);
 
     @Test
     void aDirectlyTrustedDeviceIsActiveTrustedFor180Days() {
@@ -31,8 +34,8 @@ class TrustedDeviceTest {
     @Test
     void aPendingRowIsLiveButNotTrustedUntilTheApprovalIsClaimed() {
         Instant now = Instant.parse("2026-10-25T10:00:00Z");
-        TrustedDevice pending = TrustedDevice.pending(TrustedDeviceId.random(), new CustomerId("90359"), Channel.MOBILE,
-                new DeviceId("watch-3"), DevicePlatform.IOS, "{watch-key}", now, Duration.ofMinutes(10));
+        NewDevice watchRow = DomainFixtures.newDevice(WATCH, DevicePlatform.IOS, "{watch-key}", now);
+        TrustedDevice pending = TrustedDevice.pending(watchRow, Duration.ofMinutes(10));
         assertThat(pending.isPending()).isTrue();
         assertThat(pending.status().live()).isTrue();
         assertThat(pending.isTrusted(now)).isFalse();
@@ -76,8 +79,12 @@ class TrustedDeviceTest {
 
     @Test
     void aRestrictedSessionHasOneFixedTtlAndIsNeverExtended() {
-        Session restricted = Session.startRestricted(SessionId.random(), new CustomerId("90359"), new DeviceId("dev-2"),
-                Channel.MOBILE, T0, DevicePolicy.standard());
+        NewSession restrictedStart = DomainFixtures.mobileSession(
+                SessionId.random(),
+                new CustomerId("90359"),
+                new DeviceId("dev-2"),
+                T0);
+        Session restricted = Session.startRestricted(restrictedStart, DevicePolicy.standard());
         assertThat(restricted.status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
         assertThat(restricted.idleExpiresAt()).isEqualTo(T0.plus(Duration.ofMinutes(10)));
         assertThat(restricted.absoluteExpiresAt()).isEqualTo(restricted.idleExpiresAt());

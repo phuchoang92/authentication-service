@@ -1,5 +1,7 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -54,6 +56,11 @@ import org.junit.jupiter.api.Test;
 class LoginServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-25T10:00:00Z");
     private static final CustomerId CUSTOMER = new CustomerId("90359");
+    /** The customer's primary phone, trusted by an earlier enrollment. */
+    private static final DeviceInstallation PRIMARY_PHONE =
+            new DeviceInstallation(CUSTOMER, Channel.MOBILE, new DeviceId("dev-1"));
+    private static final DeviceInstallation OTHER_PHONE =
+            new DeviceInstallation(CUSTOMER, Channel.MOBILE, new DeviceId("phone"));
     private static final UserName ALICE = new UserName("alice");
     private static final OpaqueToken TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     private static final String KENC = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"..\",\"y\":\"..\"}";
@@ -86,8 +93,8 @@ class LoginServiceTest {
         when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Verified("iss", "sub-1"));
         when(tokens.next(any(), any())).thenReturn(TOKEN);
         // dev-1 was trusted by an earlier enrollment and is the customer's primary device.
-        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), CUSTOMER, Channel.MOBILE,
-                new DeviceId("dev-1"), DevicePlatform.ANDROID, DEVICE_JWK, NOW.minusSeconds(3600), DevicePolicy.standard());
+        TrustedDevice phone = DomainFixtures.trustedDevice(PRIMARY_PHONE, DevicePlatform.ANDROID, DEVICE_JWK,
+                NOW.minusSeconds(3600));
         devices.rows.put(phone.id(), phone);
         devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(CUSTOMER, Channel.MOBILE), phone.id());
         when(sealer.seal(eq(KENC), eq(TOKEN), any())).thenReturn("jwe.compact");
@@ -118,8 +125,7 @@ class LoginServiceTest {
 
     @Test
     void aSecondDeviceGetsARestrictedNeedTrustedDeviceSessionWithATenMinuteTtl() {
-        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), CUSTOMER, Channel.MOBILE,
-                new DeviceId("phone"), DevicePlatform.ANDROID, null, NOW, DevicePolicy.standard());
+        TrustedDevice phone = DomainFixtures.trustedDevice(OTHER_PHONE, DevicePlatform.ANDROID, null, NOW);
         devices.rows.put(phone.id(), phone);
         devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(CUSTOMER, Channel.MOBILE), phone.id());
 
@@ -275,8 +281,7 @@ class LoginServiceTest {
 
     @Test
     void aRestrictedLoginIsAuditedAsARestrictedSession() {
-        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), CUSTOMER, Channel.MOBILE,
-                new DeviceId("phone"), DevicePlatform.ANDROID, null, NOW, DevicePolicy.standard());
+        TrustedDevice phone = DomainFixtures.trustedDevice(OTHER_PHONE, DevicePlatform.ANDROID, null, NOW);
         devices.rows.put(phone.id(), phone);
         devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(CUSTOMER, Channel.MOBILE), phone.id());
 

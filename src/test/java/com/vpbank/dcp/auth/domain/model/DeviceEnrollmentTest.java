@@ -13,19 +13,23 @@ import org.junit.jupiter.api.Test;
 
 class DeviceEnrollmentTest {
     private static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
+    private static final DeviceInstallation WATCH =
+            new DeviceInstallation(new CustomerId("90359"), Channel.MOBILE, new DeviceId("watch-3"));
+    private static final AdmittedSession TABLET_SESSION = new AdmittedSession(SessionId.random(),
+            new CustomerId("90359"), Channel.MOBILE, new DeviceId("tablet-2"),
+            com.vpbank.dcp.auth.domain.enums.SessionStatus.NEED_TRUSTED_DEVICE);
+    private static final KeyExchangeStart TABLET_START = KeyExchangeStart.builder()
+            .enrollmentId(EnrollmentId.random())
+            .newDeviceSession(TABLET_SESSION)
+            .deviceKey(new DeviceKey("{dev}", DevicePlatform.IOS))
+            .serverPublicJwk("{pub}")
+            .serverPrivateJwk("{priv}")
+            .challengeDigest("digest")
+            .build();
     /** A primary enrollment's row as the trust commit first sees it: past its key proof in the cache (slice 11). */
-    private final DeviceEnrollment primaryRow = DeviceEnrollment.fromTransaction(EnrollmentTransaction.keyExchange(
-                    EnrollmentId.random(),
-                    new AdmittedSession(SessionId.random(), new CustomerId("90359"), Channel.MOBILE,
-                            new DeviceId("tablet-2"), com.vpbank.dcp.auth.domain.enums.SessionStatus.NEED_TRUSTED_DEVICE),
-                    null,
-                    "{dev}",
-                    DevicePlatform.IOS,
-                    "{pub}",
-                    "{priv}",
-                    "digest",
-                    T0.plus(Duration.ofMinutes(10)))
-            .markMfaRequired("mfa-1"));
+    private final DeviceEnrollment primaryRow = DeviceEnrollment.fromTransaction(
+            EnrollmentTransaction.keyExchange(TABLET_START).markMfaRequired("mfa-1"),
+            T0.plus(Duration.ofMinutes(10)));
 
     @Test
     void thePrimaryRowGoesFromMfaRequiredToCompletedAtTheCommit() {
@@ -42,8 +46,8 @@ class DeviceEnrollmentTest {
     void anApprovalWaitsThenHoldsTheTokenDigestThenCompletesOnTheClaim() {
         TrustedDeviceId target = TrustedDeviceId.random();
         TrustedDeviceId primary = TrustedDeviceId.random();
-        DeviceEnrollment requested = DeviceEnrollment.requestApproval(EnrollmentId.random(), new CustomerId("90359"),
-                Channel.MOBILE, new DeviceId("watch-3"), target, T0.plus(Duration.ofMinutes(10)));
+        DeviceEnrollment requested = DomainFixtures.approvalRequest(WATCH,
+                target, T0.plus(Duration.ofMinutes(10)));
         assertThat(requested.state()).isEqualTo(EnrollmentState.WAITING_APPROVAL);
         assertThat(requested.isApproval()).isTrue();
         assertThat(requested.isOpen(T0)).isTrue();
@@ -81,8 +85,8 @@ class DeviceEnrollmentTest {
 
     @Test
     void stepsOutOfOrderAreProgrammingErrorsAndTerminalStatesStayTerminal() {
-        DeviceEnrollment requested = DeviceEnrollment.requestApproval(EnrollmentId.random(), new CustomerId("90359"),
-                Channel.MOBILE, new DeviceId("watch-3"), TrustedDeviceId.random(), T0.plus(Duration.ofMinutes(10)));
+        DeviceEnrollment requested = DomainFixtures.approvalRequest(WATCH,
+                TrustedDeviceId.random(), T0.plus(Duration.ofMinutes(10)));
         assertThatThrownBy(requested::complete).isInstanceOf(EnrollmentStateException.class);
         assertThatThrownBy(() -> primaryRow.countClaimAttempt()).isInstanceOf(EnrollmentStateException.class);
         assertThatThrownBy(() -> requested.fail().fail()).isInstanceOf(EnrollmentStateException.class);
@@ -96,8 +100,16 @@ class DeviceEnrollmentTest {
     void aTransactionPastItsKeyProofBecomesThePrimaryEnrollmentRowTheCommitWrites() {
         AdmittedSession tablet = new AdmittedSession(SessionId.random(), new CustomerId("90359"), Channel.MOBILE,
                 new DeviceId("tablet-2"), com.vpbank.dcp.auth.domain.enums.SessionStatus.NEED_TRUSTED_DEVICE);
-        EnrollmentTransaction started = EnrollmentTransaction.keyExchange(EnrollmentId.random(), tablet,
-                TrustedDeviceId.random(), "{dev}", DevicePlatform.IOS, "{pub}", "{priv}", "digest", T0.plusSeconds(600));
+        KeyExchangeStart start = KeyExchangeStart.builder()
+                .enrollmentId(EnrollmentId.random())
+                .newDeviceSession(tablet)
+                .targetDeviceId(TrustedDeviceId.random())
+                .deviceKey(new DeviceKey("{dev}", DevicePlatform.IOS))
+                .serverPublicJwk("{pub}")
+                .serverPrivateJwk("{priv}")
+                .challengeDigest("digest")
+                .build();
+        EnrollmentTransaction started = EnrollmentTransaction.keyExchange(start);
         EnrollmentTransaction passed = started.countVerifyAttempt().markMfaRequired("mfa-1");
 
         DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed, T0.plusSeconds(600));

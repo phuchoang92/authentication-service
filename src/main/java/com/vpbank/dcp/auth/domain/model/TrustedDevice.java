@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * One app installation known for a customer on a channel (a TRUSTED_DEVICE row). Trust means
@@ -17,53 +18,38 @@ import lombok.Builder;
  * slice 13 on, P-256 before); a trusted device proves it at every login (slice 13). {@code version} is the row version the repository must still see when saving.
  */
 @Builder(toBuilder = true)
-public record TrustedDevice(TrustedDeviceId id, CustomerId customerId, Channel channel, DeviceId deviceId,
-                            DevicePlatform platform, DeviceStatus status, TrustLevel trustLevel,
-                            Instant trustedAt, Instant expiresAt, Instant lastLoginAt, String publicKey,
+public record TrustedDevice(@NonNull TrustedDeviceId id,
+                            @NonNull CustomerId customerId,
+                            @NonNull Channel channel,
+                            @NonNull DeviceId deviceId,
+                            @NonNull DevicePlatform platform,
+                            @NonNull DeviceStatus status,
+                            @NonNull TrustLevel trustLevel,
+                            Instant trustedAt,
+                            @NonNull Instant expiresAt,
+                            Instant lastLoginAt,
+                            String publicKey,
                             long version) {
     public TrustedDevice {
-        Objects.requireNonNull(id, "id");
-        Objects.requireNonNull(customerId, "customerId");
-        Objects.requireNonNull(channel, "channel");
-        Objects.requireNonNull(deviceId, "deviceId");
-        Objects.requireNonNull(platform, "platform");
-        Objects.requireNonNull(status, "status");
-        Objects.requireNonNull(trustLevel, "trustLevel");
-        Objects.requireNonNull(expiresAt, "expiresAt");
-        if ((trustLevel == TrustLevel.TRUSTED) != (trustedAt != null)) {
+        if ((trustLevel == TrustLevel.TRUSTED) == (trustedAt == null)) {
             throw new IllegalArgumentException("TRUSTED and the trust time are set together");
         }
     }
 
-    /** The first device of a customer on a channel: trusted directly at the first successful login (phase 3). */
-    public static TrustedDevice trustedNow(TrustedDeviceId id, CustomerId customerId, Channel channel, DeviceId deviceId,
-                                           DevicePlatform platform, String publicKey, Instant now, DevicePolicy policy) {
-        Instant trustExpiresAt = now.plus(policy.trustDuration());
-        return TrustedDevice.builder()
-                .id(id)
-                .customerId(customerId)
-                .channel(channel)
-                .deviceId(deviceId)
-                .platform(platform)
-                .status(DeviceStatus.ACTIVE)
-                .trustLevel(TrustLevel.TRUSTED)
-                .trustedAt(now)
-                .expiresAt(trustExpiresAt)
-                .lastLoginAt(now)
-                .publicKey(publicKey)
-                .version(0)
-                .build();
-    }
-
     /**
      * The enrollment flow confirmed this installation (DD 20 §4): a new ACTIVE/TRUSTED row with the key
-     * the device proved. A previous live row of the same installation is replaced by the repository.
+     * the device proved, trusted from its creation for the policy's trust duration. A previous live row of the
+     * same installation is replaced by the repository.
      */
-    public static TrustedDevice trustedByEnrollment(TrustedDeviceId id, CustomerId customerId, Channel channel,
-                                                    DeviceId deviceId, DevicePlatform platform, String publicKey,
-                                                    Instant now, DevicePolicy policy) {
-        Objects.requireNonNull(publicKey, "publicKey");
-        return trustedNow(id, customerId, channel, deviceId, platform, publicKey, now, policy);
+    public static TrustedDevice trustedByEnrollment(@NonNull NewDevice newDevice, @NonNull DevicePolicy policy) {
+        Instant trustedAt = newDevice.createdAt();
+        return rowOf(newDevice)
+                .status(DeviceStatus.ACTIVE)
+                .trustLevel(TrustLevel.TRUSTED)
+                .trustedAt(trustedAt)
+                .expiresAt(trustedAt.plus(policy.trustDuration()))
+                .lastLoginAt(trustedAt)
+                .build();
     }
 
     /**
@@ -71,24 +57,27 @@ public record TrustedDevice(TrustedDeviceId id, CustomerId customerId, Channel c
      * trusted. It holds the key the device sent so the approval can trust exactly that key; it expires
      * with the approval window unless the claim succeeds.
      */
-    public static TrustedDevice pending(TrustedDeviceId id, CustomerId customerId, Channel channel, DeviceId deviceId,
-                                        DevicePlatform platform, String publicKey, Instant now, Duration pendingWindow) {
-        Objects.requireNonNull(publicKey, "publicKey");
-        Instant pendingExpiresAt = now.plus(pendingWindow);
-        return TrustedDevice.builder()
-                .id(id)
-                .customerId(customerId)
-                .channel(channel)
-                .deviceId(deviceId)
-                .platform(platform)
+    public static TrustedDevice pending(@NonNull NewDevice newDevice, @NonNull Duration pendingWindow) {
+        return rowOf(newDevice)
                 .status(DeviceStatus.PENDING)
                 .trustLevel(TrustLevel.NONE)
                 .trustedAt(null)
-                .expiresAt(pendingExpiresAt)
+                .expiresAt(newDevice.createdAt().plus(pendingWindow))
                 .lastLoginAt(null)
-                .publicKey(publicKey)
-                .version(0)
                 .build();
+    }
+
+    /** The fields every new row starts with: who and what it is, the presented key, version 0. */
+    private static TrustedDeviceBuilder rowOf(NewDevice newDevice) {
+        DeviceInstallation installation = newDevice.installation();
+        return TrustedDevice.builder()
+                .id(newDevice.id())
+                .customerId(installation.customerId())
+                .channel(installation.channel())
+                .deviceId(installation.deviceId())
+                .platform(newDevice.key().platform())
+                .publicKey(newDevice.key().publicJwk())
+                .version(0);
     }
 
     /**

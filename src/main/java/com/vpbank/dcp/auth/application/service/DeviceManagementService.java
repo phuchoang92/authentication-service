@@ -14,7 +14,7 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Device management use cases (slice 8 seed; revoke, rename and history follow): resolve the caller's
+ * Device management use cases (slice 8 seed; revoke, rename and history follow): resolve the app's
  * session once, decide what that session may do, then compose {@link TrustedDeviceService} actions.
  */
 @RequiredArgsConstructor
