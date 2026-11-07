@@ -1,13 +1,17 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.valkey;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -84,5 +88,50 @@ class ValkeyCaptchaStoreIT {
                 "answerDigest", keys.answerDigest(new CaptchaAnswer("AB3CD")), "expiresAtMs",
                 Long.toString(NOW.minusSeconds(1).toEpochMilli())));
         assertThat(store.consume(expired, ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
+    }
+
+
+    @Test
+    void withAPoolCompareAndSetWritesReuseTheirConnection() {
+        LettuceConnectionFactory pooledConnections = PooledValkey.connections(VALKEY, 2, Duration.ofSeconds(1));
+        try {
+            StringRedisTemplate pooledRedis = new StringRedisTemplate(pooledConnections);
+            ValkeyCaptchaStore pooledStore =
+                    new ValkeyCaptchaStore(pooledRedis, keys, Clock.fixed(NOW, ZoneOffset.UTC));
+            // The first write opens the shared connection and one connection for compare-and-set writes.
+            CaptchaId warmUp = CaptchaId.random();
+            pooledStore.save(warmUp, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+            assertThat(pooledStore.consume(warmUp, ALICE, new CaptchaAnswer("AB3CD"))).isTrue();
+            Set<String> connectionsBefore = PooledValkey.connectionIdsOf(pooledRedis);
+
+            for (int round = 0; round < 20; round++) {
+                CaptchaId id = CaptchaId.random();
+                pooledStore.save(id, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+                assertThat(pooledStore.consume(id, ALICE, new CaptchaAnswer("AB3CD"))).isTrue();
+            }
+
+            assertThat(PooledValkey.connectionIdsOf(pooledRedis)).isEqualTo(connectionsBefore).hasSize(2);
+        } finally {
+            pooledConnections.destroy();
+        }
+    }
+
+    @Test
+    void anExhaustedPoolIsUnavailableAfterTheWait() throws Exception {
+        // Two connections: the shared one every ordinary command uses, and a single one for compare-and-set writes.
+        LettuceConnectionFactory oneWriteConnection = PooledValkey.connections(VALKEY, 2, Duration.ofMillis(100));
+        try {
+            StringRedisTemplate pooledRedis = new StringRedisTemplate(oneWriteConnection);
+            ValkeyCaptchaStore starvedStore =
+                    new ValkeyCaptchaStore(pooledRedis, keys, Clock.fixed(NOW, ZoneOffset.UTC));
+            pooledRedis.hasKey("opens-the-shared-connection");
+
+            try (PooledValkey.HeldConnection onlyWriteConnection = PooledValkey.holdWriteConnection(pooledRedis)) {
+                assertThatThrownBy(() -> starvedStore.save(CaptchaId.random(), ALICE, new CaptchaAnswer("AB3CD"),
+                        Instant.now().plusSeconds(300))).isInstanceOf(RepositoryUnavailableException.class);
+            }
+        } finally {
+            oneWriteConnection.destroy();
+        }
     }
 }

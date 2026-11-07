@@ -1,5 +1,7 @@
 package com.vpbank.dcp.auth.boot;
 
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -66,6 +68,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -146,6 +150,7 @@ class ApplicationBootIT {
     @Autowired TrustedDeviceJpaRepository deviceRows;
     @Autowired PrimaryTrustedDeviceJpaRepository primaryRows;
     @Autowired DeviceIdProtection deviceIdProtection;
+    @Autowired LettuceConnectionFactory valkeyConnections;
     @MockitoBean CustomerDirectoryPort customers;
     @MockitoBean IdentityProviderPort keycloakAdmin;
     @MockitoBean SmsSenderPort sms;
@@ -169,8 +174,9 @@ class ApplicationBootIT {
         String loginBody = "{\"userName\":\"alice\",\"password\":\"Secret123\","
                 + "\"tokenEncryptionKey\":" + kenc.toPublicJWK().toJSONString() + "}";
         // dev-1 was trusted by an earlier enrollment and is the primary device (a login never trusts, slice 13).
-        TrustedDevice phone = TrustedDevice.trustedNow(TrustedDeviceId.random(), new CustomerId("90359"), Channel.MOBILE,
-                new DeviceId("dev-1"), DevicePlatform.ANDROID, null, Instant.now(), DevicePolicy.standard());
+        DeviceInstallation dev1 =
+                new DeviceInstallation(new CustomerId("90359"), Channel.MOBILE, new DeviceId("dev-1"));
+        TrustedDevice phone = DomainFixtures.trustedDevice(dev1, DevicePlatform.ANDROID, null, Instant.now());
         deviceRows.saveAndFlush(TrustedDevicePersistenceMapper.toEntity(phone, deviceIdProtection));
         primaryRows.saveAndFlush(TrustedDevicePersistenceMapper.toPrimary(phone, Instant.now()));
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Rejected());
@@ -411,6 +417,17 @@ class ApplicationBootIT {
      * verifies against the public JWKS route and says exactly what was asked; the same assertion is refused a
      * second time (replay), and a bare request is refused.
      */
+    @Test
+    void compareAndSetConnectionsComeFromThePoolTheSettingsDescribe() {
+        assertThat(valkeyConnections.getClientConfiguration()).isInstanceOf(LettucePoolingClientConfiguration.class);
+        LettucePoolingClientConfiguration pooling =
+                (LettucePoolingClientConfiguration) valkeyConnections.getClientConfiguration();
+
+        assertThat(pooling.getPoolConfig().getMaxTotal()).isEqualTo(32);
+        assertThat(pooling.getPoolConfig().getMaxIdle()).isEqualTo(32);
+        assertThat(pooling.getPoolConfig().getMaxWaitDuration()).isEqualTo(Duration.ofMillis(250));
+    }
+
     @Test
     void anInternalServiceGetsAnOnboardingTokenTheBffCanVerifyAndCannotReplayItsAssertion() throws Exception {
         String assertion = TestServiceClientAssertions.assertion();
