@@ -189,7 +189,8 @@
     `deleteIfCurrent`, then the comparison; the challenge's deadline is the transaction's. With that no adapter
     uses `WATCH … EXEC` any more, so the connection pool of turn 15 (`commons-pool2`, `AUTH_VALKEY_POOL_*`) is
     removed again and `ArchitectureTest` forbids `SessionCallback` in the Valkey adapters. CAPTCHA records at
-    `captcha:v1:` are not read (they lived 5 minutes). `mvn -o verify`: 340 unit tests, 43 ITs.
+    `captcha:v1:` are not read (they lived 5 minutes). `mvn -o verify`: 340 unit tests, 43 ITs. Renamed the same day to
+    `CaptchaChallengeStore`: it no longer talks to Valkey itself, only to the transaction store.
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
 and a database guard for one open approval request per device.

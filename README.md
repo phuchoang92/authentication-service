@@ -181,7 +181,7 @@ adapter with test-signed FACE and FACE+OTP receipts, lockout escalation, CAPTCHA
 the generic audit queue/writer thread, the audit store and its configuration, 12 ArchUnit rules) and 28 on Testcontainers (`RegistrationPersistenceAdapterIT`,
 `CustomerAuthenticationPersistenceAdapterIT`, `TrustedDevicePersistenceAdapterIT` incl. pending rows and
 `DeviceEnrollmentPersistenceAdapterIT` incl. the approval round trip and `SecurityAuditEventPersistenceAdapterIT` (inserts only) on MySQL 8.4, `ValkeySessionAdapterIT`
-and `ValkeyCaptchaStoreIT` on `valkey/valkey:9.1`, `ApplicationBootIT` booting everything against MySQL +
+and `CaptchaChallengeStoreIT` on `valkey/valkey:9.1`, `ApplicationBootIT` booting everything against MySQL +
 Valkey: register → 2 failures → CAPTCHA → login → decrypt envelope → four login audit rows land from the writer thread → extend → logout → lock → unlock →
 second device NEED_TRUSTED_DEVICE → device list → tablet enrollment init → verify → confirm → ACTIVE →
 watch request → tablet pending/approve/authorize (MFA mocked) → wrong QR token → claim → watch primary,

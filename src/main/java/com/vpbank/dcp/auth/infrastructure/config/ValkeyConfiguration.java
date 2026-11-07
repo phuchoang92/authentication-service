@@ -13,7 +13,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.RandomOpaqueTokenGe
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.SessionJsonCodec;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.SessionKeys;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyAssertionReplayStore;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyCaptchaStore;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.CaptchaChallengeStore;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyRecordCommands;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyTransactionAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeySessionAdapter;
@@ -57,7 +57,7 @@ public class ValkeyConfiguration {
     @Bean
     CaptchaStore captchaStore(TransactionStore transactionStore, CaptchaProperties captchaProperties, Clock clock) {
         byte[] answerHmacKey = decodeKey(captchaProperties.answerHmacKeyBase64());
-        return new ValkeyCaptchaStore(transactionStore, new CaptchaAnswerDigest(answerHmacKey), clock);
+        return new CaptchaChallengeStore(transactionStore, new CaptchaAnswerDigest(answerHmacKey), clock);
     }
 
     /** Transactions in flight (slice 11): one store for every flow, each flow bringing only its payload. */

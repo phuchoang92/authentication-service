@@ -22,7 +22,7 @@ import lombok.RequiredArgsConstructor;
  * The store keeps the keyed digest of the answer, never the answer.
  */
 @RequiredArgsConstructor
-public final class ValkeyCaptchaStore implements CaptchaStore {
+public final class CaptchaChallengeStore implements CaptchaStore {
     static final TransactionKind<CaptchaChallenge> KIND = new TransactionKind<>("captcha", CaptchaChallenge.class);
 
     @NonNull private final TransactionStore transactionStore;

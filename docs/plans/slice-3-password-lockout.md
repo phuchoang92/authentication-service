@@ -61,12 +61,12 @@ other `/internal` routes). Returns `204`, `404` when unknown.
 - `application.service`: `LoginService` checks lockout → captcha → Keycloak → record outcome;
   `CaptchaService`; `PasswordUnlockService`.
 - Adapters: persistence (entity columns, `CustomerAuthenticationPersistenceAdapter` writes),
-  `adapter.out.valkey.ValkeyCaptchaStore` + `CaptchaKeys`, `adapter.out.captcha.AwtCaptchaGenerator`,
+  `adapter.out.valkey.CaptchaChallengeStore` (`ValkeyCaptchaStore` until 2026-11-07) + `CaptchaKeys`, `adapter.out.captcha.AwtCaptchaGenerator`,
   web: `CaptchaController` (`/api/ns`), `PasswordUnlockController` (`/internal`), DTOs, mappers,
   error codes `ACCOUNT_LOCKED`, `CAPTCHA_REQUIRED` in vi/en.
 - Tests: `PasswordLockoutTest` (every escalation step, expiry does not reset), `LoginServiceTest`
   additions (short-circuit, captcha gate, reset on success, concurrent failure CAS → re-read),
-  `CaptchaServiceTest`, persistence IT (phase-2 columns, CAS), `ValkeyCaptchaStoreIT`,
+  `CaptchaServiceTest`, persistence IT (phase-2 columns, CAS), `CaptchaChallengeStoreIT`,
   `@WebMvcTest` (423/428, captcha endpoint), boot IT extended (2 failures → captcha → lock → unlock).
 
 ## Turns

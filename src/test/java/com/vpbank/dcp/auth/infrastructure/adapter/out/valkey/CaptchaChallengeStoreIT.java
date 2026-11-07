@@ -31,7 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** CAPTCHA challenges on a real Valkey: HMAC-ed answer, TTL, customer binding, single use. */
 @Testcontainers
-class ValkeyCaptchaStoreIT {
+class CaptchaChallengeStoreIT {
     @Container
     static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:9.1").withExposedPorts(6379);
     private static final CustomerId ALICE = new CustomerId("90359");
@@ -40,7 +40,7 @@ class ValkeyCaptchaStoreIT {
     private static LettuceConnectionFactory connections;
     private static StringRedisTemplate redis;
     private final CaptchaAnswerDigest digests = new CaptchaAnswerDigest(new byte[32]);
-    private final ValkeyCaptchaStore store = storeAt(Clock.fixed(NOW, ZoneOffset.UTC));
+    private final CaptchaChallengeStore store = storeAt(Clock.fixed(NOW, ZoneOffset.UTC));
 
     @BeforeAll
     static void connect() {
@@ -94,7 +94,7 @@ class ValkeyCaptchaStoreIT {
         // Still in the store (the server forgets it a little later), but past its deadline on the clock that decides.
         CaptchaId expired = CaptchaId.random();
         store.save(expired, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(2));
-        ValkeyCaptchaStore later = storeAt(Clock.fixed(Instant.now().plusSeconds(60), ZoneOffset.UTC));
+        CaptchaChallengeStore later = storeAt(Clock.fixed(Instant.now().plusSeconds(60), ZoneOffset.UTC));
         assertThat(later.consume(expired, ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
         assertThat(redis.hasKey("tx:v2:captcha:" + expired.value())).isFalse(); // consumed all the same
     }
@@ -129,7 +129,7 @@ class ValkeyCaptchaStoreIT {
         deadConnections.afterPropertiesSet();
         try {
             ValkeyTransactionAdapter deadTransactions = transactionsOn(new StringRedisTemplate(deadConnections));
-            ValkeyCaptchaStore deadStore = new ValkeyCaptchaStore(deadTransactions, digests, Clock.fixed(NOW, ZoneOffset.UTC));
+            CaptchaChallengeStore deadStore = new CaptchaChallengeStore(deadTransactions, digests, Clock.fixed(NOW, ZoneOffset.UTC));
             assertThatThrownBy(() -> deadStore.save(CaptchaId.random(), ALICE, new CaptchaAnswer("AB3CD"),
                     Instant.now().plusSeconds(300))).isInstanceOf(RepositoryUnavailableException.class);
             assertThatThrownBy(() -> deadStore.consume(CaptchaId.random(), ALICE, new CaptchaAnswer("AB3CD")))
@@ -139,8 +139,8 @@ class ValkeyCaptchaStoreIT {
         }
     }
 
-    private ValkeyCaptchaStore storeAt(Clock clock) {
-        return new ValkeyCaptchaStore(transactionsOn(redis), digests, clock);
+    private CaptchaChallengeStore storeAt(Clock clock) {
+        return new CaptchaChallengeStore(transactionsOn(redis), digests, clock);
     }
 
     private static ValkeyTransactionAdapter transactionsOn(StringRedisTemplate template) {
