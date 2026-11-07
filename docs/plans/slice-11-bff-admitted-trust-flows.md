@@ -176,8 +176,10 @@
     token's secret, the secret itself no longer stored) and `ValkeySessionAdapter` is one command per call on
     `ValkeyRecordCommands`: `SET … NX PXAT` at login, `GET`, `SET … IFEQ <text read> PXAT` on extend, `DEL` on
     logout; no `WATCH`, no pooled connection. `SessionStore.saveIfCurrent(StoredSession current, Session changed)`;
-    `StoredSession` carries the digest. Measured before the change: extend 7 commands / 1.25 ms → 2 commands /
-    0.46 ms (local Valkey 9.1.2, pooled). The BFF (`mobile-bff` `AuthSessionAdmission`) reads the same record;
+    `StoredSession` carries the digest. Measured on the real adapters, local Valkey 9.1.2, 2000 operations each,
+    two runs (p50; before = HASH with WATCH on a pooled connection, after = one JSON STRING, no pool): create 4
+    commands / 0.57 ms → 1 / 0.30 ms; read by token 1 / 0.26 ms → 1 / 0.27 ms; extend 7 / 1.25 ms → 2 / 0.51 ms
+    (p99 3.0 ms → 1.65 ms); delete 1 / 0.24 ms, unchanged. The BFF (`mobile-bff` `AuthSessionAdmission`) reads the same record;
     the shared vectors `docs/DD/target/reference/session-record-vectors.json` run in both test suites (the BFF's
     `mvn verify` cannot run here: its `authentication-protocol` dependency is missing from the workspace; its two
     classes were compiled and unit-tested standalone, 15 tests). Sessions at `session:v1:` are not read: every
@@ -189,7 +191,10 @@
     `deleteIfCurrent`, then the comparison; the challenge's deadline is the transaction's. With that no adapter
     uses `WATCH … EXEC` any more, so the connection pool of turn 15 (`commons-pool2`, `AUTH_VALKEY_POOL_*`) is
     removed again and `ArchitectureTest` forbids `SessionCallback` in the Valkey adapters. CAPTCHA records at
-    `captcha:v1:` are not read (they lived 5 minutes). `mvn -o verify`: 340 unit tests, 43 ITs. Renamed the same day to
+    `captcha:v1:` are not read (they lived 5 minutes). Measured on the real store, local Valkey 9.1.2, 2000
+    operations, two runs (p50): save 1 command / 0.22 ms, consume 2 commands (`GET`, `DELIFEQ`) / 0.46 ms; before,
+    consume was `WATCH → HGETALL → MULTI → DEL → EXEC` on a pooled connection. `mvn -o verify`: 340 unit tests,
+    43 ITs. Renamed the same day to
     `CaptchaChallengeStore`: it no longer talks to Valkey itself, only to the transaction store.
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
