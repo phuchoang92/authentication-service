@@ -199,8 +199,7 @@ three devices). No real Customer, Keycloak, Notification or MFA service was call
 | `AUTH_NOTIFICATION_ORIGIN`, `AUTH_NOTIFICATION_SERVICE_TOKEN` | Notification SMS; path `auth.registration.notification.sms-path` |
 
 | `AUTH_LOGIN_ENABLED` | `true` to expose login/logout/extend (default `false`) |
-| `AUTH_VALKEY_URL` | `redis://host:port` of the session store (default `redis://localhost:6379`). The server must be **Valkey 9.0 or later**: the transaction store uses `SET … IFEQ` and `DELIFEQ`, which Redis does not have |
-| `AUTH_VALKEY_POOL_SIZE`, `AUTH_VALKEY_POOL_MAX_WAIT` | Valkey connections per instance (default `32`: one shared by ordinary commands, the rest one compare-and-set write each) and how long a write waits for one before the step answers "unavailable" (default `PT0.25S`) |
+| `AUTH_VALKEY_URL` | `redis://host:port` of the session store (default `redis://localhost:6379`). The server must be **Valkey 9.0 or later**: every write is one command (`SET … NX|IFEQ … PXAT`, `DELIFEQ`, `DEL`), which Redis does not have |
 | `AUTH_KC_LOGIN_CLIENT_ID`, `AUTH_KC_LOGIN_CLIENT_SECRET` | Direct Grant client (`authentication-service`) |
 | `AUTH_CAPTCHA_ANSWER_HMAC_KEY_BASE64` | ≥32-byte HMAC key for the stored CAPTCHA answers |
 | `AUTH_DEVICE_LOOKUP_HMAC_KEY_D1_BASE64`, `AUTH_DEVICE_ENCRYPTION_KEY_E1_BASE64` | ≥32-byte keys protecting the stored device ID (`d1` lookup HMAC, `e1` AES-256-GCM) |

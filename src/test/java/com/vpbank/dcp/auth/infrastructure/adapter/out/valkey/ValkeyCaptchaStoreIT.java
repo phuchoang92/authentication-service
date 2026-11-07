@@ -8,15 +8,20 @@ import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.connection.DataType;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -34,8 +39,8 @@ class ValkeyCaptchaStoreIT {
 
     private static LettuceConnectionFactory connections;
     private static StringRedisTemplate redis;
-    private final CaptchaKeys keys = new CaptchaKeys(new byte[32]);
-    private final ValkeyCaptchaStore store = new ValkeyCaptchaStore(redis, keys, Clock.fixed(NOW, ZoneOffset.UTC));
+    private final CaptchaAnswerDigest digests = new CaptchaAnswerDigest(new byte[32]);
+    private final ValkeyCaptchaStore store = storeAt(Clock.fixed(NOW, ZoneOffset.UTC));
 
     @BeforeAll
     static void connect() {
@@ -59,8 +64,10 @@ class ValkeyCaptchaStoreIT {
         CaptchaId id = CaptchaId.random();
         store.save(id, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
 
-        String key = "captcha:v1:" + id.value();
-        assertThat(redis.opsForHash().entries(key)).containsEntry("customerId", "90359").doesNotContainValue("AB3CD");
+        String key = "tx:v2:captcha:" + id.value();
+        assertThat(redis.type(key)).isEqualTo(DataType.STRING);
+        assertThat(redis.opsForValue().get(key)).contains("\"boundCustomerId\":\"90359\"")
+                .contains(digests.of(new CaptchaAnswer("AB3CD"))).doesNotContain("AB3CD");
         assertThat(redis.getExpire(key, TimeUnit.SECONDS)).isBetween(290L, 300L);
 
         assertThat(store.consume(id, ALICE, new CaptchaAnswer("ab3cd"))).isTrue();
@@ -73,7 +80,7 @@ class ValkeyCaptchaStoreIT {
         CaptchaId wrong = CaptchaId.random();
         store.save(wrong, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
         assertThat(store.consume(wrong, ALICE, new CaptchaAnswer("AB3CE"))).isFalse();
-        assertThat(redis.hasKey("captcha:v1:" + wrong.value())).isFalse();
+        assertThat(redis.hasKey("tx:v2:captcha:" + wrong.value())).isFalse();
 
         CaptchaId other = CaptchaId.random();
         store.save(other, new CustomerId("77777"), new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
@@ -81,57 +88,63 @@ class ValkeyCaptchaStoreIT {
 
         CaptchaId nobody = CaptchaId.random();
         store.save(nobody, null, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+        assertThat(redis.opsForValue().get("tx:v2:captcha:" + nobody.value())).contains("\"boundCustomerId\":null");
         assertThat(store.consume(nobody, ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
 
+        // Still in the store (the server forgets it a little later), but past its deadline on the clock that decides.
         CaptchaId expired = CaptchaId.random();
-        redis.opsForHash().putAll("captcha:v1:" + expired.value(), java.util.Map.of("customerId", "90359",
-                "answerDigest", keys.answerDigest(new CaptchaAnswer("AB3CD")), "expiresAtMs",
-                Long.toString(NOW.minusSeconds(1).toEpochMilli())));
-        assertThat(store.consume(expired, ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
+        store.save(expired, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(2));
+        ValkeyCaptchaStore later = storeAt(Clock.fixed(Instant.now().plusSeconds(60), ZoneOffset.UTC));
+        assertThat(later.consume(expired, ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
+        assertThat(redis.hasKey("tx:v2:captcha:" + expired.value())).isFalse(); // consumed all the same
     }
 
-
     @Test
-    void withAPoolCompareAndSetWritesReuseTheirConnection() {
-        LettuceConnectionFactory pooledConnections = PooledValkey.connections(VALKEY, 2, Duration.ofSeconds(1));
+    void ofManyCallersConsumingTheSameChallengeOnlyOneSucceeds() throws Exception {
+        CaptchaId id = CaptchaId.random();
+        store.save(id, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+        int callers = 16;
+        ExecutorService pool = Executors.newFixedThreadPool(callers);
         try {
-            StringRedisTemplate pooledRedis = new StringRedisTemplate(pooledConnections);
-            ValkeyCaptchaStore pooledStore =
-                    new ValkeyCaptchaStore(pooledRedis, keys, Clock.fixed(NOW, ZoneOffset.UTC));
-            // The first write opens the shared connection and one connection for compare-and-set writes.
-            CaptchaId warmUp = CaptchaId.random();
-            pooledStore.save(warmUp, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
-            assertThat(pooledStore.consume(warmUp, ALICE, new CaptchaAnswer("AB3CD"))).isTrue();
-            Set<String> connectionsBefore = PooledValkey.connectionIdsOf(pooledRedis);
-
-            for (int round = 0; round < 20; round++) {
-                CaptchaId id = CaptchaId.random();
-                pooledStore.save(id, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
-                assertThat(pooledStore.consume(id, ALICE, new CaptchaAnswer("AB3CD"))).isTrue();
+            List<Callable<Boolean>> attempts = new ArrayList<>();
+            for (int caller = 0; caller < callers; caller++) {
+                attempts.add(() -> store.consume(id, ALICE, new CaptchaAnswer("AB3CD")));
             }
-
-            assertThat(PooledValkey.connectionIdsOf(pooledRedis)).isEqualTo(connectionsBefore).hasSize(2);
+            long winners = 0;
+            for (Future<Boolean> consumed : pool.invokeAll(attempts)) {
+                if (consumed.get(10, TimeUnit.SECONDS)) {
+                    winners++;
+                }
+            }
+            assertThat(winners).isEqualTo(1);
         } finally {
-            pooledConnections.destroy();
+            pool.shutdownNow();
         }
     }
 
     @Test
-    void anExhaustedPoolIsUnavailableAfterTheWait() throws Exception {
-        // Two connections: the shared one every ordinary command uses, and a single one for compare-and-set writes.
-        LettuceConnectionFactory oneWriteConnection = PooledValkey.connections(VALKEY, 2, Duration.ofMillis(100));
+    void aStoreThatDoesNotAnswerIsUnavailable() {
+        LettuceConnectionFactory deadConnections =
+                new LettuceConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", 1));
+        deadConnections.afterPropertiesSet();
         try {
-            StringRedisTemplate pooledRedis = new StringRedisTemplate(oneWriteConnection);
-            ValkeyCaptchaStore starvedStore =
-                    new ValkeyCaptchaStore(pooledRedis, keys, Clock.fixed(NOW, ZoneOffset.UTC));
-            pooledRedis.hasKey("opens-the-shared-connection");
-
-            try (PooledValkey.HeldConnection onlyWriteConnection = PooledValkey.holdWriteConnection(pooledRedis)) {
-                assertThatThrownBy(() -> starvedStore.save(CaptchaId.random(), ALICE, new CaptchaAnswer("AB3CD"),
-                        Instant.now().plusSeconds(300))).isInstanceOf(RepositoryUnavailableException.class);
-            }
+            ValkeyTransactionAdapter deadTransactions = transactionsOn(new StringRedisTemplate(deadConnections));
+            ValkeyCaptchaStore deadStore = new ValkeyCaptchaStore(deadTransactions, digests, Clock.fixed(NOW, ZoneOffset.UTC));
+            assertThatThrownBy(() -> deadStore.save(CaptchaId.random(), ALICE, new CaptchaAnswer("AB3CD"),
+                    Instant.now().plusSeconds(300))).isInstanceOf(RepositoryUnavailableException.class);
+            assertThatThrownBy(() -> deadStore.consume(CaptchaId.random(), ALICE, new CaptchaAnswer("AB3CD")))
+                    .isInstanceOf(RepositoryUnavailableException.class);
         } finally {
-            oneWriteConnection.destroy();
+            deadConnections.destroy();
         }
+    }
+
+    private ValkeyCaptchaStore storeAt(Clock clock) {
+        return new ValkeyCaptchaStore(transactionsOn(redis), digests, clock);
+    }
+
+    private static ValkeyTransactionAdapter transactionsOn(StringRedisTemplate template) {
+        return new ValkeyTransactionAdapter(new ValkeyRecordCommands(template), new TransactionKeys(),
+                new TransactionJsonCodec(TransactionJsonCodec.strictPayloadJson()));
     }
 }

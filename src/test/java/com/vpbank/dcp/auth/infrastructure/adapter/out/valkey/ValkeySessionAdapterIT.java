@@ -186,28 +186,6 @@ class ValkeySessionAdapterIT {
         assertThat(store.findByLookup(keys.lookupOf(TOKEN))).isEmpty();
     }
 
-    /** Each write is one command on the shared connection: it needs none of the pool's WATCH connections. */
-    @Test
-    void aWriteNeedsNoConnectionOfItsOwn() throws Exception {
-        LettuceConnectionFactory pooledConnections = PooledValkey.connections(VALKEY, 2, Duration.ofMillis(100));
-        try {
-            StringRedisTemplate pooledRedis = new StringRedisTemplate(pooledConnections);
-            ValkeySessionAdapter pooledStore = storeOn(pooledRedis);
-            pooledRedis.hasKey("opens-the-shared-connection");
-
-            try (PooledValkey.HeldConnection onlyWriteConnection = PooledValkey.holdWriteConnection(pooledRedis)) {
-                pooledStore.create(session, TOKEN);
-                StoredSession read = pooledStore.findByToken(TOKEN).orElseThrow();
-                Instant admitted = Instant.now();
-                assertThat(pooledStore.saveIfCurrent(read, session.extend(admitted, admitted, POLICY))).isPresent();
-                assertThat(pooledStore.delete(keys.lookupOf(TOKEN))).isTrue();
-                assertThat(PooledValkey.connectionIdsOf(pooledRedis)).hasSize(2); // the shared one and the held one
-            }
-        } finally {
-            pooledConnections.destroy();
-        }
-    }
-
     @Test
     void aStoreOutageIsUnavailable() {
         LettuceConnectionFactory dead = new LettuceConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", 1));

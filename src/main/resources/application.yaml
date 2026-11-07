@@ -8,16 +8,7 @@ spring:
   data:
     redis:
       url: ${AUTH_VALKEY_URL:redis://localhost:6379}
-      lettuce:
-        # A compare-and-set (WATCH … EXEC) runs on a connection of its own. The pool keeps those connections open;
-        # without it every session, CAPTCHA and transaction write would connect and handshake again.
-        pool:
-          enabled: true
-          # Connections per instance: one is shared by all ordinary commands, the rest carry one compare-and-set
-          # write each. A write that finds none free waits max-wait, then the step is "unavailable".
-          max-active: ${AUTH_VALKEY_POOL_SIZE:32}
-          max-idle: ${AUTH_VALKEY_POOL_SIZE:32}
-          max-wait: ${AUTH_VALKEY_POOL_MAX_WAIT:PT0.25S}
+      # Every Valkey write is one command on the shared connection (no WATCH/MULTI), so no connection pool is needed.
   datasource:
     url: ${AUTH_DB_URL}
     username: ${AUTH_DB_USER}

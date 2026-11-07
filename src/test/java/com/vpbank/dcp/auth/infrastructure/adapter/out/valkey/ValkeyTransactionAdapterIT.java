@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.model.CacheTransaction;
 import com.vpbank.dcp.auth.application.port.out.model.TransactionKind;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -192,28 +191,6 @@ class ValkeyTransactionAdapterIT {
             assertThatThrownBy(() -> deadStore.deleteIfCurrent(started)).isInstanceOf(RepositoryUnavailableException.class);
         } finally {
             deadConnections.destroy();
-        }
-    }
-
-    /** Each write is one command on the shared connection: it needs none of the pool's WATCH connections. */
-    @Test
-    void aWriteNeedsNoConnectionOfItsOwn() throws Exception {
-        LettuceConnectionFactory pooledConnections = PooledValkey.connections(VALKEY, 2, Duration.ofMillis(100));
-        try {
-            StringRedisTemplate pooledRedis = new StringRedisTemplate(pooledConnections);
-            ValkeyTransactionAdapter pooledStore = storeOn(pooledRedis);
-            pooledRedis.hasKey("opens-the-shared-connection");
-
-            try (PooledValkey.HeldConnection onlyWriteConnection = PooledValkey.holdWriteConnection(pooledRedis)) {
-                CacheTransaction<Enrollment> started = enrollment("s-1");
-                assertThat(pooledStore.createIfAbsent(started)).isTrue();
-                CacheTransaction<Enrollment> saved =
-                        pooledStore.saveIfCurrent(started, new Enrollment("s-1", 1, "k1")).orElseThrow();
-                assertThat(pooledStore.deleteIfCurrent(saved)).isTrue();
-                assertThat(PooledValkey.connectionIdsOf(pooledRedis)).hasSize(2); // the shared one and the held one
-            }
-        } finally {
-            pooledConnections.destroy();
         }
     }
 

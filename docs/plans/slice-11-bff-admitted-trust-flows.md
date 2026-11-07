@@ -183,6 +183,13 @@
     classes were compiled and unit-tested standalone, 15 tests). Sessions at `session:v1:` are not read: every
     session logs in again at deploy (cut over, DD 22 §8). The pool now serves only `ValkeyCaptchaStore`, whose IT
     took over the two pool tests. `mvn -o verify`: 339 unit tests, 46 ITs.
+18. **Done 2026-11-07.** `ValkeyCaptchaStore` is a one-shot transaction of kind `captcha` in the shared
+    `TransactionStore` (`tx:v2:captcha:<id>`, payload `CaptchaChallenge`: bound customer or null, the answer's HMAC
+    from `CaptchaAnswerDigest`, formerly `CaptchaKeys`): `save` = `createIfAbsent`, `consume` = `find` +
+    `deleteIfCurrent`, then the comparison; the challenge's deadline is the transaction's. With that no adapter
+    uses `WATCH … EXEC` any more, so the connection pool of turn 15 (`commons-pool2`, `AUTH_VALKEY_POOL_*`) is
+    removed again and `ArchitectureTest` forbids `SessionCallback` in the Valkey adapters. CAPTCHA records at
+    `captcha:v1:` are not read (they lived 5 minutes). `mvn -o verify`: 340 unit tests, 43 ITs.
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
 and a database guard for one open approval request per device.

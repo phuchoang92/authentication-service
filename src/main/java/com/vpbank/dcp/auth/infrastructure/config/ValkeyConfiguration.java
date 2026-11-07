@@ -6,7 +6,7 @@ import com.vpbank.dcp.auth.application.port.out.repository.TransactionStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
 import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.BffAssertionKeys;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.CaptchaKeys;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.CaptchaAnswerDigest;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.TransactionJsonCodec;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.TransactionKeys;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.RandomOpaqueTokenGenerator;
@@ -53,11 +53,11 @@ public class ValkeyConfiguration {
         return new ValkeySessionAdapter(valkeyRecordCommands, sessionKeys, new SessionJsonCodec(SessionJsonCodec.strictJson()));
     }
 
+    /** CAPTCHA challenges are one-shot transactions in the shared store; only the answer's HMAC key is theirs. */
     @Bean
-    CaptchaStore captchaStore(StringRedisTemplate stringRedisTemplate, CaptchaProperties captchaProperties, Clock clock) {
+    CaptchaStore captchaStore(TransactionStore transactionStore, CaptchaProperties captchaProperties, Clock clock) {
         byte[] answerHmacKey = decodeKey(captchaProperties.answerHmacKeyBase64());
-        CaptchaKeys captchaKeys = new CaptchaKeys(answerHmacKey);
-        return new ValkeyCaptchaStore(stringRedisTemplate, captchaKeys, clock);
+        return new ValkeyCaptchaStore(transactionStore, new CaptchaAnswerDigest(answerHmacKey), clock);
     }
 
     /** Transactions in flight (slice 11): one store for every flow, each flow bringing only its payload. */

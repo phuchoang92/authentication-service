@@ -253,4 +253,13 @@ class ArchitectureTest {
                 .because("rings are grouped by role; a capability is a class name, not a package")
                 .check(production);
     }
+
+    /** Every Valkey write is one command (SET NX / IFEQ, DELIFEQ, DEL): no WATCH/MULTI, hence no SessionCallback. */
+    @Test
+    void valkeyAdaptersWriteWithSingleCommands() {
+        noClasses().that().resideInAPackage(OUT + ".valkey..")
+                .should().dependOnClassesThat().haveSimpleName("SessionCallback")
+                .because("WATCH … EXEC needs a connection of its own and four round trips; the server compares instead")
+                .check(production);
+    }
 }

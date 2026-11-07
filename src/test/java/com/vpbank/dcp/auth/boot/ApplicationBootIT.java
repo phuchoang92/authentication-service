@@ -2,16 +2,6 @@ package com.vpbank.dcp.auth.boot;
 
 import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
 import com.vpbank.dcp.auth.domain.model.DomainFixtures;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
 import com.nimbusds.jose.EncryptionMethod;
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWEAlgorithm;
@@ -45,9 +35,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestServiceClie
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
-import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.DeviceHeaders;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper;
@@ -68,8 +56,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -80,6 +66,16 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 
 /**
  * The whole application boots against real MySQL and Valkey with registration and login on. One
@@ -150,7 +146,6 @@ class ApplicationBootIT {
     @Autowired TrustedDeviceJpaRepository deviceRows;
     @Autowired PrimaryTrustedDeviceJpaRepository primaryRows;
     @Autowired DeviceIdProtection deviceIdProtection;
-    @Autowired LettuceConnectionFactory valkeyConnections;
     @MockitoBean CustomerDirectoryPort customers;
     @MockitoBean IdentityProviderPort keycloakAdmin;
     @MockitoBean SmsSenderPort sms;
@@ -417,17 +412,6 @@ class ApplicationBootIT {
      * verifies against the public JWKS route and says exactly what was asked; the same assertion is refused a
      * second time (replay), and a bare request is refused.
      */
-    @Test
-    void compareAndSetConnectionsComeFromThePoolTheSettingsDescribe() {
-        assertThat(valkeyConnections.getClientConfiguration()).isInstanceOf(LettucePoolingClientConfiguration.class);
-        LettucePoolingClientConfiguration pooling =
-                (LettucePoolingClientConfiguration) valkeyConnections.getClientConfiguration();
-
-        assertThat(pooling.getPoolConfig().getMaxTotal()).isEqualTo(32);
-        assertThat(pooling.getPoolConfig().getMaxIdle()).isEqualTo(32);
-        assertThat(pooling.getPoolConfig().getMaxWaitDuration()).isEqualTo(Duration.ofMillis(250));
-    }
-
     @Test
     void anInternalServiceGetsAnOnboardingTokenTheBffCanVerifyAndCannotReplayItsAssertion() throws Exception {
         String assertion = TestServiceClientAssertions.assertion();
