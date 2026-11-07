@@ -22,7 +22,6 @@ import com.vpbank.dcp.auth.domain.model.RequestDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 import lombok.NonNull;
@@ -57,8 +56,7 @@ public final class RegisterCustomerService implements RegisterCustomerUseCase {
     @NonNull private final Supplier<RegistrationId> registrationIdGenerator;
 
     @Override
-    public RegisterCustomerResult register(RegisterCustomerCommand command) {
-        Objects.requireNonNull(command, "command");
+    public RegisterCustomerResult register(@NonNull RegisterCustomerCommand command) {
         RequestDigest requestDigest = requestDigester.digest(command);
 
         try {

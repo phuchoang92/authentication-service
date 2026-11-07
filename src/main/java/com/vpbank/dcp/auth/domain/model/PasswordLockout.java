@@ -3,18 +3,17 @@ package com.vpbank.dcp.auth.domain.model;
 import com.vpbank.dcp.auth.domain.enums.PasswordStatus;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Objects;
 import java.util.Optional;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * The lockout part of an identity (phase 2 columns). Status and lockout time always change
  * together; the counter never goes below zero and resets only on a successful login.
  */
 @Builder(toBuilder = true)
-public record PasswordLockout(PasswordStatus status, int failedCount, Instant lockedUntil) {
+public record PasswordLockout(@NonNull PasswordStatus status, int failedCount, Instant lockedUntil) {
     public PasswordLockout {
-        Objects.requireNonNull(status, "status");
         if (failedCount < 0) {
             throw new IllegalArgumentException("Failed count cannot be negative");
         }

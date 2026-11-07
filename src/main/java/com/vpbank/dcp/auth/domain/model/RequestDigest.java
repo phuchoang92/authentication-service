@@ -2,7 +2,7 @@ package com.vpbank.dcp.auth.domain.model;
 
 import java.util.Arrays;
 import java.util.HexFormat;
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * Keyed digest of the registration request. Two calls with the same digest carry the same data,
@@ -12,8 +12,7 @@ public final class RequestDigest {
     public static final int LENGTH = 32;
     private final byte[] bytes;
 
-    public RequestDigest(byte[] bytes) {
-        Objects.requireNonNull(bytes, "bytes");
+    public RequestDigest(@NonNull byte[] bytes) {
         if (bytes.length != LENGTH) {
             throw new IllegalArgumentException("Request digest must be " + LENGTH + " bytes");
         }

@@ -15,6 +15,7 @@ import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import lombok.NonNull;
 
 /**
  * How the app's device ID is stored (phase 3): a keyed lookup digest for queries and an AEAD
@@ -36,13 +37,16 @@ public final class DeviceIdProtection {
     private final String encryptionKeyId;
     private final SecureRandom secureRandom;
 
-    public DeviceIdProtection(Map<String, byte[]> lookupKeys, String lookupKeyId,
-                              Map<String, byte[]> encryptionKeys, String encryptionKeyId, SecureRandom secureRandom) {
+    public DeviceIdProtection(Map<String, byte[]> lookupKeys,
+                              String lookupKeyId,
+                              Map<String, byte[]> encryptionKeys,
+                              String encryptionKeyId,
+                              @NonNull SecureRandom secureRandom) {
         this.lookupKeys = checked(lookupKeys, lookupKeyId, 32, "lookup");
         this.lookupKeyId = lookupKeyId;
         this.encryptionKeys = checked(encryptionKeys, encryptionKeyId, 32, "encryption");
         this.encryptionKeyId = encryptionKeyId;
-        this.secureRandom = Objects.requireNonNull(secureRandom, "secureRandom");
+        this.secureRandom = secureRandom;
     }
 
     public String lookupKeyId() {

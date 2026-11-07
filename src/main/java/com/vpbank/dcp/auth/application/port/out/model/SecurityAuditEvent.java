@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * One row of the security activity audit. Carries identifiers only: no user name, password,
@@ -34,13 +35,17 @@ import lombok.Builder;
  * @param occurredAt  when the service decided
  */
 @Builder
-public record SecurityAuditEvent(SecurityEventReason reason, CustomerId customerId, Channel channel,
-                                 DevicePlatform platform, SessionId sessionId, Integer failedCount,
-                                 ServiceId serviceId, ServiceScope scope, UUID tokenId,
-                                 Instant occurredAt) {
+public record SecurityAuditEvent(@NonNull SecurityEventReason reason,
+                                 CustomerId customerId,
+                                 Channel channel,
+                                 DevicePlatform platform,
+                                 SessionId sessionId,
+                                 Integer failedCount,
+                                 ServiceId serviceId,
+                                 ServiceScope scope,
+                                 UUID tokenId,
+                                 @NonNull Instant occurredAt) {
     public SecurityAuditEvent {
-        Objects.requireNonNull(reason, "reason");
-        Objects.requireNonNull(occurredAt, "occurredAt");
         if (reason.type().aboutAService()) {
             Objects.requireNonNull(serviceId, "serviceId");
             Objects.requireNonNull(scope, "scope");

@@ -3,7 +3,7 @@ package com.vpbank.dcp.auth.application.port.out.gateway;
 import com.vpbank.dcp.auth.application.port.out.model.DeviceProofBindings;
 import com.vpbank.dcp.auth.domain.model.DeviceProof;
 import java.time.Instant;
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * Checks the proof a trusted device signs at login (slice 13) under the public key its trusted row holds:
@@ -14,10 +14,7 @@ public interface DeviceProofVerifier {
 
     sealed interface Outcome {
         /** A genuine, current proof, and how long its nonce must be remembered (until it could no longer pass the time check). */
-        record Proven(Instant rememberUntil) implements Outcome {
-            public Proven {
-                Objects.requireNonNull(rememberUntil, "rememberUntil");
-            }
+        record Proven(@NonNull Instant rememberUntil) implements Outcome {
         }
 
         /** Anything else: another key, other bindings, out of time, unusable stored key. One answer, no detail. */

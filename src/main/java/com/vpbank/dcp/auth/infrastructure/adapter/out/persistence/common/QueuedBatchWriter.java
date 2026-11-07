@@ -3,11 +3,11 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import lombok.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
@@ -46,14 +46,18 @@ public final class QueuedBatchWriter<E> implements SmartLifecycle {
      * @param batchSize    the most items one {@link BatchWriter#write} call carries
      * @param shutdownDrain how long {@link #stop} waits for the thread before writing the rest itself
      */
-    public QueuedBatchWriter(String threadName, BatchWriter<E> writer, Function<E, String> labelOf,
-                             int queueCapacity, int batchSize, Duration shutdownDrain) {
-        this.threadName = Objects.requireNonNull(threadName, "threadName");
-        this.writer = Objects.requireNonNull(writer, "writer");
-        this.labelOf = Objects.requireNonNull(labelOf, "labelOf");
+    public QueuedBatchWriter(@NonNull String threadName,
+                             @NonNull BatchWriter<E> writer,
+                             @NonNull Function<E, String> labelOf,
+                             int queueCapacity,
+                             int batchSize,
+                             @NonNull Duration shutdownDrain) {
+        this.threadName = threadName;
+        this.writer = writer;
+        this.labelOf = labelOf;
         this.queue = new ArrayBlockingQueue<>(queueCapacity);
         this.batchSize = batchSize;
-        this.shutdownDrain = Objects.requireNonNull(shutdownDrain, "shutdownDrain");
+        this.shutdownDrain = shutdownDrain;
     }
 
     /** Never blocks, never throws: a full queue costs this one item, not the caller's request. */

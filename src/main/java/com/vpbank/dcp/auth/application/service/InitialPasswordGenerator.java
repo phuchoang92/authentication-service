@@ -1,7 +1,7 @@
 package com.vpbank.dcp.auth.application.service;
 
 import java.security.SecureRandom;
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * Random first password sent by SMS: upper and lower letters and digits, at least one of each.
@@ -16,8 +16,8 @@ public final class InitialPasswordGenerator {
     private final SecureRandom secureRandom;
     private final int length;
 
-    public InitialPasswordGenerator(SecureRandom secureRandom, int length) {
-        this.secureRandom = Objects.requireNonNull(secureRandom);
+    public InitialPasswordGenerator(@NonNull SecureRandom secureRandom, int length) {
+        this.secureRandom = secureRandom;
         if (length < 8 || length > 64) {
             throw new IllegalArgumentException("Initial password length must be 8 to 64");
         }

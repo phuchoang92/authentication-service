@@ -6,8 +6,8 @@ import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.util.List;
-import java.util.Objects;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * Everything the trust commit writes in one SQL transaction (DD 20 §4, §7): the trusted row (new, or an
@@ -19,13 +19,16 @@ import lombok.Builder;
  * for the first time (slice 11: the transaction lived in the cache until now); null when the row already exists.
  */
 @Builder
-public record TrustConfirmation(TrustedDevice device, TrustedDevice replaced, List<TrustedDevice> expiredByCap,
-                                DeviceEnrollment enrollment, PrimaryMode primaryMode, boolean faceAuthenticated,
-                                String receiptDigest, TrustedDeviceId actorDeviceId, SessionId creationSessionId) {
+public record TrustConfirmation(@NonNull TrustedDevice device,
+                                TrustedDevice replaced,
+                                List<TrustedDevice> expiredByCap,
+                                @NonNull DeviceEnrollment enrollment,
+                                @NonNull PrimaryMode primaryMode,
+                                boolean faceAuthenticated,
+                                String receiptDigest,
+                                TrustedDeviceId actorDeviceId,
+                                SessionId creationSessionId) {
     public TrustConfirmation {
-        Objects.requireNonNull(device, "device");
-        Objects.requireNonNull(enrollment, "enrollment");
-        Objects.requireNonNull(primaryMode, "primaryMode");
         expiredByCap = expiredByCap == null ? List.of() : List.copyOf(expiredByCap);
     }
 }

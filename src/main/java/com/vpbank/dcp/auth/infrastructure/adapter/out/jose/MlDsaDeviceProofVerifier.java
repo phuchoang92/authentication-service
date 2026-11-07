@@ -20,7 +20,6 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import lombok.NonNull;
@@ -58,9 +57,7 @@ public final class MlDsaDeviceProofVerifier implements DeviceProofVerifier {
     @NonNull private final Clock clock;
 
     @Override
-    public Outcome verify(String devicePublicJwk, DeviceProof proof, DeviceProofBindings bindings) {
-        Objects.requireNonNull(proof, "proof");
-        Objects.requireNonNull(bindings, "bindings");
+    public Outcome verify(String devicePublicJwk, @NonNull DeviceProof proof, @NonNull DeviceProofBindings bindings) {
         if (devicePublicJwk == null) {
             return new Outcome.Rejected();
         }

@@ -1,7 +1,7 @@
 package com.vpbank.dcp.auth.domain.model;
 
 import java.util.Arrays;
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * A password in transit to the identity provider. Never stored, compared or printed here;
@@ -10,8 +10,7 @@ import java.util.Objects;
 public final class Password {
     private final char[] value;
 
-    public Password(char[] value) {
-        Objects.requireNonNull(value, "value");
+    public Password(@NonNull char[] value) {
         if (value.length == 0) {
             throw new IllegalArgumentException("Password must not be empty");
         }

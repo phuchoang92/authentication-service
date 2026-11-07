@@ -19,10 +19,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import lombok.NonNull;
 
 /**
  * The BFF assertion of DD 20 §6a, extended for slice 11: a compact ES256 JWS from the pinned BFF key, header
@@ -48,22 +48,19 @@ public final class BffAssertionVerifier {
     private final Clock clock;
 
     /** {@code bffAssertionKey} is the pinned public P-256 key; it must carry the key ID the header names. */
-    public BffAssertionVerifier(ECKey bffAssertionKey, String issuer, Clock clock) {
-        this.bffAssertionKey = Objects.requireNonNull(bffAssertionKey, "bffAssertionKey");
-        this.issuer = Objects.requireNonNull(issuer, "issuer");
-        this.clock = Objects.requireNonNull(clock, "clock");
+    public BffAssertionVerifier(@NonNull ECKey bffAssertionKey, @NonNull String issuer, @NonNull Clock clock) {
+        this.bffAssertionKey = bffAssertionKey;
+        this.issuer = issuer;
+        this.clock = clock;
         if (bffAssertionKey.isPrivate() || bffAssertionKey.getKeyID() == null) {
             throw new IllegalArgumentException("The BFF assertion key must be a public key with a key ID");
         }
     }
 
     /** A genuine, current assertion: who the BFF admitted, and the ID and deadline the replay check needs. */
-    public record VerifiedAssertion(AdmittedSession admittedSession, String assertionId, Instant expiresAt) {
-        public VerifiedAssertion {
-            Objects.requireNonNull(admittedSession, "admittedSession");
-            Objects.requireNonNull(assertionId, "assertionId");
-            Objects.requireNonNull(expiresAt, "expiresAt");
-        }
+    public record VerifiedAssertion(@NonNull AdmittedSession admittedSession,
+                                    @NonNull String assertionId,
+                                    @NonNull Instant expiresAt) {
     }
 
     public Optional<VerifiedAssertion> verify(String compactAssertion) {

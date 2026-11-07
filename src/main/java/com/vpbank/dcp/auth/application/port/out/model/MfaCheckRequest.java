@@ -5,8 +5,8 @@ import com.vpbank.dcp.auth.domain.enums.MfaFactor;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import java.util.List;
-import java.util.Objects;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * What Auth asks MFA about an open transaction and what the signed receipt must be bound to
@@ -14,15 +14,13 @@ import lombok.Builder;
  * customer travels with the check (slice 11): a primary enrollment has no database row until it commits.
  */
 @Builder
-public record MfaCheckRequest(String mfaTransactionId, CustomerId customerId, EnrollmentId authOperationId,
-                              EnrollmentPurpose purpose, List<MfaFactor> factors, String contextDigest) {
+public record MfaCheckRequest(@NonNull String mfaTransactionId,
+                              @NonNull CustomerId customerId,
+                              @NonNull EnrollmentId authOperationId,
+                              @NonNull EnrollmentPurpose purpose,
+                              @NonNull List<MfaFactor> factors,
+                              @NonNull String contextDigest) {
     public MfaCheckRequest {
-        Objects.requireNonNull(mfaTransactionId, "mfaTransactionId");
-        Objects.requireNonNull(customerId, "customerId");
-        Objects.requireNonNull(authOperationId, "authOperationId");
-        Objects.requireNonNull(purpose, "purpose");
-        Objects.requireNonNull(factors, "factors");
-        Objects.requireNonNull(contextDigest, "contextDigest");
         if (factors.isEmpty()) {
             throw new IllegalArgumentException("At least one factor is required");
         }

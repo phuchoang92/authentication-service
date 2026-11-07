@@ -3,8 +3,8 @@ package com.vpbank.dcp.auth.domain.model;
 import com.vpbank.dcp.auth.domain.enums.RegistrationState;
 import com.vpbank.dcp.auth.domain.exception.RegistrationStateException;
 import java.time.Instant;
-import java.util.Objects;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * One registration request and its place in the flow
@@ -15,17 +15,16 @@ import lombok.Builder;
  * subject are known from USER_CREATED on; before that they are null.
  */
 @Builder(toBuilder = true)
-public record Registration(RegistrationId id, CustomerId customerId, UserName userName,
-                           RequestDigest requestDigest, RegistrationState state,
-                           String identityIssuer, String identitySubject,
-                           Instant expiresAt, long version) {
+public record Registration(@NonNull RegistrationId id,
+                           @NonNull CustomerId customerId,
+                           @NonNull UserName userName,
+                           @NonNull RequestDigest requestDigest,
+                           @NonNull RegistrationState state,
+                           String identityIssuer,
+                           String identitySubject,
+                           @NonNull Instant expiresAt,
+                           long version) {
     public Registration {
-        Objects.requireNonNull(id, "id");
-        Objects.requireNonNull(customerId, "customerId");
-        Objects.requireNonNull(userName, "userName");
-        Objects.requireNonNull(requestDigest, "requestDigest");
-        Objects.requireNonNull(state, "state");
-        Objects.requireNonNull(expiresAt, "expiresAt");
         if ((identityIssuer == null) != (identitySubject == null)) {
             throw new IllegalArgumentException("Identity issuer and subject are set together");
         }
@@ -48,10 +47,8 @@ public record Registration(RegistrationId id, CustomerId customerId, UserName us
                 .build();
     }
 
-    public Registration markUserCreated(String identityIssuer, String identitySubject) {
+    public Registration markUserCreated(@NonNull String identityIssuer, @NonNull String identitySubject) {
         requireState(RegistrationState.RESERVED);
-        Objects.requireNonNull(identityIssuer, "identityIssuer");
-        Objects.requireNonNull(identitySubject, "identitySubject");
         return toBuilder()
                 .state(RegistrationState.USER_CREATED)
                 .identityIssuer(identityIssuer)

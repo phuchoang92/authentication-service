@@ -5,9 +5,9 @@ import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.Base64;
-import java.util.Objects;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import lombok.NonNull;
 
 /** Key factory for CAPTCHA challenges: {@code captcha:v1:<uuid>}; answers are stored as a keyed HMAC, never in clear. */
 public final class CaptchaKeys {
@@ -15,8 +15,7 @@ public final class CaptchaKeys {
     private static final String ALGORITHM = "HmacSHA256";
     private final byte[] hmacKey;
 
-    public CaptchaKeys(byte[] hmacKey) {
-        Objects.requireNonNull(hmacKey, "hmacKey");
+    public CaptchaKeys(@NonNull byte[] hmacKey) {
         if (hmacKey.length < 32) {
             throw new IllegalArgumentException("CAPTCHA HMAC key must be at least 32 bytes");
         }

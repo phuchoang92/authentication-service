@@ -1,14 +1,10 @@
 package com.vpbank.dcp.auth.application.result;
 
 import java.time.Instant;
-import java.util.Objects;
+import lombok.NonNull;
 
 public sealed interface ExtendSessionResult {
-    record Extended(Instant idleExpiresAt, Instant absoluteExpiresAt) implements ExtendSessionResult {
-        public Extended {
-            Objects.requireNonNull(idleExpiresAt, "idleExpiresAt");
-            Objects.requireNonNull(absoluteExpiresAt, "absoluteExpiresAt");
-        }
+    record Extended(@NonNull Instant idleExpiresAt, @NonNull Instant absoluteExpiresAt) implements ExtendSessionResult {
     }
 
     /** The admission time is outside the accepted skew: nothing changed. */

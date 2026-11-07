@@ -1,13 +1,10 @@
 package com.vpbank.dcp.auth.domain.model;
 
-import java.util.Objects;
 import java.util.UUID;
+import lombok.NonNull;
 
 /** Identifier of one issued CAPTCHA challenge; single use, short-lived. */
-public record CaptchaId(UUID value) {
-    public CaptchaId {
-        Objects.requireNonNull(value, "value");
-    }
+public record CaptchaId(@NonNull UUID value) {
 
     public static CaptchaId random() {
         return new CaptchaId(UUID.randomUUID());

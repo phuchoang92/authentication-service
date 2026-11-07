@@ -7,8 +7,8 @@ import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * The transaction Auth asks MFA to open (DD 20 §5.2): the purpose names the flow, the factors the
@@ -16,17 +16,14 @@ import lombok.Builder;
  * enrollment ID is the idempotent {@code authOperationId}.
  */
 @Builder
-public record MfaTransactionRequest(CustomerId customerId, Channel channel, EnrollmentId authOperationId,
-                                    EnrollmentPurpose purpose, List<MfaFactor> factors, Instant notAfter,
-                                    String contextDigest) {
+public record MfaTransactionRequest(@NonNull CustomerId customerId,
+                                    @NonNull Channel channel,
+                                    @NonNull EnrollmentId authOperationId,
+                                    @NonNull EnrollmentPurpose purpose,
+                                    @NonNull List<MfaFactor> factors,
+                                    @NonNull Instant notAfter,
+                                    @NonNull String contextDigest) {
     public MfaTransactionRequest {
-        Objects.requireNonNull(customerId, "customerId");
-        Objects.requireNonNull(channel, "channel");
-        Objects.requireNonNull(authOperationId, "authOperationId");
-        Objects.requireNonNull(purpose, "purpose");
-        Objects.requireNonNull(factors, "factors");
-        Objects.requireNonNull(notAfter, "notAfter");
-        Objects.requireNonNull(contextDigest, "contextDigest");
         if (factors.isEmpty()) {
             throw new IllegalArgumentException("At least one factor is required");
         }

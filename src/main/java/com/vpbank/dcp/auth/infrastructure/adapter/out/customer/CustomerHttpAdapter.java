@@ -6,7 +6,6 @@ import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.customer.dto.CustomerProfileDto;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.customer.mapper.CustomerProfileMapper;
-import java.util.Objects;
 import java.util.Optional;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
@@ -32,8 +31,7 @@ public final class CustomerHttpAdapter implements CustomerDirectoryPort {
     private final String serviceToken;
 
     @Override
-    public Optional<CustomerProfile> profile(CustomerId customerId) {
-        Objects.requireNonNull(customerId, "customerId");
+    public Optional<CustomerProfile> profile(@NonNull CustomerId customerId) {
         try {
             return restClient.get()
                     .uri(profilePath, customerId.value())

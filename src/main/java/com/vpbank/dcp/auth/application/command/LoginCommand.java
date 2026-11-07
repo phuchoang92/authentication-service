@@ -6,8 +6,8 @@ import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DeviceProof;
 import com.vpbank.dcp.auth.domain.model.Password;
 import com.vpbank.dcp.auth.domain.model.UserName;
-import java.util.Objects;
 import lombok.Builder;
+import lombok.NonNull;
 
 /**
  * One login attempt. On the MOBILE channel {@code deviceId} and {@code platform} identify the app
@@ -17,14 +17,15 @@ import lombok.Builder;
  * required once the identity has failed {@code LockoutPolicy.captchaAfter()} times.
  */
 @Builder
-public record LoginCommand(UserName userName, Password password, Channel channel, DeviceId deviceId,
-                           DevicePlatform platform, DeviceProof deviceProof, String tokenEncryptionKey,
+public record LoginCommand(@NonNull UserName userName,
+                           @NonNull Password password,
+                           @NonNull Channel channel,
+                           DeviceId deviceId,
+                           DevicePlatform platform,
+                           DeviceProof deviceProof,
+                           @NonNull String tokenEncryptionKey,
                            CaptchaSolution captcha) {
     public LoginCommand {
-        Objects.requireNonNull(userName, "userName");
-        Objects.requireNonNull(password, "password");
-        Objects.requireNonNull(channel, "channel");
-        Objects.requireNonNull(tokenEncryptionKey, "tokenEncryptionKey");
         if (channel == Channel.MOBILE && (deviceId == null || platform == null)) {
             throw new IllegalArgumentException("A mobile login needs the device ID and platform");
         }

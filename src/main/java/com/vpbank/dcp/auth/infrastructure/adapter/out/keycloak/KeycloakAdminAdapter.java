@@ -10,9 +10,9 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.keycloak.dto.EnableUserReq
 import com.vpbank.dcp.auth.infrastructure.adapter.out.keycloak.dto.TokenResponse;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.keycloak.mapper.KeycloakUserMapper;
 import java.net.URI;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import lombok.NonNull;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.util.LinkedMultiValueMap;
@@ -39,12 +39,16 @@ public final class KeycloakAdminAdapter implements IdentityProviderPort {
     private final String clientSecret;
 
     /** Explicit constructor: it derives the issuer {@code <baseUrl>/realms/<realm>}. */
-    public KeycloakAdminAdapter(RestClient restClient, String baseUrl, String realm, String clientId, String clientSecret) {
-        this.restClient = Objects.requireNonNull(restClient);
-        this.realm = Objects.requireNonNull(realm);
-        this.clientId = Objects.requireNonNull(clientId);
-        this.clientSecret = Objects.requireNonNull(clientSecret);
-        this.issuer = Objects.requireNonNull(baseUrl).replaceAll("/+$", "") + "/realms/" + realm;
+    public KeycloakAdminAdapter(@NonNull RestClient restClient,
+                                @NonNull String baseUrl,
+                                @NonNull String realm,
+                                @NonNull String clientId,
+                                @NonNull String clientSecret) {
+        this.restClient = restClient;
+        this.realm = realm;
+        this.clientId = clientId;
+        this.clientSecret = clientSecret;
+        this.issuer = baseUrl.replaceAll("/+$", "") + "/realms/" + realm;
     }
 
     @Override

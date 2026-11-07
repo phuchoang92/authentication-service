@@ -1,7 +1,7 @@
 package com.vpbank.dcp.auth.domain.model;
 
 import java.time.Duration;
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * Enrollment limits. Slice 5: how many wrong challenge answers one enrollment may take. Slice 6
@@ -9,13 +9,11 @@ import java.util.Objects;
  * wrong claims it survives and how many devices may wait at once per customer and channel.
  */
 public record EnrollmentPolicy(int maxVerifyAttempts,
-                               Duration pendingWindow,
-                               Duration approvalTokenLifetime,
+                               @NonNull Duration pendingWindow,
+                               @NonNull Duration approvalTokenLifetime,
                                int maxClaimAttempts,
                                int maxPendingDevices) {
     public EnrollmentPolicy {
-        Objects.requireNonNull(pendingWindow, "pendingWindow");
-        Objects.requireNonNull(approvalTokenLifetime, "approvalTokenLifetime");
         if (maxVerifyAttempts < 1 || maxVerifyAttempts > 10) {
             throw new IllegalArgumentException("maxVerifyAttempts must be 1..10");
         }

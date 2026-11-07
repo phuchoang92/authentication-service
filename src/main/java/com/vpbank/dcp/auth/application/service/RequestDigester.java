@@ -4,9 +4,9 @@ import com.vpbank.dcp.auth.application.command.RegisterCustomerCommand;
 import com.vpbank.dcp.auth.domain.model.RequestDigest;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.util.Objects;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import lombok.NonNull;
 
 /**
  * HMAC-SHA256 of a registration request with a server key. A plain hash would let anyone with
@@ -16,8 +16,7 @@ public final class RequestDigester {
     private static final String ALGORITHM = "HmacSHA256";
     private final byte[] key;
 
-    public RequestDigester(byte[] key) {
-        Objects.requireNonNull(key, "key");
+    public RequestDigester(@NonNull byte[] key) {
         if (key.length < 32) {
             throw new IllegalArgumentException("Request digest key must be at least 32 bytes");
         }

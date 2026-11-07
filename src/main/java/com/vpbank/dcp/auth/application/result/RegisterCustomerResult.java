@@ -3,19 +3,17 @@ package com.vpbank.dcp.auth.application.result;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.RegistrationId;
 import com.vpbank.dcp.auth.domain.model.UserName;
-import java.util.Objects;
+import lombok.NonNull;
 
 /** Business outcomes of {@link RegisterCustomerUseCase}; infrastructure failures are exceptions. */
 public sealed interface RegisterCustomerResult {
 
     /** The login account exists. {@code created} is false when a retry found it already READY. */
-    record Ready(RegistrationId requestId, CustomerId customerId, UserName userName, boolean created)
+    record Ready(@NonNull RegistrationId requestId,
+                 @NonNull CustomerId customerId,
+                 @NonNull UserName userName,
+                 boolean created)
             implements RegisterCustomerResult {
-        public Ready {
-            Objects.requireNonNull(requestId, "requestId");
-            Objects.requireNonNull(customerId, "customerId");
-            Objects.requireNonNull(userName, "userName");
-        }
     }
 
     /** Same customer with other data, or the username / identity belongs to someone else. */

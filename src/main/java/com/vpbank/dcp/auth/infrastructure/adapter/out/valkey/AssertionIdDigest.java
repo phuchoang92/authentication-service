@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * SHA-256 of an assertion ID as unpadded base64url (43 characters): the key has a fixed length and shape whatever
@@ -14,8 +14,7 @@ final class AssertionIdDigest {
     private AssertionIdDigest() {
     }
 
-    static String of(String assertionId) {
-        Objects.requireNonNull(assertionId, "assertionId");
+    static String of(@NonNull String assertionId) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(assertionId.getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
