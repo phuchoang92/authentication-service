@@ -13,7 +13,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.ServiceTokenSigner;
 import com.vpbank.dcp.auth.domain.model.ServiceTokenClaims;
 
 import java.util.Date;
-import java.util.Objects;
+import lombok.NonNull;
 
 /**
  * The service token as compact JWS (slice 12): {@code alg=ES256}, {@code typ=service-token+jwt}, {@code kid} of
@@ -31,8 +31,8 @@ public final class NimbusServiceTokenSigner implements ServiceTokenSigner {
     /**
      * {@code signingKey} is the private P-256 key; it must carry the key ID the header names.
      */
-    public NimbusServiceTokenSigner(ECKey signingKey) {
-        this.signingKey = Objects.requireNonNull(signingKey, "signingKey");
+    public NimbusServiceTokenSigner(@NonNull ECKey signingKey) {
+        this.signingKey = signingKey;
         if (!signingKey.isPrivate() || !Curve.P_256.equals(signingKey.getCurve()) || signingKey.getKeyID() == null) {
             throw new IllegalArgumentException("The service token signing key must be a private P-256 key with a key ID");
         }
@@ -46,7 +46,7 @@ public final class NimbusServiceTokenSigner implements ServiceTokenSigner {
                 .build();
         JWTClaimsSet.Builder claimSet = new JWTClaimsSet.Builder()
                 .issuer(claims.issuer())
-                .subject(claims.caller().value())
+                .subject(claims.issuedTo().value())
                 .audience(claims.audience())
                 .claim(SCOPE_CLAIM, claims.scope().code())
                 .issueTime(Date.from(claims.issuedAt()))

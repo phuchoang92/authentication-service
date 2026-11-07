@@ -7,7 +7,7 @@ import com.vpbank.dcp.auth.domain.model.BusinessReference;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.VerifiedServiceCaller;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.VerifiedServiceClient;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.ErrorCodes;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.IssueServiceTokenRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.response.ServiceTokenResponse;
@@ -23,12 +23,12 @@ public final class ServiceTokenRestMapper {
 
     @NonNull private final ErrorMessages errorMessages;
 
-    public IssueServiceTokenCommand toCommand(VerifiedServiceCaller caller, IssueServiceTokenRequest request) {
+    public IssueServiceTokenCommand toCommand(VerifiedServiceClient callingService, IssueServiceTokenRequest request) {
         ServiceScope scope = ServiceScope.fromCode(request.scope())
                 .orElseThrow(() -> new InvalidRequestException("scope is not a known scope"));
         BusinessReference businessReference = request.businessReference() == null || request.businessReference().isEmpty()
                 ? null : new BusinessReference(request.businessReference());
-        return new IssueServiceTokenCommand(caller.caller(), scope, businessReference);
+        return new IssueServiceTokenCommand(callingService.serviceId(), scope, businessReference);
     }
 
     public ResponseEntity<ApiEnvelope<ServiceTokenResponse>> toResponse(IssueServiceTokenResult result) {

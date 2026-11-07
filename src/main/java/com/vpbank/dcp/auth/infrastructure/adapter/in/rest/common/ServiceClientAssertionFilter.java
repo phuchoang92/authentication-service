@@ -22,12 +22,12 @@ import org.springframework.web.servlet.LocaleResolver;
 /**
  * The gate of the service-token route (slice 12): an internal service calls {@code POST /internal/v1/service-tokens}
  * with exactly one {@code Authorization: Bearer <client assertion>}. The filter verifies the assertion, uses its ID
- * once, and leaves the verified caller on the request for the controller. A bad or replayed assertion is
+ * once, and leaves the verified calling service on the request for the controller. A bad or replayed assertion is
  * {@code 401 REQUEST_REJECTED}; a replay store that cannot answer is {@code 503}, because admitting without
  * recording the use would allow a replay. The JWKS route next to it is public and not gated.
  */
 public final class ServiceClientAssertionFilter extends OncePerRequestFilter {
-    public static final String CALLER_ATTRIBUTE = "com.vpbank.dcp.auth.service-token.caller";
+    public static final String CALLING_SERVICE_ATTRIBUTE = "com.vpbank.dcp.auth.service-token.calling-service";
     public static final String ISSUE_PATH = "/internal/v1/service-tokens";
     private static final String BEARER = "Bearer ";
 
@@ -80,7 +80,7 @@ public final class ServiceClientAssertionFilter extends OncePerRequestFilter {
             return;
         }
 
-        request.setAttribute(CALLER_ATTRIBUTE, new VerifiedServiceCaller(assertion.caller()));
+        request.setAttribute(CALLING_SERVICE_ATTRIBUTE, new VerifiedServiceClient(assertion.clientService()));
         chain.doFilter(request, response);
     }
 

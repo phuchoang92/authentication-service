@@ -60,7 +60,7 @@ class IssueServiceTokenServiceTest {
                 NOW.plus(Duration.ofMinutes(15))));
         assertThat(signer.signed).containsExactly(ServiceTokenClaims.builder()
                 .issuer("authentication-service")
-                .caller(ONBOARDING_SERVICE)
+                .issuedTo(ONBOARDING_SERVICE)
                 .audience("mobile-bff")
                 .scope(ServiceScope.ONBOARDING)
                 .businessReference(new BusinessReference("onb-1"))

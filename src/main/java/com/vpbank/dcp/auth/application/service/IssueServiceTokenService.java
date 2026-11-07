@@ -18,7 +18,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * Issues a scoped service token (slice 12): is the caller granted the scope, does the scope have the journey
+ * Issues a scoped service token (slice 12): is the calling service granted the scope, does the scope have the journey
  * reference it needs, then build the claims and sign. A reference sent for a scope that does not take one is
  * left out of the token. Stateless: nothing is stored, so there is nothing to fail on but the signer, and the
  * signer only fails on a broken key, which is a startup problem. Each outcome is handed to the activity audit
@@ -41,7 +41,7 @@ public final class IssueServiceTokenService implements IssueServiceTokenUseCase 
 
     @Override
     public IssueServiceTokenResult issue(IssueServiceTokenCommand command) {
-        if (!grants.allows(command.caller(), command.scope())) {
+        if (!grants.allows(command.callingService(), command.scope())) {
             securityAuditStore.record(auditEvent(command, SecurityEventReason.SCOPE_NOT_GRANTED, null));
             return new IssueServiceTokenResult.ScopeNotAllowed();
         }
@@ -53,7 +53,7 @@ public final class IssueServiceTokenService implements IssueServiceTokenUseCase 
         Instant now = clock.instant();
         ServiceTokenClaims claims = ServiceTokenClaims.builder()
                 .issuer(settings.issuer())
-                .caller(command.caller())
+                .issuedTo(command.callingService())
                 .audience(settings.audience())
                 .scope(command.scope())
                 .businessReference(command.scope().businessReferenceRequired() ? command.businessReference() : null)
@@ -72,7 +72,7 @@ public final class IssueServiceTokenService implements IssueServiceTokenUseCase 
     private SecurityAuditEvent auditEvent(IssueServiceTokenCommand command, SecurityEventReason reason, UUID tokenId) {
         return SecurityAuditEvent.builder()
                 .reason(reason)
-                .serviceId(command.caller())
+                .serviceId(command.callingService())
                 .scope(command.scope())
                 .tokenId(tokenId)
                 .occurredAt(clock.instant())

@@ -70,7 +70,7 @@ Turn 2 (done):
 - `rest.common.ServiceClientAssertionVerifier` — key looked up by the service the assertion names (`iss` = `sub`),
   header `kid` must be that key's; same header/claim/lifetime checks as `BffAssertionVerifier`.
   `ServiceClientAssertionFilter` gates only `POST /internal/v1/service-tokens` (the JWKS `GET` is open) and leaves
-  `VerifiedServiceCaller` on the request.
+  `VerifiedServiceClient` on the request (named `VerifiedServiceCaller` until 2026-11-04, see below).
 - `valkey.UsedAssertionKeys` (interface) with `BffAssertionKeys` and `ServiceClientAssertionKeys`
   (`service-client-assertion:used:v1:<sha256(jti)>`) sharing the package-private `AssertionIdDigest`;
   `ValkeyAssertionReplayStore` takes the interface, one instance per kind of assertion.
@@ -109,6 +109,18 @@ Turn 4 (done):
 - Tests: `SecurityAuditEventTest` (shape rule), `IssueServiceTokenServiceTest` (an event per branch),
   `SecurityAuditEventPersistenceAdapterIT` (service-token rows on V6), `ServiceTokenConfigurationTest` (audit wiring),
   `ApplicationBootIT` (issued and refused decisions land in `SECURITY_AUDIT_EVENT` with the token's `jti`).
+
+## Renamed 2026-11-04 (names say the role, rule N09)
+
+Behavior unchanged; token claims (`sub`), request JSON and the `auth.service-token.callers` setting are unchanged.
+
+- `IssueServiceTokenCommand.caller` and `ServiceScopeGrants.allows(caller, …)` → `callingService`.
+- `ServiceTokenClaims.caller` → `issuedTo` (rendered as `sub`).
+- `VerifiedServiceCaller(caller)` → `VerifiedServiceClient(serviceId)`, under
+  `ServiceClientAssertionFilter.CALLING_SERVICE_ATTRIBUTE` (a type ending in `Service` must be an application
+  service, so the type is not called `VerifiedCallingService`).
+- `ServiceClientAssertionVerifier`: `VerifiedClientAssertion.clientService`, `clientKeys` / `clientKey`.
+- `mvn -o verify`: 336 unit tests, 37 ITs.
 
 ## Not in this slice
 

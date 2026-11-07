@@ -5,7 +5,7 @@ import com.vpbank.dcp.auth.application.port.in.IssueServiceTokenUseCase;
 import com.vpbank.dcp.auth.application.result.IssueServiceTokenResult;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ServiceClientAssertionFilter;
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.VerifiedServiceCaller;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.VerifiedServiceClient;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.IssueServiceTokenRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.response.ServiceTokenResponse;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.ServiceTokenRestMapper;
@@ -36,9 +36,10 @@ public class ServiceTokenController {
     @PostMapping(path = ServiceClientAssertionFilter.ISSUE_PATH, consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiEnvelope<ServiceTokenResponse>> issue(
-            @RequestAttribute(ServiceClientAssertionFilter.CALLER_ATTRIBUTE) VerifiedServiceCaller caller,
+            @RequestAttribute(ServiceClientAssertionFilter.CALLING_SERVICE_ATTRIBUTE)
+            VerifiedServiceClient callingService,
             @Valid @RequestBody IssueServiceTokenRequest body) {
-        IssueServiceTokenCommand command = serviceTokenRestMapper.toCommand(caller, body);
+        IssueServiceTokenCommand command = serviceTokenRestMapper.toCommand(callingService, body);
         IssueServiceTokenResult result = issueServiceTokenUseCase.issue(command);
         return serviceTokenRestMapper.toResponse(result);
     }

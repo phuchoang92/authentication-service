@@ -55,12 +55,12 @@ public class ServiceTokenConfiguration {
     @Bean
     ServiceScopeGrants serviceScopeGrants(ServiceTokenProperties properties) {
         Map<ServiceId, Set<ServiceScope>> grants = new HashMap<>();
-        for (Map.Entry<String, ServiceTokenProperties.Caller> caller : properties.callers().entrySet()) {
-            ServiceId serviceId = serviceId(caller.getKey());
+        for (Map.Entry<String, ServiceTokenProperties.Caller> callerSetting : properties.callers().entrySet()) {
+            ServiceId serviceId = serviceId(callerSetting.getKey());
             Set<ServiceScope> scopes = new HashSet<>();
-            for (String code : caller.getValue().scopes()) {
+            for (String code : callerSetting.getValue().scopes()) {
                 ServiceScope scope = ServiceScope.fromCode(code).orElseThrow(() -> new IllegalStateException(
-                        CALLERS_SETTING + "." + caller.getKey() + ".scopes names an unknown scope"));
+                        CALLERS_SETTING + "." + callerSetting.getKey() + ".scopes names an unknown scope"));
                 scopes.add(scope);
             }
             grants.put(serviceId, scopes);
@@ -93,19 +93,19 @@ public class ServiceTokenConfiguration {
         return ServiceTokenPublicKeys.of(List.of(signingKey(properties)));
     }
 
-    /** Each caller's key is pinned; its key ID must be in the JWK because the assertion header has to name it. */
+    /** Each calling service's key is pinned; its key ID must be in the JWK because the assertion header has to name it. */
     @Bean
     ServiceClientAssertionVerifier serviceClientAssertionVerifier(ServiceTokenProperties properties, Clock clock) {
-        Map<ServiceId, ECKey> callerKeys = new HashMap<>();
-        for (Map.Entry<String, ServiceTokenProperties.Caller> caller : properties.callers().entrySet()) {
-            String setting = CALLERS_SETTING + "." + caller.getKey() + ".public-jwk";
-            ECKey callerKey = publicKey(setting, caller.getValue().publicJwk());
-            if (callerKey.getKeyID() == null) {
+        Map<ServiceId, ECKey> clientKeys = new HashMap<>();
+        for (Map.Entry<String, ServiceTokenProperties.Caller> callerSetting : properties.callers().entrySet()) {
+            String setting = CALLERS_SETTING + "." + callerSetting.getKey() + ".public-jwk";
+            ECKey clientKey = publicKey(setting, callerSetting.getValue().publicJwk());
+            if (clientKey.getKeyID() == null) {
                 throw new IllegalStateException(setting + " has no kid");
             }
-            callerKeys.put(serviceId(caller.getKey()), callerKey);
+            clientKeys.put(serviceId(callerSetting.getKey()), clientKey);
         }
-        return new ServiceClientAssertionVerifier(callerKeys, clock);
+        return new ServiceClientAssertionVerifier(clientKeys, clock);
     }
 
     /** Used client assertion IDs get their own replay store, told apart from the BFF's by its key factory. */

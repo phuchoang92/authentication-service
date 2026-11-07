@@ -23,7 +23,7 @@ import com.vpbank.dcp.auth.domain.model.ServiceId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ServiceClientAssertionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ServiceTokenPublicKeys;
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.VerifiedServiceCaller;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.VerifiedServiceClient;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.ServiceTokenRestMapper;
 import com.vpbank.dcp.auth.infrastructure.config.RestConfiguration;
 import java.time.Instant;
@@ -46,7 +46,8 @@ import org.springframework.test.web.servlet.ResultActions;
 @Import({RestConfiguration.class, ServiceTokenControllerTest.Beans.class})
 class ServiceTokenControllerTest {
     private static final ECKey SIGNING_KEY = generate();
-    private static final VerifiedServiceCaller ONBOARDING = new VerifiedServiceCaller(new ServiceId("onboarding-service"));
+    private static final VerifiedServiceClient ONBOARDING =
+            new VerifiedServiceClient(new ServiceId("onboarding-service"));
     private static final Instant EXPIRES = Instant.parse("2026-11-03T10:15:00Z");
 
     @TestConfiguration
@@ -120,7 +121,7 @@ class ServiceTokenControllerTest {
 
     private ResultActions issue(String body) throws Exception {
         return mvc.perform(post(ServiceClientAssertionFilter.ISSUE_PATH)
-                .requestAttr(ServiceClientAssertionFilter.CALLER_ATTRIBUTE, ONBOARDING)
+                .requestAttr(ServiceClientAssertionFilter.CALLING_SERVICE_ATTRIBUTE, ONBOARDING)
                 .contentType(MediaType.APPLICATION_JSON).content(body));
     }
 

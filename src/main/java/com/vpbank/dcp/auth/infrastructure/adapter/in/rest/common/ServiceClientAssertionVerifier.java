@@ -16,9 +16,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import lombok.NonNull;
 
 /**
  * The client assertion an internal service presents to get a service token (slice 12), after RFC 7523: a
@@ -38,28 +38,25 @@ public final class ServiceClientAssertionVerifier {
     /** An assertion ID longer than this is not one a service issued. */
     private static final int MAX_ASSERTION_ID_LENGTH = 128;
 
-    private final Map<ServiceId, ECKey> callerKeys;
+    private final Map<ServiceId, ECKey> clientKeys;
     private final Clock clock;
 
-    /** {@code callerKeys}: each service's pinned public P-256 key, carrying the key ID its headers will name. */
-    public ServiceClientAssertionVerifier(Map<ServiceId, ECKey> callerKeys, Clock clock) {
-        this.callerKeys = Map.copyOf(Objects.requireNonNull(callerKeys, "callerKeys"));
-        this.clock = Objects.requireNonNull(clock, "clock");
-        for (Map.Entry<ServiceId, ECKey> callerKey : this.callerKeys.entrySet()) {
-            ECKey key = callerKey.getValue();
+    /** {@code clientKeys}: each service's pinned public P-256 key, carrying the key ID its headers will name. */
+    public ServiceClientAssertionVerifier(@NonNull Map<ServiceId, ECKey> clientKeys, @NonNull Clock clock) {
+        this.clientKeys = Map.copyOf(clientKeys);
+        this.clock = clock;
+        for (Map.Entry<ServiceId, ECKey> clientKey : this.clientKeys.entrySet()) {
+            ECKey key = clientKey.getValue();
             if (key.isPrivate() || !Curve.P_256.equals(key.getCurve()) || key.getKeyID() == null) {
-                throw new IllegalArgumentException("The key of " + callerKey.getKey() + " must be a public P-256 key with a key ID");
+                throw new IllegalArgumentException("The key of " + clientKey.getKey() + " must be a public P-256 key with a key ID");
             }
         }
     }
 
     /** A genuine, current assertion: which service made it, and the ID and deadline the replay check needs. */
-    public record VerifiedClientAssertion(ServiceId caller, String assertionId, Instant expiresAt) {
-        public VerifiedClientAssertion {
-            Objects.requireNonNull(caller, "caller");
-            Objects.requireNonNull(assertionId, "assertionId");
-            Objects.requireNonNull(expiresAt, "expiresAt");
-        }
+    public record VerifiedClientAssertion(@NonNull ServiceId clientService,
+                                          @NonNull String assertionId,
+                                          @NonNull Instant expiresAt) {
     }
 
     public Optional<VerifiedClientAssertion> verify(String compactAssertion) {
@@ -73,12 +70,12 @@ public final class ServiceClientAssertionVerifier {
                 return Optional.empty();
             }
 
-            ServiceId caller = new ServiceId(claims.getSubject());
-            ECKey callerKey = callerKeys.get(caller);
-            if (callerKey == null || !hasThePinnedHeader(assertionJws.getHeader(), callerKey)) {
+            ServiceId clientService = new ServiceId(claims.getSubject());
+            ECKey clientKey = clientKeys.get(clientService);
+            if (clientKey == null || !hasThePinnedHeader(assertionJws.getHeader(), clientKey)) {
                 return Optional.empty();
             }
-            if (!assertionJws.verify(new ECDSAVerifier(callerKey.toECPublicKey()))) {
+            if (!assertionJws.verify(new ECDSAVerifier(clientKey.toECPublicKey()))) {
                 return Optional.empty();
             }
 
@@ -89,15 +86,15 @@ public final class ServiceClientAssertionVerifier {
                 return Optional.empty();
             }
             Instant expiresAt = claims.getExpirationTime().toInstant();
-            return Optional.of(new VerifiedClientAssertion(caller, claims.getJWTID(), expiresAt));
+            return Optional.of(new VerifiedClientAssertion(clientService, claims.getJWTID(), expiresAt));
         } catch (ParseException | JOSEException | IllegalArgumentException | ClassCastException | NullPointerException invalid) {
             // A claim present with a null or wrongly typed value lands here too.
             return Optional.empty();
         }
     }
 
-    /** ES256 under the caller's key ID, the assertion type, and no key material or critical extension in the header. */
-    private static boolean hasThePinnedHeader(JWSHeader header, ECKey callerKey) {
+    /** ES256 under the client service's key ID, the assertion type, and no key material or critical extension in the header. */
+    private static boolean hasThePinnedHeader(JWSHeader header, ECKey clientKey) {
         boolean carriesAnotherKey = header.getJWK() != null
                 || header.getJWKURL() != null
                 || header.getX509CertURL() != null
@@ -105,7 +102,7 @@ public final class ServiceClientAssertionVerifier {
         boolean hasCriticalExtension = header.getCriticalParams() != null && !header.getCriticalParams().isEmpty();
         return JWSAlgorithm.ES256.equals(header.getAlgorithm())
                 && ASSERTION_TYPE.equals(header.getType())
-                && callerKey.getKeyID().equals(header.getKeyID())
+                && clientKey.getKeyID().equals(header.getKeyID())
                 && !carriesAnotherKey
                 && !hasCriticalExtension;
     }

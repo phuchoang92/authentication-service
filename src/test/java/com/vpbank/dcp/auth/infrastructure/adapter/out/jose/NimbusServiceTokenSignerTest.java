@@ -33,7 +33,7 @@ class NimbusServiceTokenSignerTest {
 
         String compact = signer.sign(ServiceTokenClaims.builder()
                 .issuer("authentication-service")
-                .caller(new ServiceId("onboarding-service"))
+                .issuedTo(new ServiceId("onboarding-service"))
                 .audience("mobile-bff")
                 .scope(ServiceScope.ONBOARDING)
                 .businessReference(new BusinessReference("onb-1"))

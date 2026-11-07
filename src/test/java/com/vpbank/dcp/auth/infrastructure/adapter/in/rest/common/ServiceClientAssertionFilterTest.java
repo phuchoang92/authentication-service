@@ -43,8 +43,9 @@ class ServiceClientAssertionFilterTest {
         filter.doFilter(request, new MockHttpServletResponse(), chain);
 
         assertThat(chain.getRequest()).isNotNull();
-        VerifiedServiceCaller caller = (VerifiedServiceCaller) request.getAttribute(ServiceClientAssertionFilter.CALLER_ATTRIBUTE);
-        assertThat(caller.caller()).isEqualTo(new ServiceId("onboarding-service"));
+        VerifiedServiceClient callingService =
+                (VerifiedServiceClient) request.getAttribute(ServiceClientAssertionFilter.CALLING_SERVICE_ATTRIBUTE);
+        assertThat(callingService.serviceId()).isEqualTo(new ServiceId("onboarding-service"));
         assertThat(usedAssertionIds).hasSize(1);
         // The ID is remembered at least until the assertion's expiry plus the accepted skew.
         assertThat(usedAssertionIds.values().iterator().next()).isAfter(Instant.now().plusSeconds(30));
@@ -86,7 +87,7 @@ class ServiceClientAssertionFilterTest {
             MockFilterChain chain = new MockFilterChain();
             filter.doFilter(open, new MockHttpServletResponse(), chain);
             assertThat(chain.getRequest()).as(open.getRequestURI()).isNotNull();
-            assertThat(open.getAttribute(ServiceClientAssertionFilter.CALLER_ATTRIBUTE)).isNull();
+            assertThat(open.getAttribute(ServiceClientAssertionFilter.CALLING_SERVICE_ATTRIBUTE)).isNull();
         }
     }
 
@@ -94,7 +95,7 @@ class ServiceClientAssertionFilterTest {
         MockHttpServletResponse response = run(request);
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(response.getContentAsString()).contains("\"code\":\"REQUEST_REJECTED\"");
-        assertThat(request.getAttribute(ServiceClientAssertionFilter.CALLER_ATTRIBUTE)).isNull();
+        assertThat(request.getAttribute(ServiceClientAssertionFilter.CALLING_SERVICE_ATTRIBUTE)).isNull();
     }
 
     private MockHttpServletResponse run(MockHttpServletRequest request) throws Exception {

@@ -35,7 +35,7 @@ class ServiceTokenClaimsTest {
     void claimsHoldTogether() {
         ServiceTokenClaims claims = onboardingClaims().build();
 
-        assertThat(claims.caller()).isEqualTo(ONBOARDING_SERVICE);
+        assertThat(claims.issuedTo()).isEqualTo(ONBOARDING_SERVICE);
         assertThat(claims.scope()).isEqualTo(ServiceScope.ONBOARDING);
         assertThat(claims.businessReference()).isEqualTo(new BusinessReference("onb-1"));
     }
@@ -69,7 +69,7 @@ class ServiceTokenClaimsTest {
     private static ServiceTokenClaims.ServiceTokenClaimsBuilder onboardingClaims() {
         return ServiceTokenClaims.builder()
                 .issuer("authentication-service")
-                .caller(ONBOARDING_SERVICE)
+                .issuedTo(ONBOARDING_SERVICE)
                 .audience("mobile-bff")
                 .scope(ServiceScope.ONBOARDING)
                 .businessReference(new BusinessReference("onb-1"))

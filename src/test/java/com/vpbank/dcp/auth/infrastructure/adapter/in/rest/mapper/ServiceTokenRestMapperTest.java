@@ -11,7 +11,7 @@ import com.vpbank.dcp.auth.domain.model.ServiceId;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.VerifiedServiceCaller;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.VerifiedServiceClient;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.IssueServiceTokenRequest;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.response.ServiceTokenResponse;
 import com.vpbank.dcp.auth.infrastructure.config.RestConfiguration;
@@ -21,7 +21,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 class ServiceTokenRestMapperTest {
-    private static final VerifiedServiceCaller ONBOARDING = new VerifiedServiceCaller(new ServiceId("onboarding-service"));
+    private static final VerifiedServiceClient ONBOARDING =
+            new VerifiedServiceClient(new ServiceId("onboarding-service"));
     private static final Instant EXPIRES = Instant.parse("2026-11-03T10:15:00Z");
     private final ServiceTokenRestMapper mapper = new ServiceTokenRestMapper(new ErrorMessages(RestConfiguration.errorMessageSource()));
 
