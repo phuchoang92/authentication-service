@@ -1,5 +1,6 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.application.command.IssueSessionCommand;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -52,7 +53,7 @@ class SessionServiceTest {
 
     @Test
     void issuesAFullSessionSealedToTheAppKey() {
-        IssuedSession issued = service.issueActive(service.newSessionId(), ALICE, PHONE, Channel.MOBILE, KENC);
+        IssuedSession issued = service.issueActive(aliceOnHerPhone(service.newSessionId()));
 
         assertThat(issued.tokenEnvelope()).isEqualTo("jwe.compact");
         assertThat(issued.session().status()).isEqualTo(SessionStatus.ACTIVE);
@@ -64,7 +65,7 @@ class SessionServiceTest {
 
     @Test
     void issuesARestrictedSessionWithTheFixedDeadline() {
-        IssuedSession issued = service.issueRestricted(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
+        IssuedSession issued = service.issueRestricted(aliceOnHerPhone(SESSION));
 
         assertThat(issued.session().status()).isEqualTo(SessionStatus.NEED_TRUSTED_DEVICE);
         assertThat(issued.session().idleExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
@@ -74,14 +75,25 @@ class SessionServiceTest {
 
     @Test
     void consumeWinsOnceAndEndRemovesWithoutAnAnswer() {
-        service.issueRestricted(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
+        service.issueRestricted(aliceOnHerPhone(SESSION));
 
         assertThat(service.consume(LOOKUP)).isTrue();
         assertThat(service.consume(LOOKUP)).isFalse(); // the second claimant loses
         assertThat(service.findLive(TOKEN)).isEmpty();
 
-        service.issueActive(SESSION, ALICE, PHONE, Channel.MOBILE, KENC);
+        service.issueActive(aliceOnHerPhone(SESSION));
         service.end(LOOKUP);
         assertThat(sessions.rows).isEmpty();
+    }
+
+    /** Alice's session on her phone, sealed to the app's key. */
+    private static IssueSessionCommand aliceOnHerPhone(SessionId sessionId) {
+        return IssueSessionCommand.builder()
+                .sessionId(sessionId)
+                .customerId(ALICE)
+                .channel(Channel.MOBILE)
+                .deviceId(PHONE)
+                .tokenEncryptionKey(KENC)
+                .build();
     }
 }

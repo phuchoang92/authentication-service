@@ -1,26 +1,30 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.application.command.IssueSessionCommand;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
-import com.vpbank.dcp.auth.domain.enums.Channel;
-import com.vpbank.dcp.auth.domain.model.*;
+import com.vpbank.dcp.auth.domain.model.DevicePolicy;
+import com.vpbank.dcp.auth.domain.model.NewSession;
+import com.vpbank.dcp.auth.domain.model.OpaqueToken;
+import com.vpbank.dcp.auth.domain.model.Session;
+import com.vpbank.dcp.auth.domain.model.SessionId;
+import com.vpbank.dcp.auth.domain.model.SessionPolicy;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
  * The common session actions (ARCHITECTURE §6.1, slice 8): find a live, restricted or full session by
  * its token, issue a new session with its sealed token envelope, extend with a bounded compare-and-set
- * retry, consume or end a session. Flows ({@link LoginService}, {@link DeviceEnrollmentService},
- * {@link DeviceApprovalService}) and the use cases ({@link SessionManagementService}) compose these; this
+ * retry, consume or end a session. Flows ({@link LoginService}, {@link VerifyEnrollmentService},
+ * {@link ConfirmEnrollmentService}, {@link ClaimEnrollmentService}) and the use cases ({@link SessionManagementService}) compose these; this
  * class implements no use case itself and never calls a flow. Each action is one store read or write.
  */
 @RequiredArgsConstructor
@@ -45,12 +49,7 @@ public final class SessionService {
     /**
      * A new session with the compact JWE the app decrypts to learn its token.
      */
-    public record IssuedSession(Session session, String tokenEnvelope) {
-        public IssuedSession {
-            Objects.requireNonNull(session, "session");
-            Objects.requireNonNull(tokenEnvelope, "tokenEnvelope");
-        }
-
+    public record IssuedSession(@NonNull Session session, @NonNull String tokenEnvelope) {
         @Override
         public String toString() {
             return "IssuedSession[sessionId=" + session.id() + ", redacted]";
@@ -100,31 +99,27 @@ public final class SessionService {
     /**
      * A full ACTIVE session: start, token, envelope sealed to the app's key, stored.
      */
-    public IssuedSession issueActive(SessionId sessionId, CustomerId customerId, DeviceId deviceId, Channel channel,
-                                     String tokenEncryptionKey) {
-        Session session = Session.start(
-                sessionId,
-                customerId,
-                deviceId,
-                channel,
-                clock.instant(),
-                sessionPolicy);
-        return store(session, tokenEncryptionKey);
+    public IssuedSession issueActive(@NonNull IssueSessionCommand command) {
+        Session session = Session.start(newSession(command), sessionPolicy);
+        return store(session, command.tokenEncryptionKey());
     }
 
     /**
      * A restricted NEED_TRUSTED_DEVICE session with the device policy's fixed deadline (DD 20 §3).
      */
-    public IssuedSession issueRestricted(SessionId sessionId, CustomerId customerId, DeviceId deviceId, Channel channel,
-                                         String tokenEncryptionKey) {
-        Session session = Session.startRestricted(
-                sessionId,
-                customerId,
-                deviceId,
-                channel,
-                clock.instant(),
-                devicePolicy);
-        return store(session, tokenEncryptionKey);
+    public IssuedSession issueRestricted(@NonNull IssueSessionCommand command) {
+        Session session = Session.startRestricted(newSession(command), devicePolicy);
+        return store(session, command.tokenEncryptionKey());
+    }
+
+    private NewSession newSession(IssueSessionCommand command) {
+        return NewSession.builder()
+                .id(command.sessionId())
+                .customerId(command.customerId())
+                .channel(command.channel())
+                .deviceId(command.deviceId())
+                .startedAt(clock.instant())
+                .build();
     }
 
     private IssuedSession store(Session session, String tokenEncryptionKey) {
@@ -137,10 +132,10 @@ public final class SessionService {
     // ---- writes ----
 
     /**
-     * Compare-and-set on the stored version; empty when another writer moved the session first.
+     * Compare-and-set on what was read; empty when another writer moved the session first.
      */
     public Optional<Session> saveIfCurrent(StoredSession storedSession, Session changedSession) {
-        return sessionStore.saveIfCurrent(storedSession.lookup(), changedSession);
+        return sessionStore.saveIfCurrent(storedSession, changedSession);
     }
 
     /**
@@ -151,21 +146,20 @@ public final class SessionService {
         for (int attempt = 0; attempt < EXTEND_ATTEMPTS; attempt++) {
             Instant now = clock.instant();
 
-            Optional<Session> currentFullSession = sessionStore.findByLookup(sessionLookup)
-                    .map(StoredSession::session)
-                    .filter(session -> session.isFull(now));
+            Optional<StoredSession> currentFullSession = sessionStore.findByLookup(sessionLookup)
+                    .filter(stored -> stored.session().isFull(now));
             if (currentFullSession.isEmpty()) {
                 return new ExtendOutcome.Gone();
             }
 
             Session extendedSession;
             try {
-                extendedSession = currentFullSession.get().extend(admittedAt, now, sessionPolicy);
+                extendedSession = currentFullSession.get().session().extend(admittedAt, now, sessionPolicy);
             } catch (IllegalArgumentException outsideSkew) {
                 return new ExtendOutcome.Rejected();
             }
 
-            Optional<Session> savedSession = sessionStore.saveIfCurrent(sessionLookup, extendedSession);
+            Optional<Session> savedSession = sessionStore.saveIfCurrent(currentFullSession.get(), extendedSession);
             if (savedSession.isPresent()) {
                 return new ExtendOutcome.Extended(savedSession.get());
             }

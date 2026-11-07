@@ -19,7 +19,7 @@ class SessionKeysTest {
         // Frozen so a Java refactor cannot change stored keys (RK09/RK12); the BFF builds the same key.
         SessionLookup lookup = keys.lookupOf(TOKEN);
         assertThat(lookup).isEqualTo(new SessionLookup(Channel.MOBILE, SESSION));
-        assertThat(keys.forLookup(lookup)).isEqualTo("session:v1:MOBILE:00000000-0000-4000-8000-000000000001");
+        assertThat(keys.forLookup(lookup)).isEqualTo("session:v3:MOBILE:00000000-0000-4000-8000-000000000001");
     }
 
     @Test
@@ -27,6 +27,6 @@ class SessionKeysTest {
         OpaqueToken otherSecret = OpaqueToken.of(Channel.MOBILE, SESSION, "B".repeat(43));
         assertThat(keys.lookupOf(otherSecret)).isEqualTo(keys.lookupOf(TOKEN));
         OpaqueToken web = OpaqueToken.of(Channel.WEB, SESSION, "A".repeat(43));
-        assertThat(keys.forLookup(keys.lookupOf(web))).isEqualTo("session:v1:WEB:00000000-0000-4000-8000-000000000001");
+        assertThat(keys.forLookup(keys.lookupOf(web))).isEqualTo("session:v3:WEB:00000000-0000-4000-8000-000000000001");
     }
 }

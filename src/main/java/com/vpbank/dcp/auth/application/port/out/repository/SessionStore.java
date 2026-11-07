@@ -9,14 +9,14 @@ import com.vpbank.dcp.auth.domain.model.Session;
 import java.util.Optional;
 
 /**
- * Online session authority (Valkey). Sessions are addressed by the token's keyed lookup, never
- * by session ID. Every method throws {@link RepositoryUnavailableException} when the store cannot
+ * Online session authority (Valkey). Sessions are addressed by the token's lookup (channel and session ID). A
+ * save succeeds only while the store still holds exactly the record the caller read. Every method throws {@link RepositoryUnavailableException} when the store cannot
  * answer; an uncertain write is reported as unavailable, never as success.
  */
 public interface SessionStore {
 
     /**
-     * Stores a new ACTIVE session under the token's lookup; TTL = idle deadline.
+     * Stores a new session under the token's lookup, with the digest of the token's secret; TTL = idle deadline.
      */
     void create(Session session, OpaqueToken token);
 
@@ -25,10 +25,10 @@ public interface SessionStore {
     Optional<StoredSession> findByLookup(SessionLookup lookup);
 
     /**
-     * Saves a changed session only if the stored {@code sessionVersion} still equals
-     * {@code changed.sessionVersion()}; returns the stored session (version + 1). Empty = stale.
+     * Saves the changed session only if the store still holds {@code current}; returns the stored session
+     * (version + 1). Empty = stale or gone.
      */
-    Optional<Session> saveIfCurrent(SessionLookup lookup, Session changed);
+    Optional<Session> saveIfCurrent(StoredSession current, Session changed);
 
     /**
      * Removes the session with one atomic delete. True when this call removed it, false when it was

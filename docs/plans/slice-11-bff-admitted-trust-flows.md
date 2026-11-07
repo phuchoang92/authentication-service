@@ -72,6 +72,118 @@
    `fromTransaction`). Tests that used them now use approval rows or `fromTransaction`. README route table updated.
    `mvn -o verify`: 288 unit tests, 37 ITs.
 
+6. **Done 2026-11-04.** One generic cache transaction store replaces the enrollment-only one (turn 2):
+   port `TransactionStore` over `CacheTransaction<P>` (kind, id, deadline, version, payload) with the same four
+   CAS operations; `ValkeyTransactionAdapter` keeps one HASH per transaction at `tx:v1:<purpose>:<id>`
+   (`TransactionKeys`), the payload as one strict JSON field (`TransactionHashCodec`). The enrollment is now a
+   pure payload (no deadline or version of its own) at `tx:v1:enrollment:<channel>:<customerId>:<deviceId>`.
+   `EnrollmentTransactions` is the enrollment's typed view of the store (`wasStartedBy`, `makeRoomFor`, `open`,
+   `findOpenAt`, `update`, `claim`, `remove`), used by the three enrollment steps and by `request`'s in-flight
+   check. `DeviceEnrollmentService` was split into one service per use case, `InitEnrollmentService`,
+   `VerifyEnrollmentService` and `ConfirmEnrollmentService` (one bean each), written to the 2026-11-04
+   method-shape rules (public step lists, `KeyExchangeStart` + `DeviceKey` input records, role names such as
+   `newDeviceSession`); `FaceCheckRequests` builds the FACE create and check requests in one place so verify
+   and confirm bind the same purpose, factor and context digest. Behavior unchanged; the flow test is
+   `DeviceEnrollmentFlowTest`. `DeviceApprovalService` was split the same way into `RequestApprovalService`,
+   `ApprovalStatusService`, `ClaimEnrollmentService` (the new device) and `ListPendingDevicesService`,
+   `ApproveEnrollmentService`, `AuthorizeEnrollmentService` (the primary device), one bean each, over
+   `ApprovalRequests` (the approval flow's view of `EnrollmentRepository`) and `ApprovalCheckRequests` (the FACE +
+   OTP create and check requests); `TrustedDeviceService.primaryDeviceIdOf(session)` holds the "full session on
+   the trusted primary" check the three primary routes share. Behavior unchanged (approve now takes the MFA
+   request's customer and channel from the request row, which `findApproval` already matched to the session); the
+   flow test is `DeviceApprovalFlowTest`.
+   Records left by turn 2's key layout are not read; restricted sessions live 10 minutes.
+   `mvn -o verify`: 336 unit tests, 37 ITs.
+7. **Done 2026-11-04.** Three-parameter rule on `TrustedDeviceService`: `registerPendingDevice` (7 parameters),
+   `confirmTrust` (6) and `routeAfterPassword` (5) take `RegisterPendingDeviceCommand`, `ConfirmTrustCommand`
+   (with the proved `DeviceKey`) and `RouteAfterPasswordCommand` (plus the `DevicePossession` callback, which a
+   command may not carry). Behavior unchanged. `mvn -o verify`: 336 unit tests, 37 ITs.
+8. **Done 2026-11-04.** Three-parameter rule on the domain factories. `DeviceInstallation` (customer, channel,
+   device) names what a row, a request and a session are about (`AdmittedSession.installation()`,
+   `DeviceEnrollment.requester()`). `TrustedDevice.pending(NewDevice, Duration)` and
+   `trustedByEnrollment(NewDevice, DevicePolicy)` replace two 8-parameter factories (`NewDevice`: ID, installation,
+   presented `DeviceKey`, creation time); `DeviceEnrollment.requestApproval(ApprovalRequestStart)` replaces 6
+   parameters. `TrustedDevice.trustedNow` is removed: no production code used it and its "trusted at the first
+   login" no longer holds since slice 13; tests build such rows with `DomainFixtures.trustedDevice`, which may
+   leave the key empty like a row from before slice 13. Behavior unchanged. `mvn -o verify`: 336 unit tests, 37 ITs.
+9. **Done 2026-11-04.** Three-parameter rule on sessions. `SessionService.issueActive` / `issueRestricted` (5
+   parameters each) take `IssueSessionCommand`; `LoginService` builds it once and the device routing only picks
+   which of the two to call. `Session.start(NewSession, SessionPolicy)` and `startRestricted(NewSession,
+   DevicePolicy)` replace two 6-parameter factories; `NewSession` keeps `deviceId` nullable (WEB has no
+   installation), so it is not a `DeviceInstallation`. `SessionService` lost its wildcard import. Tests start
+   sessions from `DomainFixtures.mobileSession`. Behavior unchanged. `mvn -o verify`: 336 unit tests, 37 ITs.
+10. **Done 2026-11-04.** A cache transaction is opened from its kind: `TransactionKind.open(id, expiresAt,
+    payload)` replaces the 4-parameter `CacheTransaction.open(kind, id, expiresAt, payload)`; the kind already
+    carries the payload type. Behavior unchanged. `mvn -o verify`: 336 unit tests, 37 ITs.
+11. **Done 2026-11-04.** Method shape in `TrustedDeviceService`: the "live, trusted now, the customer's primary"
+    checks that `routeAfterPassword` and `primaryDeviceId` each repeated are one private step,
+    `findTrustedPrimary(DeviceInstallation, now)`; the 3-parameter `primaryDeviceId` is gone (`primaryDeviceIdOf`
+    was its only caller). `confirmTrustByApproval` names its lookup `findApprovedRow`. Every method is 22 lines or
+    fewer. `RouteAfterPasswordCommand` now refuses a MOBILE login without an installation, as `LoginCommand`
+    already did. Behavior unchanged. `mvn -o verify`: 336 unit tests, 37 ITs.
+12. **Done 2026-11-04.** R02 on `domain`: the 96 `Objects.requireNonNull(x, "x")` checks became Lombok `@NonNull`
+    on the record component or parameter (30 files; 5 compact constructors that held only null checks are gone);
+    a record header now shows at a glance which components may be null. One check stays: `trustByApproval`
+    checks the row's own `publicKey`, which is a field, not a parameter. Where a state check came first
+    (`approveBy`, `authorize`, `markMfaRequired`, `markUserCreated`) the null check now runs first, so a call in
+    the wrong state with a null argument is an NPE rather than a state exception (both are programming errors).
+    Lombok's NPE message is "x is marked non-null but is null". `mvn -o verify`: 336 unit tests, 37 ITs.
+13. **Done 2026-11-04.** R02 on `application` (commands, results, port models, the services' own records): 111
+    checks became `@NonNull`, nested records inside sealed interfaces and services included (`LoginResult`,
+    `SessionService.IssuedSession`, `DeviceProofVerifier.Outcome.Proven`, ...); `InitialPasswordGenerator` takes
+    `@NonNull SecureRandom`. Kept: the three conditional checks in `SecurityAuditEvent` (a field required only for
+    some reasons), whose messages `SecurityAuditEventTest` asserts. No check moved behind or before another
+    statement. `mvn -o verify`: 336 unit tests, 37 ITs.
+14. **Done 2026-11-05.** R02 on `infrastructure`: 35 checks became `@NonNull`, including the expression form in bean
+    constructors (`this.x = Objects.requireNonNull(x, "x")`, `Map.copyOf(Objects.requireNonNull(...))`,
+    `Objects.requireNonNull(baseUrl).replaceAll(...)` in `KeycloakAdminAdapter`), which now read as plain
+    assignments with the check on the parameter. `TransactionHashCodec`, whose constructor only assigned its one
+    field, is `@RequiredArgsConstructor`; the others keep explicit constructors because they validate or derive a
+    field. Kept: `DeviceIdProtection`'s two checks whose message names the key purpose. Across `src/main` six
+    `requireNonNull` remain, each with a reason (a field rather than a parameter, a condition, or a message that
+    says more than the name). `mvn -o verify`: 336 unit tests, 37 ITs.
+15. **Done 2026-11-06.** Valkey connection pool. Measured first: every compare-and-set (`WATCH … EXEC`, used by the
+    session, CAPTCHA and transaction adapters) ran on a dedicated connection that Spring opened and closed per
+    write, because no pool was configured: 4 new TCP connections and 40 commands per enrollment flow, p50 about
+    11 ms on a local Valkey 9.1.2, and connection failures after about 10 000 writes in a row. `commons-pool2` plus
+    `spring.data.redis.lettuce.pool` (`AUTH_VALKEY_POOL_SIZE` 32, `AUTH_VALKEY_POOL_MAX_WAIT` PT0.25S) keeps those
+    connections open: 0 new connections, 28 commands, p50 about 5 ms. One pooled connection is the shared one for
+    ordinary commands. A write that gets no connection within the wait is `RepositoryUnavailableException`, so the
+    step answers "unavailable"; reads still answer. No adapter code changed. Tests: `ValkeyTransactionAdapterIT`
+    (writes reuse their connection; an exhausted pool is unavailable), `ApplicationBootIT` (the application's own
+    settings give the pool). Not done: one-command compare-and-set (`SET … IFEQ`, `DELIFEQ`; about 1.6 ms in the
+    same measurement), which changes the record format and contract 16. `mvn -o verify`: 336 unit tests, 40 ITs.
+16. **Done 2026-11-06.** One-command compare-and-set for the transaction store. A transaction is one JSON STRING
+    at `tx:v2:<purpose>:<id>` (`{"schemaVersion":2,"purpose",…,"expiresAtMs",…,"version",…,"payload":{…}}`,
+    `TransactionJsonCodec`, deterministic text) instead of a HASH at `tx:v1:`. `ValkeyRecordCommands` sends
+    `SET … NX PXAT` (create), `SET … IFEQ <text read> PXAT` (save) and `DELIFEQ <text read>` (remove): Valkey
+    compares the stored text itself, so there is no `WATCH`/`MULTI`, no Lua and no connection of its own; each
+    call is one round trip. `version` still moves on with every save, so no earlier text can come back. The port
+    is `saveIfCurrent(current, changedPayload)`: a write succeeds only while the store holds exactly the
+    transaction the caller read (stricter than "same version"). `CacheTransaction.next` replaces
+    `withPayload`/`withVersion`. Measured with the application's adapter on a local Valkey 9.1.2: 7 commands and
+    about 1.8 ms per enrollment flow (11 ms before the pool, 5 ms with it). Needs Valkey 9.0 or later (`DELIFEQ`;
+    Redis has `DELEX` instead, which Valkey 9.1.2 rejects); a server without the commands makes every write
+    "unavailable". Lettuce 7.5.2 has no `DELIFEQ`, so the commands go out by name with their reply type.
+    Contract 16 does not describe this record, so it was not changed; records at `tx:v1:` are not read (they
+    lived 10 minutes). The session and CAPTCHA adapters still use `WATCH … EXEC` on the pool: their HASH layout
+    is fixed by contract 16. Tests: `TransactionJsonCodecTest` (fixed text, read-back encodes to the stored text,
+    the real enrollment payload, strict decoding), `ValkeyTransactionAdapterIT` (16 racing writers, one winner;
+    same version with another payload is refused; a write needs no pooled connection), pool tests moved to
+    `ValkeySessionAdapterIT`. `mvn -o verify`: 338 unit tests, 43 ITs.
+17. **Done 2026-11-07 (DD 22 approved the same day).** The session record is one JSON STRING at
+    `session:v3:<channel>:<sessionId>` (`SessionJsonCodec`: fixed property order, `secretDigest` = SHA-256 of the
+    token's secret, the secret itself no longer stored) and `ValkeySessionAdapter` is one command per call on
+    `ValkeyRecordCommands`: `SET … NX PXAT` at login, `GET`, `SET … IFEQ <text read> PXAT` on extend, `DEL` on
+    logout; no `WATCH`, no pooled connection. `SessionStore.saveIfCurrent(StoredSession current, Session changed)`;
+    `StoredSession` carries the digest. Measured before the change: extend 7 commands / 1.25 ms → 2 commands /
+    0.46 ms (local Valkey 9.1.2, pooled). The BFF (`mobile-bff` `AuthSessionAdmission`) reads the same record;
+    the shared vectors `docs/DD/target/reference/session-record-vectors.json` run in both test suites (the BFF's
+    `mvn verify` cannot run here: its `authentication-protocol` dependency is missing from the workspace; its two
+    classes were compiled and unit-tested standalone, 15 tests). Sessions at `session:v1:` are not read: every
+    session logs in again at deploy (cut over, DD 22 §8). The pool now serves only `ValkeyCaptchaStore`, whose IT
+    took over the two pool tests. `mvn -o verify`: 339 unit tests, 46 ITs.
+
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
 and a database guard for one open approval request per device.
 

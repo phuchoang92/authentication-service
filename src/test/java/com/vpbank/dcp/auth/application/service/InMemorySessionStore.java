@@ -11,10 +11,12 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Test double with the store's contract: a session is addressed by the token's channel and session ID,
- * compare-and-set on sessionVersion, version + 1 on every saved change. The secret is not checked here.
+ * Test double with the store's contract: a session is addressed by the token's channel and session ID; a save
+ * succeeds only while the store still holds the session the caller read; version + 1 on every saved change. The
+ * secret is not checked here, and every record carries the same stand-in digest.
  */
 final class InMemorySessionStore implements SessionStore {
+    static final String ANY_DIGEST = "d".repeat(43);
     final Map<SessionLookup, Session> rows = new HashMap<>();
     boolean unavailable;
     /** When > 0, each saveIfCurrent is preceded by a concurrent bump of the stored version. */
@@ -38,21 +40,21 @@ final class InMemorySessionStore implements SessionStore {
     @Override
     public Optional<StoredSession> findByLookup(SessionLookup lookup) {
         check();
-        return Optional.ofNullable(rows.get(lookup)).map(session -> new StoredSession(lookup, session));
+        return Optional.ofNullable(rows.get(lookup)).map(session -> new StoredSession(lookup, session, ANY_DIGEST));
     }
 
     @Override
-    public Optional<Session> saveIfCurrent(SessionLookup lookup, Session changed) {
+    public Optional<Session> saveIfCurrent(StoredSession current, Session changed) {
         check();
+        SessionLookup lookup = current.lookup();
         if (concurrentBumps > 0 && rows.containsKey(lookup)) {
             concurrentBumps--;
             rows.put(lookup, rows.get(lookup).withSessionVersion(rows.get(lookup).sessionVersion() + 1));
         }
-        Session stored = rows.get(lookup);
-        if (stored == null || stored.sessionVersion() != changed.sessionVersion()) {
+        if (!current.session().equals(rows.get(lookup))) {
             return Optional.empty();
         }
-        Session saved = changed.withSessionVersion(changed.sessionVersion() + 1);
+        Session saved = changed.withSessionVersion(current.session().sessionVersion() + 1);
         rows.put(lookup, saved);
         return Optional.of(saved);
     }
