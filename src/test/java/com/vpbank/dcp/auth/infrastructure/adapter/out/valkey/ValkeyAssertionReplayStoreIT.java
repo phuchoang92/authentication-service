@@ -22,7 +22,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class ValkeyAssertionReplayStoreIT {
     @Container
-    static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:9.1").withExposedPorts(6379);
+    static final GenericContainer<?> VALKEY = new GenericContainer<>(ValkeyImage.underTest()).withExposedPorts(6379);
 
     private static LettuceConnectionFactory connections;
     private static StringRedisTemplate redis;

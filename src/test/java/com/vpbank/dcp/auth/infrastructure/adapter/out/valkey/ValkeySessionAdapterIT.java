@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers
 class ValkeySessionAdapterIT {
     @Container
-    static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:9.1").withExposedPorts(6379);
+    static final GenericContainer<?> VALKEY = new GenericContainer<>(ValkeyImage.underTest()).withExposedPorts(6379);
     private static final OpaqueToken TOKEN = new OpaqueToken("s1:auth:session:MOBILE:00000000-0000-4000-8000-000000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     private static final SessionPolicy POLICY = new SessionPolicy(Duration.ofMinutes(15), Duration.ofMinutes(20),
             Duration.ofSeconds(30));

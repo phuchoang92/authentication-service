@@ -194,7 +194,13 @@
     `captcha:v1:` are not read (they lived 5 minutes). Measured on the real store, local Valkey 9.1.2, 2000
     operations, two runs (p50): save 1 command / 0.22 ms, consume 2 commands (`GET`, `DELIFEQ`) / 0.46 ms; before,
     consume was `WATCH → HGETALL → MULTI → DEL → EXEC` on a pooled connection. `mvn -o verify`: 340 unit tests,
-    43 ITs. Renamed the same day to
+    43 ITs.
+19. **Done 2026-11-08.** The company's ElastiCache offers Valkey 8.x by default (AWS: `SET … IFEQ` since 8.1,
+    `DELIFEQ` only since 9.0). `ValkeyRecordCommands.deleteIfUnchanged` no longer uses `DELIFEQ`: it claims the key
+    with `SET key "" IFEQ <text read> PX 1000` (the atomic step; one winner) and then `DEL`s it. An empty
+    tombstone decodes as "no record" and expires by itself if the `DEL` never comes. Removal costs two commands
+    instead of one (confirm/claim of the enrollment, CAPTCHA consume); nothing else changes. Minimum server is now
+    Valkey 8.1; the ITs take `-Dvalkey.image=…` and were run on `valkey/valkey:9.1` and `valkey/valkey:8.1-alpine`. Renamed the same day to
     `CaptchaChallengeStore`: it no longer talks to Valkey itself, only to the transaction store.
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,

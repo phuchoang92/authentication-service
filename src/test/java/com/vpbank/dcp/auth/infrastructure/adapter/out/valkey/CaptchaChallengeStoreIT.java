@@ -33,7 +33,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class CaptchaChallengeStoreIT {
     @Container
-    static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:9.1").withExposedPorts(6379);
+    static final GenericContainer<?> VALKEY = new GenericContainer<>(ValkeyImage.underTest()).withExposedPorts(6379);
     private static final CustomerId ALICE = new CustomerId("90359");
     private static final Instant NOW = Instant.parse("2026-10-25T10:00:00Z");
 

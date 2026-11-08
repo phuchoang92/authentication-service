@@ -199,7 +199,7 @@ three devices). No real Customer, Keycloak, Notification or MFA service was call
 | `AUTH_NOTIFICATION_ORIGIN`, `AUTH_NOTIFICATION_SERVICE_TOKEN` | Notification SMS; path `auth.registration.notification.sms-path` |
 
 | `AUTH_LOGIN_ENABLED` | `true` to expose login/logout/extend (default `false`) |
-| `AUTH_VALKEY_URL` | `redis://host:port` of the session store (default `redis://localhost:6379`). The server must be **Valkey 9.0 or later**: every write is one command (`SET … NX|IFEQ … PXAT`, `DELIFEQ`, `DEL`), which Redis does not have |
+| `AUTH_VALKEY_URL` | `redis://host:port` of the session store (default `redis://localhost:6379`). The server must be **Valkey 8.1 or later** (ElastiCache 8.1/8.2/9.x): every write is a single conditional command (`SET … NX|IFEQ … PXAT`, `DEL`), which Redis does not have |
 | `AUTH_KC_LOGIN_CLIENT_ID`, `AUTH_KC_LOGIN_CLIENT_SECRET` | Direct Grant client (`authentication-service`) |
 | `AUTH_CAPTCHA_ANSWER_HMAC_KEY_BASE64` | ≥32-byte HMAC key for the stored CAPTCHA answers |
 | `AUTH_DEVICE_LOOKUP_HMAC_KEY_D1_BASE64`, `AUTH_DEVICE_ENCRYPTION_KEY_E1_BASE64` | ≥32-byte keys protecting the stored device ID (`d1` lookup HMAC, `e1` AES-256-GCM) |

@@ -32,7 +32,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class ValkeyTransactionAdapterIT {
     @Container
-    static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:9.1").withExposedPorts(6379);
+    static final GenericContainer<?> VALKEY = new GenericContainer<>(ValkeyImage.underTest()).withExposedPorts(6379);
 
     /** A payload of one flow; another flow's payload has a different shape. */
     record Enrollment(String owner, int attempts, String secret) {
@@ -148,6 +148,7 @@ class ValkeyTransactionAdapterIT {
         assertThat(store.deleteIfCurrent(started)).isFalse(); // stale
         assertThat(store.find(ENROLLMENT, TABLET)).isPresent();
         assertThat(store.deleteIfCurrent(counted)).isTrue();
+        assertThat(redis.hasKey(TABLET_KEY)).isFalse(); // the claim's tombstone is removed right away
         assertThat(store.deleteIfCurrent(counted)).isFalse(); // the second claimant loses
         assertThat(store.find(ENROLLMENT, TABLET)).isEmpty();
         assertThat(store.saveIfCurrent(counted, new Enrollment("s-1", 2, "k1"))).isEmpty(); // gone
@@ -162,6 +163,12 @@ class ValkeyTransactionAdapterIT {
         String stored = redis.opsForValue().get(TABLET_KEY);
         redis.opsForValue().set(TABLET_KEY, stored.replace("\"secret\":\"k1\"", "\"secret\":\"k1\",\"x\":1"));
 
+        assertThat(store.find(ENROLLMENT, TABLET)).isEmpty();
+        assertThat(store.saveIfCurrent(started, new Enrollment("s-1", 1, "k1"))).isEmpty();
+        assertThat(store.deleteIfCurrent(started)).isFalse();
+
+        // A tombstone a crashed remover left behind is no transaction either, and nothing is written over it.
+        redis.opsForValue().set(TABLET_KEY, "");
         assertThat(store.find(ENROLLMENT, TABLET)).isEmpty();
         assertThat(store.saveIfCurrent(started, new Enrollment("s-1", 1, "k1"))).isEmpty();
         assertThat(store.deleteIfCurrent(started)).isFalse();

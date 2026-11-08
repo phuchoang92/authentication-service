@@ -2,7 +2,6 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.valkey;
 
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.output.CommandOutput;
-import io.lettuce.core.output.IntegerOutput;
 import io.lettuce.core.output.StatusOutput;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
@@ -22,15 +21,22 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  * <ul>
  *     <li>create: {@code SET key text NX PXAT deadline}</li>
  *     <li>replace: {@code SET key text IFEQ expectedText PXAT deadline} (Valkey 8.1)</li>
- *     <li>delete: {@code DELIFEQ key expectedText} (Valkey 9.0)</li>
+ *     <li>delete: {@code SET key "" IFEQ expectedText PX 1000} claims the key by turning it into an empty
+ *     tombstone, then {@code DEL key} removes it. The claim is the atomic step, so of two racing callers exactly
+ *     one wins; a tombstone decodes as "no record" and expires by itself if the DEL never comes. Two commands
+ *     instead of Valkey 9.0's {@code DELIFEQ}, because ElastiCache offers 8.1/8.2 by default.</li>
  * </ul>
  *
- * <p>Spring Data Redis has no method for {@code DELIFEQ}, so the commands go to Lettuce by name with the reply
- * type each one gives. Spring's {@code DataAccessException} leaves this class; the adapter translates it.
+ * <p>Everything a Valkey 8.1 server has. Spring Data Redis has no typed call for {@code IFEQ}, so the commands go
+ * to Lettuce by name. Spring's {@code DataAccessException} leaves this class; the adapter translates it.
  */
 @RequiredArgsConstructor
 public final class ValkeyRecordCommands {
     private static final String OK = "OK";
+    /** The claimed key's text; nothing decodes from it. */
+    private static final String TOMBSTONE = "";
+    /** How long a claimed key may linger when the DEL after the claim never comes. */
+    private static final String TOMBSTONE_MILLIS = "1000";
 
     @NonNull
     private final StringRedisTemplate stringRedisTemplate;
@@ -63,8 +69,13 @@ public final class ValkeyRecordCommands {
 
     /** Removes the key only while it still holds exactly the expected text. Of two racing callers one gets true. */
     public boolean deleteIfUnchanged(@NonNull ValkeyRecord expected) {
-        Object reply = send("DELIFEQ", new IntegerOutput<>(ByteArrayCodec.INSTANCE), expected.key(), expected.text());
-        return Long.valueOf(1).equals(reply);
+        Object claimed = send("SET", statusReply(),
+                expected.key(), TOMBSTONE, "IFEQ", expected.text(), "PX", TOMBSTONE_MILLIS);
+        if (!OK.equals(claimed)) {
+            return false;
+        }
+        delete(expected.key());
+        return true;
     }
 
     private Object send(String command, CommandOutput<byte[], byte[], ?> reply, String... arguments) {

@@ -1,5 +1,6 @@
 package com.vpbank.dcp.auth.boot;
 
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyImage;
 import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
 import com.vpbank.dcp.auth.domain.model.DomainFixtures;
 import com.nimbusds.jose.EncryptionMethod;
@@ -116,7 +117,7 @@ class ApplicationBootIT {
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
     @Container
-    static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:9.1").withExposedPorts(6379);
+    static final GenericContainer<?> VALKEY = new GenericContainer<>(ValkeyImage.underTest()).withExposedPorts(6379);
     private static final String ISSUER = "https://kc.test/realms/test";
     /** The service-token signing key (slice 12), generated for this run. */
     private static final ECKey SERVICE_TOKEN_KEY = serviceTokenKey();
