@@ -19,6 +19,13 @@ public interface TransactionStore {
     /** Stores a new transaction (version 0). False when that kind and ID already exist: nothing is overwritten. */
     <P> boolean createIfAbsent(CacheTransaction<P> fresh);
 
+    /**
+     * Stores a new transaction (version 0) in place of whatever that kind and ID held. For a record that has one
+     * owner and no steps, such as a customer's current CAPTCHA challenge; a flow with steps uses
+     * {@link #createIfAbsent} and {@link #saveIfCurrent}.
+     */
+    <P> void overwrite(CacheTransaction<P> fresh);
+
     <P> Optional<CacheTransaction<P>> find(TransactionKind<P> kind, String id);
 
     /**

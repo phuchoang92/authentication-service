@@ -25,6 +25,17 @@ open ("Auth lockout vs Keycloak brute-force", "CAPTCHA after three failures — 
 
 ## CAPTCHA (needs your confirmation, see questions)
 
+> **Changed 2026-11-08.** No CAPTCHA route any more: the login itself answers `428 CAPTCHA_REQUIRED` with the
+> challenge in the headers `X-Captcha-Image` (PNG, base64) and `X-Captcha-Expires-At`, and the next login sends
+> `captchaAnswer` in its body; there is no `captchaId`. A customer has one open challenge, keyed by customer
+> (`tx:v2:captcha:<customerId>`, a one-shot record in the shared transaction store, `TransactionStore.overwrite`
+> replaces the earlier one); a wrong answer consumes it and the `428` carries a fresh one. The image is up to
+> ~10 KB as base64, hence `server.max-http-response-header-size: 16KB`. `CaptchaService` lost its use-case
+> port and user-name lookup (`issueFor(CustomerId)`, `solved(CustomerId, CaptchaAnswer)`); `CaptchaId`,
+> `CaptchaSolution`, `CaptchaController`, `CaptchaRequest`, `CaptchaResponse`, `CaptchaRestMapper` are gone.
+> The text below is the original slice-3 design.
+
+
 - `POST /api/ns/v1/login/captcha {userName}` → `200 {captchaId, image}` (PNG, base64, 5 distorted
   characters, generated with the JDK's `java.awt` in headless mode — no external provider yet).
   The same shape is returned for an unknown user so the endpoint cannot probe accounts.

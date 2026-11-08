@@ -1,8 +1,5 @@
 package com.vpbank.dcp.auth.boot;
 
-import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyImage;
-import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
-import com.vpbank.dcp.auth.domain.model.DomainFixtures;
 import com.nimbusds.jose.EncryptionMethod;
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWEAlgorithm;
@@ -12,41 +9,44 @@ import com.nimbusds.jose.Payload;
 import com.nimbusds.jose.crypto.ECDHDecrypter;
 import com.nimbusds.jose.crypto.ECDHEncrypter;
 import com.nimbusds.jose.crypto.ECDSAVerifier;
-import com.nimbusds.jose.jwk.JWKSet;
-import com.nimbusds.jwt.SignedJWT;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
+import com.nimbusds.jwt.SignedJWT;
 import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator;
-import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
+import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.CustomerDirectoryPort;
-import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort.CreateUserResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort;
+import com.vpbank.dcp.auth.application.port.out.gateway.IdentityProviderPort.CreateUserResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CheckResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.CreateResult;
-import com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort;
 import com.vpbank.dcp.auth.application.port.out.gateway.SmsSenderPort;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerProfile;
+import com.vpbank.dcp.auth.domain.enums.Channel;
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
+import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.UserName;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestBffAssertions;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestServiceClientAssertions;
-import com.vpbank.dcp.auth.domain.enums.Channel;
-import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
-import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.DeviceHeaders;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.PrimaryTrustedDeviceJpaRepository;
-import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
-import java.time.Instant;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.SecurityAuditEventEntity;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.PrimaryTrustedDeviceJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.SecurityAuditEventJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyImage;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -182,13 +182,10 @@ class ApplicationBootIT {
         }
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Verified(ISSUER, "sub-1"));
         mvc.perform(login(loginBody, "dev-1", "ANDROID"))
-                .andExpect(status().isPreconditionRequired()).andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"));
-        MvcResult captcha = mvc.perform(post("/api/ns/v1/login/captcha").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"userName\":\"alice\"}"))
-                .andExpect(status().isOk()).andReturn();
-        String captchaId = field(captcha.getResponse().getContentAsString(), "captchaId");
-        String solved = loginBody.replace("\"userName\":\"alice\",",
-                "\"userName\":\"alice\",\"captcha\":{\"captchaId\":\"" + captchaId + "\",\"answer\":\"ab3cd\"},");
+                .andExpect(status().isPreconditionRequired()).andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"))
+                .andExpect(header().string("X-Captcha-Image", Base64.getEncoder().encodeToString(new byte[]{1})))
+                .andExpect(header().exists("X-Captcha-Expires-At"));
+        String solved = loginBody.replace("\"userName\":\"alice\",", "\"userName\":\"alice\",\"captchaAnswer\":\"ab3cd\",");
         MvcResult login = mvc.perform(login(solved, "dev-1", "ANDROID"))
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("X-Correlation-Id"))
@@ -233,10 +230,8 @@ class ApplicationBootIT {
             mvc.perform(login(loginBody, "dev-1", "ANDROID"))
                     .andExpect(status().isUnauthorized());
         }
-        MvcResult again = mvc.perform(post("/api/ns/v1/login/captcha").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"userName\":\"alice\"}")).andReturn();
-        String third = loginBody.replace("\"userName\":\"alice\",", "\"userName\":\"alice\",\"captcha\":{\"captchaId\":\""
-                + field(again.getResponse().getContentAsString(), "captchaId") + "\",\"answer\":\"AB3CD\"},");
+        mvc.perform(login(loginBody, "dev-1", "ANDROID")).andExpect(status().isPreconditionRequired()); // hands out the challenge
+        String third = loginBody.replace("\"userName\":\"alice\",", "\"userName\":\"alice\",\"captchaAnswer\":\"AB3CD\",");
         mvc.perform(login(third, "dev-1", "ANDROID"))
                 .andExpect(status().isLocked()).andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
         assertThat(identities.findById("90359").orElseThrow().getPasswordFailedCount()).isEqualTo(3);

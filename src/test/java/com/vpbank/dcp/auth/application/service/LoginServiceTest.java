@@ -1,22 +1,10 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
-import com.vpbank.dcp.auth.domain.model.DomainFixtures;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
-
-import com.vpbank.dcp.auth.application.command.CaptchaSolution;
 import com.vpbank.dcp.auth.application.command.LoginCommand;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
-import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
+import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
+import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.OpaqueTokenGenerator;
 import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
@@ -30,11 +18,12 @@ import com.vpbank.dcp.auth.domain.enums.SecurityEventReason;
 import com.vpbank.dcp.auth.domain.enums.SecurityEventType;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
-import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.domain.model.DeviceProof;
+import com.vpbank.dcp.auth.domain.model.DomainFixtures;
 import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.Password;
@@ -52,6 +41,16 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
 
 class LoginServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-25T10:00:00Z");
@@ -68,6 +67,10 @@ class LoginServiceTest {
     private final InMemoryCustomerAuthenticationRepository identities = new InMemoryCustomerAuthenticationRepository();
     private final CredentialVerifierPort credentials = mock(CredentialVerifierPort.class);
     private final InMemoryCaptchaStore captchas = new InMemoryCaptchaStore();
+    /** Every challenge the login hands out reads AB3CD. */
+    private final CaptchaService captchaService = new CaptchaService(
+            () -> new CaptchaGenerator.GeneratedCaptcha(new CaptchaAnswer("AB3CD"), new byte[]{1}),
+            captchas, Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
     private final InMemorySessionStore sessions = new InMemorySessionStore();
     private final TokenEnvelopeSealer sealer = mock(TokenEnvelopeSealer.class);
     private final OpaqueTokenGenerator tokens = mock(OpaqueTokenGenerator.class);
@@ -81,10 +84,10 @@ class LoginServiceTest {
             new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random, clock);
     private final FakeDeviceProofVerifier proofs = new FakeDeviceProofVerifier();
     private final InMemoryLoginProofReplayStore usedProofs = new InMemoryLoginProofReplayStore();
-    private final LoginService service = new LoginService(identities, credentials, captchas, sessionService,
+    private final LoginService service = new LoginService(identities, credentials, captchaService, sessionService,
             trustedDeviceService, proofs, usedProofs, audit, LockoutPolicy.standard(), false, clock);
     /** The same service with the device proof enforced (slice 13). */
-    private final LoginService enforcing = new LoginService(identities, credentials, captchas, sessionService,
+    private final LoginService enforcing = new LoginService(identities, credentials, captchaService, sessionService,
             trustedDeviceService, proofs, usedProofs, audit, LockoutPolicy.standard(), true, clock);
 
     @BeforeEach
@@ -214,25 +217,32 @@ class LoginServiceTest {
     }
 
     @Test
-    void afterTwoFailuresALoginNeedsACaptchaBoundToThisCustomerAndAMissingOrWrongOneCostsNoAttempt() {
+    void afterTwoFailuresALoginAnswersWithAChallengeAndAMissingOrWrongAnswerCostsNoAttempt() {
         identities.rows.put(CUSTOMER, identity("ACTIVE", new PasswordLockout(PasswordStatus.ACTIVE, 2, null)));
 
-        assertThat(service.login(command())).isInstanceOf(LoginResult.CaptchaRequired.class);
+        // No answer: the login is not tried; the customer gets a challenge to answer next time.
+        LoginResult first = service.login(command());
+        assertThat(first).isInstanceOf(LoginResult.CaptchaRequired.class);
+        assertThat(((LoginResult.CaptchaRequired) first).challenge().expiresAt()).isEqualTo(NOW.plusSeconds(300));
+        assertThat(captchas.challenges).containsOnlyKeys(CUSTOMER);
         verify(credentials, never()).verify(any(), any());
         assertThat(identities.only().lockout().failedCount()).isEqualTo(2);
 
-        CaptchaId id = CaptchaId.random();
-        captchas.save(id, CUSTOMER, new CaptchaAnswer("AB3CD"), NOW.plusSeconds(300));
-        assertThat(service.login(withCaptcha(command(), id, "WRONG"))).isInstanceOf(LoginResult.CaptchaRequired.class);
-        assertThat(captchas.challenges).isEmpty(); // a wrong answer burns the challenge
+        // A wrong answer burns the challenge and gets a fresh one, still without trying the password.
+        assertThat(service.login(withCaptchaAnswer(command(), "WRONG")))
+                .isInstanceOf(LoginResult.CaptchaRequired.class);
+        assertThat(captchas.challenges).containsOnlyKeys(CUSTOMER);
         verify(credentials, never()).verify(any(), any());
 
-        CaptchaId other = CaptchaId.random();
-        captchas.save(other, new CustomerId("77777"), new CaptchaAnswer("AB3CD"), NOW.plusSeconds(300));
-        assertThat(service.login(withCaptcha(command(), other, "AB3CD"))).isInstanceOf(LoginResult.CaptchaRequired.class);
+        // Another customer's answer is no answer here: Bob's challenge stays, Alice gets hers.
+        captchas.issue(new CustomerId("77777"), new CaptchaAnswer("XY7ZW"), NOW.plusSeconds(300));
+        assertThat(service.login(withCaptchaAnswer(command(), "XY7ZW")))
+                .isInstanceOf(LoginResult.CaptchaRequired.class);
+        assertThat(captchas.challenges).containsKey(new CustomerId("77777"));
 
-        assertThat(service.login(withCaptcha(command()))).isInstanceOf(LoginResult.Authenticated.class);
+        assertThat(service.login(withCaptchaAnswer(command(), "ab3cd"))).isInstanceOf(LoginResult.Authenticated.class);
         assertThat(identities.only().lockout()).isEqualTo(PasswordLockout.none());
+        assertThat(captchas.challenges).doesNotContainKey(CUSTOMER); // consumed by the login that passed
     }
 
     @Test
@@ -377,7 +387,7 @@ class LoginServiceTest {
     void theAuditIsRecordedOnlyAfterThePasswordWasWiped() {
         Password password = new Password("Secret123".toCharArray());
         List<Boolean> passwordWipedWhenRecorded = new ArrayList<>();
-        LoginService observed = new LoginService(identities, credentials, captchas, sessionService, trustedDeviceService,
+        LoginService observed = new LoginService(identities, credentials, captchaService, sessionService, trustedDeviceService,
                 proofs, usedProofs,
                 event -> passwordWipedWhenRecorded.add(new String(password.value()).chars().allMatch(c -> c == '\0')),
                 LockoutPolicy.standard(), false, clock);
@@ -466,17 +476,16 @@ class LoginServiceTest {
                 .deviceProof(deviceProof).build();
     }
 
-    /** A freshly issued, correct CAPTCHA for the customer. */
+    /** The login as if the customer had received a challenge and answers it correctly. */
     private LoginCommand withCaptcha(LoginCommand command) {
-        CaptchaId id = CaptchaId.random();
-        captchas.save(id, CUSTOMER, new CaptchaAnswer("AB3CD"), NOW.plusSeconds(300));
-        return withCaptcha(command, id, "ab3cd");
+        captchas.issue(CUSTOMER, new CaptchaAnswer("AB3CD"), NOW.plusSeconds(300));
+        return withCaptchaAnswer(command, "ab3cd");
     }
 
-    private static LoginCommand withCaptcha(LoginCommand command, CaptchaId id, String answer) {
+    private static LoginCommand withCaptchaAnswer(LoginCommand command, String answer) {
         return LoginCommand.builder().userName(command.userName()).password(command.password()).channel(command.channel())
                 .deviceId(command.deviceId()).platform(command.platform()).tokenEncryptionKey(command.tokenEncryptionKey())
-                .captcha(new CaptchaSolution(id, new CaptchaAnswer(answer))).build();
+                .captchaAnswer(new CaptchaAnswer(answer)).build();
     }
 
     private static LoginCommand command(Password password) {

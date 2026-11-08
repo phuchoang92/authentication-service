@@ -1,19 +1,19 @@
 package com.vpbank.dcp.auth.application.port.out.repository;
 
+import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
-import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import java.time.Instant;
 
 /**
- * Short-lived CAPTCHA challenges (Valkey). A challenge is bound to the customer it was issued for
- * and is consumed on first use, right or wrong. Throws {@link RepositoryUnavailableException}.
+ * Short-lived CAPTCHA challenges (Valkey), one open challenge per customer: issuing a new one replaces the
+ * previous, and a challenge is consumed on first use, right or wrong. Throws {@link RepositoryUnavailableException}.
  */
 public interface CaptchaStore {
 
-    /** {@code customerId} may be null for an unknown user name: the challenge then matches nobody. */
-    void save(CaptchaId id, CustomerId customerId, CaptchaAnswer answer, Instant expiresAt);
+    /** The customer's open challenge from now on; whatever challenge it had before is gone. */
+    void issue(CustomerId customerId, CaptchaAnswer answer, Instant expiresAt);
 
-    /** Removes the challenge and tells whether it was live, bound to this customer and answered correctly. */
-    boolean consume(CaptchaId id, CustomerId customerId, CaptchaAnswer answer);
+    /** Removes the customer's challenge and tells whether it was live and answered correctly. */
+    boolean consume(CustomerId customerId, CaptchaAnswer answer);
 }

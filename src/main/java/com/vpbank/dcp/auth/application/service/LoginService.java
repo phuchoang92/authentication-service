@@ -1,6 +1,5 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.command.CaptchaSolution;
 import com.vpbank.dcp.auth.application.command.IssueSessionCommand;
 import com.vpbank.dcp.auth.application.command.LoginCommand;
 import com.vpbank.dcp.auth.application.command.RouteAfterPasswordCommand;
@@ -13,7 +12,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.DeviceProofVerifier;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
 import com.vpbank.dcp.auth.application.port.out.model.DeviceProofBindings;
 import com.vpbank.dcp.auth.application.port.out.model.SecurityAuditEvent;
-import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
+import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
 import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.LoginProofReplayStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
@@ -42,7 +41,8 @@ import lombok.RequiredArgsConstructor;
  * <p>Unknown user and wrong password give the same answer, so nothing reveals whether an account
  * exists; Keycloak is still asked for an unknown user so the two paths take similar time. A locked
  * identity answers from the database alone; once the CAPTCHA threshold is reached, an attempt
- * without a valid CAPTCHA bound to this customer is refused before Keycloak and does not count as
+ * without the right answer to the customer's challenge is refused before Keycloak, with the next
+ * challenge in the answer, and does not count as
  * a password failure (slice 3 policy). Every failure on an existing identity
  * is counted with compare-and-set; only a success resets the count. The password is wiped as soon
  * as the provider has answered. After the password, {@link TrustedDeviceService} decides whether this
@@ -62,7 +62,7 @@ import lombok.RequiredArgsConstructor;
 public final class LoginService implements LoginUseCase {
     @NonNull private final CustomerAuthenticationRepository customerAuthenticationRepository;
     @NonNull private final CredentialVerifierPort credentialVerifierPort;
-    @NonNull private final CaptchaStore captchaStore;
+    @NonNull private final CaptchaService captchaService;
     @NonNull private final SessionService sessionService;
     @NonNull private final TrustedDeviceService trustedDeviceService;
     @NonNull private final DeviceProofVerifier deviceProofVerifier;
@@ -109,7 +109,9 @@ public final class LoginService implements LoginUseCase {
             }
             boolean captchaRequired = identity.lockout().captchaRequired(lockoutPolicy);
             if (captchaRequired && !captchaSolved(command, identity.customerId())) {
-                return new Decision(new LoginResult.CaptchaRequired(), SecurityEventReason.CAPTCHA_REQUIRED, identity, null);
+                LoginResult.CaptchaRequired challenged =
+                        new LoginResult.CaptchaRequired(captchaService.issueFor(identity.customerId()));
+                return new Decision(challenged, SecurityEventReason.CAPTCHA_REQUIRED, identity, null);
             }
         }
 
@@ -205,11 +207,10 @@ public final class LoginService implements LoginUseCase {
 
     /** A challenge is consumed on first use whether right or wrong, so a guess costs a new CAPTCHA. */
     private boolean captchaSolved(LoginCommand command, CustomerId customerId) {
-        CaptchaSolution captchaSolution = command.captcha();
-        if (captchaSolution == null) {
+        if (command.captchaAnswer() == null) {
             return false;
         }
-        return captchaStore.consume(captchaSolution.captchaId(), customerId, captchaSolution.answer());
+        return captchaService.solved(customerId, command.captchaAnswer());
     }
 
     /**

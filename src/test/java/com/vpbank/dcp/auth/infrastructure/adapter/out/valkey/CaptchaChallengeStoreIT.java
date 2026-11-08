@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
-import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import java.time.Clock;
 import java.time.Instant;
@@ -60,55 +59,56 @@ class CaptchaChallengeStoreIT {
     }
 
     @Test
-    void storesTheDigestNotTheAnswerWithTheExpiryAsTtlAndConsumesOnce() {
-        CaptchaId id = CaptchaId.random();
-        store.save(id, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+    void storesTheDigestNotTheAnswerUnderTheCustomerWithTheExpiryAsTtlAndConsumesOnce() {
+        store.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
 
-        String key = "tx:v2:captcha:" + id.value();
+        String key = "tx:v2:captcha:90359";
         assertThat(redis.type(key)).isEqualTo(DataType.STRING);
-        assertThat(redis.opsForValue().get(key)).contains("\"boundCustomerId\":\"90359\"")
+        assertThat(redis.opsForValue().get(key))
                 .contains(digests.of(new CaptchaAnswer("AB3CD"))).doesNotContain("AB3CD");
         assertThat(redis.getExpire(key, TimeUnit.SECONDS)).isBetween(290L, 300L);
 
-        assertThat(store.consume(id, ALICE, new CaptchaAnswer("ab3cd"))).isTrue();
+        assertThat(store.consume(ALICE, new CaptchaAnswer("ab3cd"))).isTrue();
         assertThat(redis.hasKey(key)).isFalse();
-        assertThat(store.consume(id, ALICE, new CaptchaAnswer("ab3cd"))).isFalse();
+        assertThat(store.consume(ALICE, new CaptchaAnswer("ab3cd"))).isFalse();
     }
 
     @Test
-    void wrongAnswerOtherCustomerNobodyOrExpiredIsFalseAndStillConsumes() {
-        CaptchaId wrong = CaptchaId.random();
-        store.save(wrong, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
-        assertThat(store.consume(wrong, ALICE, new CaptchaAnswer("AB3CE"))).isFalse();
-        assertThat(redis.hasKey("tx:v2:captcha:" + wrong.value())).isFalse();
+    void aNewChallengeReplacesTheCustomersEarlierOne() {
+        store.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+        store.issue(ALICE, new CaptchaAnswer("XY7ZW"), Instant.now().plusSeconds(300));
 
-        CaptchaId other = CaptchaId.random();
-        store.save(other, new CustomerId("77777"), new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
-        assertThat(store.consume(other, ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
+        assertThat(store.consume(ALICE, new CaptchaAnswer("AB3CD"))).isFalse(); // the earlier answer is gone
+        assertThat(redis.hasKey("tx:v2:captcha:90359")).isFalse(); // and the attempt consumed the new one
+    }
 
-        CaptchaId nobody = CaptchaId.random();
-        store.save(nobody, null, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
-        assertThat(redis.opsForValue().get("tx:v2:captcha:" + nobody.value())).contains("\"boundCustomerId\":null");
-        assertThat(store.consume(nobody, ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
+    @Test
+    void wrongAnswerOtherCustomerOrExpiredIsFalseAndStillConsumes() {
+        store.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+        assertThat(store.consume(ALICE, new CaptchaAnswer("AB3CE"))).isFalse();
+        assertThat(redis.hasKey("tx:v2:captcha:90359")).isFalse();
+
+        CustomerId bob = new CustomerId("77777");
+        store.issue(bob, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+        assertThat(store.consume(ALICE, new CaptchaAnswer("AB3CD"))).isFalse(); // Alice has no challenge
+        assertThat(store.consume(bob, new CaptchaAnswer("AB3CD"))).isTrue();
 
         // Still in the store (the server forgets it a little later), but past its deadline on the clock that decides.
-        CaptchaId expired = CaptchaId.random();
-        store.save(expired, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(2));
+        store.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(2));
         CaptchaChallengeStore later = storeAt(Clock.fixed(Instant.now().plusSeconds(60), ZoneOffset.UTC));
-        assertThat(later.consume(expired, ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
-        assertThat(redis.hasKey("tx:v2:captcha:" + expired.value())).isFalse(); // consumed all the same
+        assertThat(later.consume(ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
+        assertThat(redis.hasKey("tx:v2:captcha:90359")).isFalse(); // consumed all the same
     }
 
     @Test
     void ofManyCallersConsumingTheSameChallengeOnlyOneSucceeds() throws Exception {
-        CaptchaId id = CaptchaId.random();
-        store.save(id, ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
+        store.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
         int callers = 16;
         ExecutorService pool = Executors.newFixedThreadPool(callers);
         try {
             List<Callable<Boolean>> attempts = new ArrayList<>();
             for (int caller = 0; caller < callers; caller++) {
-                attempts.add(() -> store.consume(id, ALICE, new CaptchaAnswer("AB3CD")));
+                attempts.add(() -> store.consume(ALICE, new CaptchaAnswer("AB3CD")));
             }
             long winners = 0;
             for (Future<Boolean> consumed : pool.invokeAll(attempts)) {
@@ -130,9 +130,9 @@ class CaptchaChallengeStoreIT {
         try {
             ValkeyTransactionAdapter deadTransactions = transactionsOn(new StringRedisTemplate(deadConnections));
             CaptchaChallengeStore deadStore = new CaptchaChallengeStore(deadTransactions, digests, Clock.fixed(NOW, ZoneOffset.UTC));
-            assertThatThrownBy(() -> deadStore.save(CaptchaId.random(), ALICE, new CaptchaAnswer("AB3CD"),
-                    Instant.now().plusSeconds(300))).isInstanceOf(RepositoryUnavailableException.class);
-            assertThatThrownBy(() -> deadStore.consume(CaptchaId.random(), ALICE, new CaptchaAnswer("AB3CD")))
+            assertThatThrownBy(() -> deadStore.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300)))
+                    .isInstanceOf(RepositoryUnavailableException.class);
+            assertThatThrownBy(() -> deadStore.consume(ALICE, new CaptchaAnswer("AB3CD")))
                     .isInstanceOf(RepositoryUnavailableException.class);
         } finally {
             deadConnections.destroy();

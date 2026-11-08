@@ -31,8 +31,7 @@ without a customer session (onboarding), issued to an internal service that pres
 
 | Path | Caller | Result |
 |---|---|---|
-| `POST /api/ns/v1/login` | app via BFF, no session | `201 {tokenEnvelope, status, idleExpiresAt, absoluteExpiresAt}`; `401 INVALID_CREDENTIALS`; `403 ACCOUNT_NOT_READY`; `423 ACCOUNT_LOCKED`; `428 CAPTCHA_REQUIRED`; `503 LOGIN_UNAVAILABLE` |
-| `POST /api/ns/v1/login/captcha` | app via BFF, no session | `200 {captchaId, image (base64 PNG), expiresAt}` — same shape for unknown names |
+| `POST /api/ns/v1/login` | app via BFF, no session | `201 {tokenEnvelope, status, idleExpiresAt, absoluteExpiresAt}`; `401 INVALID_CREDENTIALS`; `403 ACCOUNT_NOT_READY`; `423 ACCOUNT_LOCKED`; `428 CAPTCHA_REQUIRED` with the challenge in the headers `X-Captcha-Image` (base64 PNG) and `X-Captcha-Expires-At`, answered by `captchaAnswer` in the next login; `503 LOGIN_UNAVAILABLE` |
 | `POST /api/v1/logout` | app, `Authorization: Bearer s1:auth:session:<channel>:<sessionId>:<secret>` (ACTIVE or restricted) | `204`; `401 SESSION_REQUIRED` |
 | `POST /api/v1/trusted-device/init` | BFF for the app (restricted session) | `200 {status:"KEY_EXCHANGE", enrollmentId, serverPublicJwk, challenge (JWE to the device key), expiresAt}`; `400 DEVICE_KEY_REQUIRED`; `409 STATE_CONFLICT` (ACTIVE session or init already done) |
 | `POST /api/v1/trusted-device/verify` | BFF for the app (restricted session) | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}`; `401 WRONG_CHALLENGE` + detail `attemptsLeft`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT`; `503` |
@@ -125,8 +124,12 @@ completes the request and writes the audit trail with the approving device as ac
 stays trusted. Auth stores only the token's SHA-256. Push notification to the primary is a follow-up.
 
 **Lockout (phase 2):** consecutive password failures on one identity escalate — after 2 the next
-login must carry a solved CAPTCHA (`captcha{captchaId, answer}` from `/login/captcha`, bound to the
-customer, single use, 5 min), at 3 the account is locked 15 min, at 4 for 24 h, at 5 permanently
+login is not tried: it answers `428 CAPTCHA_REQUIRED` with the customer's challenge in its headers
+(`X-Captcha-Image`, `X-Captcha-Expires-At`; decided 2026-11-08, no CAPTCHA route of its own), and the next
+login carries `captchaAnswer`. A customer has one open challenge at a time (Valkey `tx:v2:captcha:<customerId>`,
+5 min, HMAC of the answer only); any answer consumes it, and a wrong one gets a fresh challenge with the next
+`428`. The image is up to ~10 KB as base64, so `server.max-http-response-header-size` is 16 KB and a proxy in
+front of Auth must pass response headers of that size. At 3 the account is locked 15 min, at 4 for 24 h, at 5 permanently
 until `password-unlock`. Only a successful login resets the count; an expired lock does not. A locked
 account is answered from the database without calling Keycloak; an unknown user name is never counted.
 Settings: `auth.login.lockout.{captcha-after, temporary-locks, permanent-at, captcha-lifetime}`.

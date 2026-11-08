@@ -2,7 +2,7 @@ package com.vpbank.dcp.auth.infrastructure.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
+import com.vpbank.dcp.auth.application.service.CaptchaService;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
@@ -64,7 +64,7 @@ class LoginConfigurationTest {
     void onWithEverySettingWiresLoginSessionsAndTheFilter() {
         runner.withPropertyValues(ENABLED).run(context -> assertThat(context).hasNotFailed()
                 .hasSingleBean(LoginUseCase.class).hasSingleBean(SessionStore.class)
-                .hasSingleBean(IssueCaptchaUseCase.class).hasSingleBean(CaptchaStore.class)
+                .hasSingleBean(CaptchaService.class).hasSingleBean(CaptchaStore.class)
                 .hasSingleBean(TrustedDeviceRepository.class)
                 .hasSingleBean(com.vpbank.dcp.auth.application.port.in.InitEnrollmentUseCase.class)
                 .hasSingleBean(com.vpbank.dcp.auth.application.port.out.gateway.MfaTransactionPort.class)

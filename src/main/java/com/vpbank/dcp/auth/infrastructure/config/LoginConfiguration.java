@@ -2,7 +2,6 @@ package com.vpbank.dcp.auth.infrastructure.config;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
-import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.in.UnlockPasswordUseCase;
 import com.vpbank.dcp.auth.application.port.out.gateway.AuthorizationTokenGenerator;
@@ -102,7 +101,7 @@ public class LoginConfiguration {
     @Bean
     LoginUseCase loginUseCase(CustomerAuthenticationRepository customerAuthenticationRepository,
                               CredentialVerifierPort credentialVerifierPort,
-                              CaptchaStore captchaStore,
+                              CaptchaService captchaService,
                               SessionService sessionService,
                               TrustedDeviceService trustedDeviceService,
                               DeviceProofVerifier deviceProofVerifier,
@@ -114,7 +113,7 @@ public class LoginConfiguration {
         return new LoginService(
                 customerAuthenticationRepository,
                 credentialVerifierPort,
-                captchaStore,
+                captchaService,
                 sessionService,
                 trustedDeviceService,
                 deviceProofVerifier,
@@ -173,19 +172,13 @@ public class LoginConfiguration {
         return new TrustedDeviceService(trustedDeviceRepository, devicePolicy, TrustedDeviceId::random, clock);
     }
 
+    /** The login hands out and checks CAPTCHA challenges through this; there is no CAPTCHA route of its own. */
     @Bean
-    IssueCaptchaUseCase issueCaptchaUseCase(CustomerAuthenticationRepository customerAuthenticationRepository,
-                                            CaptchaGenerator captchaGenerator,
-                                            CaptchaStore captchaStore,
-                                            LoginProperties properties,
-                                            Clock clock) {
-        Duration captchaLifetime = properties.lockout().captchaLifetime();
-        return new CaptchaService(
-                customerAuthenticationRepository,
-                captchaGenerator,
-                captchaStore,
-                captchaLifetime,
-                clock);
+    CaptchaService captchaService(CaptchaGenerator captchaGenerator,
+                                  CaptchaStore captchaStore,
+                                  LoginProperties properties,
+                                  Clock clock) {
+        return new CaptchaService(captchaGenerator, captchaStore, properties.lockout().captchaLifetime(), clock);
     }
 
     @Bean

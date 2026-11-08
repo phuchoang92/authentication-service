@@ -30,7 +30,8 @@ public sealed interface LoginResult {
     record AccountLocked() implements LoginResult { }
 
     /** Two or more failures: this attempt needs a solved CAPTCHA bound to the customer first. */
-    record CaptchaRequired() implements LoginResult { }
+    /** The identity has failed too often: this login was not tried, here is the challenge the next one answers. */
+    record CaptchaRequired(@NonNull CaptchaChallenge challenge) implements LoginResult { }
 
     /** Keycloak, the database or the session store did not answer; nothing was issued. */
     record Unavailable() implements LoginResult { }

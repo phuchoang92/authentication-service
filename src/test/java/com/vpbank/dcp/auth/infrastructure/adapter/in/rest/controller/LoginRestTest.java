@@ -1,6 +1,7 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -18,7 +19,6 @@ import com.vpbank.dcp.auth.application.port.in.ConfirmEnrollmentUseCase;
 import com.vpbank.dcp.auth.application.port.in.CurrentSessionUseCase;
 import com.vpbank.dcp.auth.application.port.in.ExtendSessionUseCase;
 import com.vpbank.dcp.auth.application.port.in.InitEnrollmentUseCase;
-import com.vpbank.dcp.auth.application.port.in.IssueCaptchaUseCase;
 import com.vpbank.dcp.auth.application.port.in.ListDevicesUseCase;
 import com.vpbank.dcp.auth.application.port.in.ListPendingDevicesUseCase;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
@@ -51,6 +51,8 @@ import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.enums.TrustLevel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
+import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceProof;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.OpaqueToken;
 import com.vpbank.dcp.auth.domain.model.SessionId;
@@ -60,6 +62,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.BffAssertionVer
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.SessionFilter;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.TestBffAssertions;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.DeviceHeaders;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceApprovalRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.DeviceRestMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper.LoginRestMapper;
@@ -71,10 +74,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.hamcrest.Matchers;
-import com.vpbank.dcp.auth.domain.model.DeviceProof;
-import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.DeviceHeaders;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -85,10 +84,11 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 /** Web slice for slice 2: login, logout behind the session filter, extend; use cases mocked. */
 @WebMvcTest(controllers = {LoginController.class, SessionController.class, SessionExtensionController.class,
-        CaptchaController.class, PasswordUnlockController.class, DeviceController.class, TrustedDeviceController.class,
+        PasswordUnlockController.class, DeviceController.class, TrustedDeviceController.class,
         DeviceApprovalController.class},
         properties = "auth.login.enabled=true")
 @Import({RestConfiguration.class, LoginRestTest.Beans.class})
@@ -137,7 +137,6 @@ class LoginRestTest {
     @MockitoBean LogoutUseCase logout;
     @MockitoBean ExtendSessionUseCase extend;
     @MockitoBean CurrentSessionUseCase current;
-    @MockitoBean IssueCaptchaUseCase captchas;
     @MockitoBean UnlockPasswordUseCase unlock;
     @MockitoBean ListDevicesUseCase devices;
     @MockitoBean InitEnrollmentUseCase initEnrollment;
@@ -339,37 +338,33 @@ class LoginRestTest {
                 .andExpect(status().isLocked()).andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"))
                 .andExpect(jsonPath("$.error.message").value("The account is locked after too many failed logins"))
                 .andExpect(jsonPath("$.error.lockedUntil").doesNotExist());
-        when(login.login(any())).thenReturn(new LoginResult.CaptchaRequired());
-        mvc.perform(mobileLogin(LOGIN_BODY))
-                .andExpect(status().isPreconditionRequired()).andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"));
     }
 
+    /** The challenge rides on the 428 itself (decided 2026-11-08): image and deadline as headers, no second call. */
     @Test
-    void aCaptchaIsIssuedForAUserNameAndSentBackWithTheLogin() throws Exception {
-        com.vpbank.dcp.auth.domain.model.CaptchaId id = com.vpbank.dcp.auth.domain.model.CaptchaId.random();
-        when(captchas.issue(new com.vpbank.dcp.auth.domain.model.UserName("alice")))
-                .thenReturn(new CaptchaChallenge(id, new byte[]{1, 2, 3}, IDLE));
-        mvc.perform(post("/api/ns/v1/login/captcha").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"userName\":\"alice\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.captchaId").value(id.toString()))
-                .andExpect(jsonPath("$.data.image").value("AQID"))
-                .andExpect(jsonPath("$.data.expiresAt").value("2026-10-25T10:15:00Z"));
-        verifyNoInteractions(current);
+    void aCaptchaRequiredAnswerCarriesTheChallengeInItsHeadersAndTheNextLoginSendsTheAnswer() throws Exception {
+        CaptchaChallenge challenge = new CaptchaChallenge(new byte[]{1, 2, 3}, IDLE);
+        when(login.login(any())).thenReturn(new LoginResult.CaptchaRequired(challenge));
+        mvc.perform(mobileLogin(LOGIN_BODY))
+                .andExpect(status().isPreconditionRequired())
+                .andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(header().string("X-Captcha-Image", "AQID"))
+                .andExpect(header().string("X-Captcha-Expires-At", "2026-10-25T10:15:00Z"));
 
         when(login.login(any())).thenReturn(new LoginResult.InvalidCredentials());
-        String withCaptcha = LOGIN_BODY.replace("\"userName\":\"alice\",",
-                "\"userName\":\"alice\",\"captcha\":{\"captchaId\":\"" + id + "\",\"answer\":\"ab3cd\"},");
-        mvc.perform(mobileLogin(withCaptcha))
-                .andExpect(status().isUnauthorized());
+        String withAnswer = LOGIN_BODY.replace("\"userName\":\"alice\",",
+                "\"userName\":\"alice\",\"captchaAnswer\":\"ab3cd\",");
+        mvc.perform(mobileLogin(withAnswer)).andExpect(status().isUnauthorized());
         var captor = ArgumentCaptor.forClass(com.vpbank.dcp.auth.application.command.LoginCommand.class);
-        verify(login).login(captor.capture());
-        org.assertj.core.api.Assertions.assertThat(captor.getValue().captcha().captchaId()).isEqualTo(id);
-        org.assertj.core.api.Assertions.assertThat(captor.getValue().captcha().answer().normalized()).isEqualTo("AB3CD");
+        verify(login, times(2)).login(captor.capture()); // the challenged login, then the one with the answer
+        org.assertj.core.api.Assertions.assertThat(captor.getAllValues().get(0).captchaAnswer()).isNull();
+        org.assertj.core.api.Assertions.assertThat(captor.getAllValues().get(1).captchaAnswer().normalized())
+                .isEqualTo("AB3CD");
 
-        mvc.perform(mobileLogin(withCaptcha.replace("ab3cd", "a!")))
+        mvc.perform(mobileLogin(withAnswer.replace("ab3cd", "a!")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.details[0].field").value("captcha.answer"));
+                .andExpect(jsonPath("$.error.details[0].field").value("captchaAnswer"));
     }
 
     @Test

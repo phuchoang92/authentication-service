@@ -90,6 +90,21 @@ class ValkeyTransactionAdapterIT {
     }
 
     @Test
+    void overwriteReplacesWhateverTheIdHeldAndStartsAtVersionZero() {
+        CacheTransaction<Enrollment> first = enrollment("s-1");
+        store.createIfAbsent(first);
+        store.saveIfCurrent(first, new Enrollment("s-1", 1, "k1")).orElseThrow();
+
+        CacheTransaction<Enrollment> replacement = enrollment("s-2");
+        store.overwrite(replacement);
+
+        assertThat(store.find(ENROLLMENT, TABLET)).contains(replacement);
+        assertThat(redis.getExpire(TABLET_KEY, TimeUnit.SECONDS)).isBetween(590L, 600L);
+        assertThatThrownBy(() -> store.overwrite(replacement.next(new Enrollment("s-2", 1, "k1"))))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void aSaveSucceedsOnlyWhileTheStoreHoldsWhatTheCallerRead() {
         CacheTransaction<Enrollment> started = enrollment("s-1");
         store.createIfAbsent(started);

@@ -28,4 +28,13 @@ class AwtCaptchaGeneratorTest {
         }
         assertThat(answers).hasSizeGreaterThan(15);
     }
+
+    /** The image travels in a response header (X-Captcha-Image); Tomcat is given 16 KB for all of them. */
+    @Test
+    void theImageAsBase64StaysWellUnderTheResponseHeaderBudget() {
+        for (int i = 0; i < 50; i++) {
+            String base64 = java.util.Base64.getEncoder().encodeToString(generator.next().imagePng());
+            assertThat(base64.length()).isLessThan(12_000);
+        }
+    }
 }

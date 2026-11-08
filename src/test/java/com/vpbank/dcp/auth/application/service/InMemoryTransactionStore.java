@@ -26,6 +26,12 @@ final class InMemoryTransactionStore implements TransactionStore {
     }
 
     @Override
+    public <P> void overwrite(CacheTransaction<P> fresh) {
+        check();
+        rows.put(keyOf(fresh), fresh);
+    }
+
+    @Override
     @SuppressWarnings("unchecked")
     public <P> Optional<CacheTransaction<P>> find(TransactionKind<P> kind, String id) {
         check();

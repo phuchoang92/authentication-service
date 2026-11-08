@@ -1,12 +1,11 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.in.rest.mapper;
 
-import com.vpbank.dcp.auth.application.command.CaptchaSolution;
 import com.vpbank.dcp.auth.application.command.LoginCommand;
+import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
-import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.DeviceProof;
 import com.vpbank.dcp.auth.domain.model.Password;
@@ -15,6 +14,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ApiEnvelope;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.ErrorMessages;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.InvalidRequestException;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.common.JwkJson;
+import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.CaptchaHeaders;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.DeviceHeaders;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.constant.ErrorCodes;
 import com.vpbank.dcp.auth.infrastructure.adapter.in.rest.dto.request.LoginRequest;
@@ -53,7 +53,8 @@ public final class LoginRestMapper {
             DeviceId deviceId = deviceIdHeader == null ? null : toDeviceId(deviceIdHeader);
             DevicePlatform platform = deviceOsHeader == null ? null : DevicePlatform.valueOf(deviceOsHeader);
             DeviceProof deviceProof = deviceProofHeader == null ? null : toDeviceProof(deviceProofHeader);
-            CaptchaSolution captchaSolution = request.captcha() == null ? null : toCaptchaSolution(request.captcha());
+            CaptchaAnswer captchaAnswer =
+                    request.captchaAnswer() == null ? null : new CaptchaAnswer(request.captchaAnswer());
 
             return LoginCommand.builder()
                     .userName(new UserName(request.userName()))
@@ -63,7 +64,7 @@ public final class LoginRestMapper {
                     .platform(platform)
                     .deviceProof(deviceProof)
                     .tokenEncryptionKey(JwkJson.toJson(request.tokenEncryptionKey()))
-                    .captcha(captchaSolution)
+                    .captchaAnswer(captchaAnswer)
                     .build();
         } catch (IllegalArgumentException invalid) {
             throw new InvalidRequestException(invalid.getMessage());
@@ -79,8 +80,7 @@ public final class LoginRestMapper {
                     errorMessages.failure(HttpStatus.FORBIDDEN, ErrorCodes.ACCOUNT_NOT_READY);
             case LoginResult.AccountLocked() ->
                     errorMessages.failure(HttpStatus.LOCKED, ErrorCodes.ACCOUNT_LOCKED);
-            case LoginResult.CaptchaRequired() ->
-                    errorMessages.failure(HttpStatus.PRECONDITION_REQUIRED, ErrorCodes.CAPTCHA_REQUIRED);
+            case LoginResult.CaptchaRequired(CaptchaChallenge challenge) -> captchaRequired(challenge);
             case LoginResult.Unavailable() ->
                     errorMessages.failure(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.LOGIN_UNAVAILABLE);
         };
@@ -116,11 +116,14 @@ public final class LoginRestMapper {
         byte[] signature = Base64.getUrlDecoder().decode(parts[2]);
         return new DeviceProof(issuedAt, parts[1], signature);
     }
-
-    private static CaptchaSolution toCaptchaSolution(LoginRequest.CaptchaDto captcha) {
-        CaptchaId captchaId = new CaptchaId(UUID.fromString(captcha.captchaId()));
-        CaptchaAnswer captchaAnswer = new CaptchaAnswer(captcha.answer());
-        return new CaptchaSolution(captchaId, captchaAnswer);
+    /** The error envelope as for every refusal; the challenge itself travels in the headers (decided 2026-11-08). */
+    private ResponseEntity<ApiEnvelope<LoginResponse>> captchaRequired(CaptchaChallenge challenge) {
+        ResponseEntity<ApiEnvelope<LoginResponse>> refusal =
+                errorMessages.failure(HttpStatus.PRECONDITION_REQUIRED, ErrorCodes.CAPTCHA_REQUIRED);
+        return ResponseEntity.status(HttpStatus.PRECONDITION_REQUIRED)
+                .header(CaptchaHeaders.IMAGE, Base64.getEncoder().encodeToString(challenge.imagePng()))
+                .header(CaptchaHeaders.EXPIRES_AT, challenge.expiresAt().toString())
+                .body(refusal.getBody());
     }
 
     /** 201: a session (full or restricted) was created; the status tells the app which. */

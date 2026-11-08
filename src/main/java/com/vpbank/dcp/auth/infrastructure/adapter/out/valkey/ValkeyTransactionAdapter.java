@@ -32,6 +32,18 @@ public final class ValkeyTransactionAdapter implements TransactionStore {
     }
 
     @Override
+    public <P> void overwrite(CacheTransaction<P> fresh) {
+        if (fresh.version() != 0) {
+            throw new IllegalArgumentException("A new transaction starts at version 0");
+        }
+        ValkeyRecord freshRecord = recordOf(fresh);
+        translate(() -> {
+            recordCommands.write(freshRecord);
+            return null;
+        });
+    }
+
+    @Override
     public <P> Optional<CacheTransaction<P>> find(TransactionKind<P> kind, String id) {
         String key = transactionKeys.forTransaction(kind, id);
         Optional<String> storedText = translate(() -> recordCommands.read(key));

@@ -1,13 +1,27 @@
 package com.vpbank.dcp.auth.application.result;
 
-import com.vpbank.dcp.auth.domain.model.CaptchaId;
 import java.time.Instant;
 import lombok.NonNull;
 
-/** What the app shows: the challenge ID to send back and the PNG to display. */
-public record CaptchaChallenge(@NonNull CaptchaId captchaId, @NonNull byte[] imagePng, @NonNull Instant expiresAt) {
+/**
+ * The challenge a login answers with {@code 428 CAPTCHA_REQUIRED}: the image to show and how long the customer
+ * has to answer it. No ID: the challenge is the customer's one open challenge, found again by the user name.
+ */
+public record CaptchaChallenge(@NonNull byte[] imagePng, @NonNull Instant expiresAt) {
+    public CaptchaChallenge {
+        if (imagePng.length == 0) {
+            throw new IllegalArgumentException("A challenge has an image");
+        }
+        imagePng = imagePng.clone();
+    }
+
+    @Override
+    public byte[] imagePng() {
+        return imagePng.clone();
+    }
+
     @Override
     public String toString() {
-        return "CaptchaChallenge[captchaId=" + captchaId + ", expiresAt=" + expiresAt + "]";
+        return "CaptchaChallenge[expiresAt=" + expiresAt + ", redacted]";
     }
 }

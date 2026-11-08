@@ -19,7 +19,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  * connection.
  *
  * <ul>
- *     <li>create: {@code SET key text NX PXAT deadline}</li>
+ *     <li>write: {@code SET key text PXAT deadline}; create: the same with {@code NX}</li>
  *     <li>replace: {@code SET key text IFEQ expectedText PXAT deadline} (Valkey 8.1)</li>
  *     <li>delete: {@code SET key "" IFEQ expectedText PX 1000} claims the key by turning it into an empty
  *     tombstone, then {@code DEL key} removes it. The claim is the atomic step, so of two racing callers exactly
@@ -48,6 +48,11 @@ public final class ValkeyRecordCommands {
     /** Removes the key whatever it holds. True when this call removed it: of two racing callers one gets true. */
     public boolean delete(@NonNull String key) {
         return Boolean.TRUE.equals(stringRedisTemplate.delete(key));
+    }
+
+    /** Writes the record whatever its key held before ({@code SET key text PXAT}). */
+    public void write(@NonNull ValkeyRecord record) {
+        send("SET", statusReply(), record.key(), record.text(), "PXAT", epochMillis(record));
     }
 
     /** Writes the record only when its key holds nothing. False: another record is there and stays. */

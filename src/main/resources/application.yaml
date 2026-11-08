@@ -1,6 +1,8 @@
 server:
   # X-Device-Proof carries an ML-DSA-65 signature (3309 bytes, ~4.4 KB base64url); Tomcat's 8 KB default is too tight.
   max-http-request-header-size: 16KB
+  # A 428 CAPTCHA_REQUIRED answer carries the challenge image (PNG, base64, up to ~10 KB) in X-Captcha-Image.
+  max-http-response-header-size: 16KB
 
 spring:
   application:
