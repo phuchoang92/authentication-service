@@ -200,7 +200,11 @@
     with `SET key "" IFEQ <text read> PX 1000` (the atomic step; one winner) and then `DEL`s it. An empty
     tombstone decodes as "no record" and expires by itself if the `DEL` never comes. Removal costs two commands
     instead of one (confirm/claim of the enrollment, CAPTCHA consume); nothing else changes. Minimum server is now
-    Valkey 8.1; the ITs take `-Dvalkey.image=…` and were run on `valkey/valkey:9.1` and `valkey/valkey:8.1-alpine`. Renamed the same day to
+    Valkey 8.1; the ITs take `-Dvalkey.image=…` and were run on `valkey/valkey:9.1` and `valkey/valkey:8.1-alpine`.
+    Measured on Valkey 8.1.11 (real adapters, 2000 operations, p50): session create 1 command / 0.32 ms, read by
+    token 1 / 0.28 ms, extend 2 / 0.47 ms, delete 1 / 0.22 ms, all as on 9.1; CAPTCHA save 1 / 0.26 ms, consume
+    3 commands (`GET`, claim, `DEL`) / 0.72 ms against 2 / 0.46 ms with `DELIFEQ` on 9.1. The hot path (extend)
+    is unchanged; only removals pay the extra command. Renamed the same day to
     `CaptchaChallengeStore`: it no longer talks to Valkey itself, only to the transaction store.
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
