@@ -29,8 +29,9 @@ open ("Auth lockout vs Keycloak brute-force", "CAPTCHA after three failures — 
 > challenge in the headers `X-Captcha-Image` (PNG, base64) and `X-Captcha-Expires-At`, and the next login sends
 > `captchaAnswer` in its body; there is no `captchaId`. A customer has one open challenge, keyed by customer
 > (`tx:v2:captcha:<customerId>`, a one-shot record in the shared transaction store, `TransactionStore.overwrite`
-> replaces the earlier one); a wrong answer consumes it and the `428` carries a fresh one. The image is up to
-> ~10 KB as base64, hence `server.max-http-response-header-size: 16KB`. `CaptchaService` lost its use-case
+> replaces the earlier one); a wrong answer consumes it and the `428` carries a fresh one. The image is drawn
+> with a fixed 16-colour palette (`CaptchaPalette`, 4-bit PNG, about 2 KB as base64, measured 1.9–2.5 KB) so it
+> fits the usual 8 KB response-header limit; the 24-bit image was 6.4–9.2 KB. `CaptchaService` lost its use-case
 > port and user-name lookup (`issueFor(CustomerId)`, `solved(CustomerId, CaptchaAnswer)`); `CaptchaId`,
 > `CaptchaSolution`, `CaptchaController`, `CaptchaRequest`, `CaptchaResponse`, `CaptchaRestMapper` are gone.
 > The text below is the original slice-3 design.

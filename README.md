@@ -128,8 +128,8 @@ login is not tried: it answers `428 CAPTCHA_REQUIRED` with the customer's challe
 (`X-Captcha-Image`, `X-Captcha-Expires-At`; decided 2026-11-08, no CAPTCHA route of its own), and the next
 login carries `captchaAnswer`. A customer has one open challenge at a time (Valkey `tx:v2:captcha:<customerId>`,
 5 min, HMAC of the answer only); any answer consumes it, and a wrong one gets a fresh challenge with the next
-`428`. The image is up to ~10 KB as base64, so `server.max-http-response-header-size` is 16 KB and a proxy in
-front of Auth must pass response headers of that size. At 3 the account is locked 15 min, at 4 for 24 h, at 5 permanently
+`428`. The image is a 16-colour PNG of about 2 KB as base64, so it fits the usual 8 KB response-header limit
+of Tomcat and proxies. At 3 the account is locked 15 min, at 4 for 24 h, at 5 permanently
 until `password-unlock`. Only a successful login resets the count; an expired lock does not. A locked
 account is answered from the database without calling Keycloak; an unknown user name is never counted.
 Settings: `auth.login.lockout.{captcha-after, temporary-locks, permanent-at, captcha-lifetime}`.

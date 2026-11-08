@@ -3,7 +3,6 @@ package com.vpbank.dcp.auth.infrastructure.adapter.out.captcha;
 import com.vpbank.dcp.auth.application.port.out.gateway.CaptchaGenerator;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import java.awt.BasicStroke;
-import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -17,8 +16,9 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Server-drawn CAPTCHA with the JDK alone (headless AWT): five characters without look-alikes,
- * each rotated and shifted, over noise lines and dots, as a PNG. Good enough to stop plain
- * scripted guessing; an external provider can replace it behind the same port later.
+ * each rotated and shifted, over noise lines and dots, as a 4-bit PNG ({@link CaptchaPalette}; about
+ * 2 KB as base64, so it fits a response header). Good enough to stop plain scripted guessing; an
+ * external provider can replace it behind the same port later.
  */
 @RequiredArgsConstructor
 public final class AwtCaptchaGenerator implements CaptchaGenerator {
@@ -26,6 +26,8 @@ public final class AwtCaptchaGenerator implements CaptchaGenerator {
     static final int LENGTH = 5;
     private static final int WIDTH = 180;
     private static final int HEIGHT = 64;
+    private static final int NOISE_LINES = 6;
+    private static final int NOISE_DOTS = 150;
 
     static {
         System.setProperty("java.awt.headless", "true");
@@ -45,39 +47,56 @@ public final class AwtCaptchaGenerator implements CaptchaGenerator {
     }
 
     private byte[] draw(char[] text) {
-        BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
+        BufferedImage image = new BufferedImage(
+                WIDTH, HEIGHT, BufferedImage.TYPE_BYTE_BINARY, CaptchaPalette.colorModel());
         Graphics2D graphics = image.createGraphics();
         try {
-            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            graphics.setColor(new Color(245, 245, 240));
+            // No anti-aliasing: a 16-colour image cannot blend, and jagged edges are no help to a reader program.
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+            graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
+            graphics.setColor(CaptchaPalette.background());
             graphics.fillRect(0, 0, WIDTH, HEIGHT);
-            graphics.setStroke(new BasicStroke(1.5f));
-            for (int i = 0; i < 6; i++) {
-                graphics.setColor(new Color(secureRandom.nextInt(120) + 80, secureRandom.nextInt(120) + 80, secureRandom.nextInt(120) + 80));
-                graphics.drawLine(secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT), secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT));
-            }
-            for (int i = 0; i < 150; i++) {
-                graphics.setColor(new Color(secureRandom.nextInt(160) + 60, secureRandom.nextInt(160) + 60, secureRandom.nextInt(160) + 60));
-                graphics.fillRect(secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT), 1, 1);
-            }
-            Font font = new Font(Font.SANS_SERIF, Font.BOLD, 34);
-            int step = WIDTH / (LENGTH + 1);
-            for (int i = 0; i < text.length; i++) {
-                Graphics2D glyph = (Graphics2D) graphics.create();
-                try {
-                    int x = step * (i + 1) - 10 + secureRandom.nextInt(7) - 3;
-                    int y = HEIGHT / 2 + 12 + secureRandom.nextInt(9) - 4;
-                    glyph.rotate(Math.toRadians(secureRandom.nextInt(50) - 25), x, y);
-                    glyph.setFont(font);
-                    glyph.setColor(new Color(secureRandom.nextInt(80), secureRandom.nextInt(80), secureRandom.nextInt(120) + 40));
-                    glyph.drawString(String.valueOf(text[i]), x, y);
-                } finally {
-                    glyph.dispose();
-                }
-            }
+            drawNoise(graphics);
+            drawCharacters(graphics, text);
         } finally {
             graphics.dispose();
         }
+        return encodePng(image);
+    }
+
+    private void drawNoise(Graphics2D graphics) {
+        graphics.setStroke(new BasicStroke(1.5f));
+        for (int i = 0; i < NOISE_LINES; i++) {
+            graphics.setColor(CaptchaPalette.noise(secureRandom));
+            graphics.drawLine(secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT),
+                    secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT));
+        }
+        for (int i = 0; i < NOISE_DOTS; i++) {
+            graphics.setColor(CaptchaPalette.noise(secureRandom));
+            graphics.fillRect(secureRandom.nextInt(WIDTH), secureRandom.nextInt(HEIGHT), 1, 1);
+        }
+    }
+
+    /** Each character in its own slot, rotated up to 25 degrees and shifted a few pixels. */
+    private void drawCharacters(Graphics2D graphics, char[] text) {
+        Font font = new Font(Font.SANS_SERIF, Font.BOLD, 34);
+        int step = WIDTH / (LENGTH + 1);
+        for (int i = 0; i < text.length; i++) {
+            Graphics2D glyph = (Graphics2D) graphics.create();
+            try {
+                int x = step * (i + 1) - 10 + secureRandom.nextInt(7) - 3;
+                int y = HEIGHT / 2 + 12 + secureRandom.nextInt(9) - 4;
+                glyph.rotate(Math.toRadians(secureRandom.nextInt(50) - 25), x, y);
+                glyph.setFont(font);
+                glyph.setColor(CaptchaPalette.ink(secureRandom));
+                glyph.drawString(String.valueOf(text[i]), x, y);
+            } finally {
+                glyph.dispose();
+            }
+        }
+    }
+
+    private static byte[] encodePng(BufferedImage image) {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             ImageIO.write(image, "png", out);
             return out.toByteArray();
