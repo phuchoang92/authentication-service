@@ -17,9 +17,9 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Cache transaction ↔ the one JSON text Valkey keeps for it:
- * {@code {"schemaVersion":2,"purpose":…,"expiresAtMs":…,"version":…,"payload":{…}}}. The envelope is five fixed
- * properties in that order; the payload is the flow's own record, so this codec serves every flow without
- * knowing any.
+ * {@code {"schemaVersion":3,"purpose":…,"expiresAtMs":…,"payload":{…}}}. The envelope is four fixed properties in
+ * that order; the payload is the flow's own record, so this codec serves every flow without knowing any. Schema 3
+ * dropped the {@code version} counter of schema 2: the store compares the whole text, so the payload is enough.
  *
  * <p>Encoding is deterministic: equal transactions give the same text. The store relies on it, because its
  * compare-and-set asks Valkey whether the stored text still equals the text of the transaction the caller read.
@@ -32,13 +32,12 @@ import tools.jackson.databind.node.ObjectNode;
  */
 @RequiredArgsConstructor
 public final class TransactionJsonCodec {
-    static final int SCHEMA_VERSION = 2;
+    static final int SCHEMA_VERSION = 3;
     static final String P_SCHEMA = "schemaVersion";
     static final String P_PURPOSE = "purpose";
     static final String P_EXPIRES_AT = "expiresAtMs";
-    static final String P_VERSION = "version";
     static final String P_PAYLOAD = "payload";
-    private static final Set<String> PROPERTIES = Set.of(P_SCHEMA, P_PURPOSE, P_EXPIRES_AT, P_VERSION, P_PAYLOAD);
+    private static final Set<String> PROPERTIES = Set.of(P_SCHEMA, P_PURPOSE, P_EXPIRES_AT, P_PAYLOAD);
 
     @NonNull
     private final JsonMapper payloadJson;
@@ -61,7 +60,6 @@ public final class TransactionJsonCodec {
         envelope.put(P_SCHEMA, SCHEMA_VERSION);
         envelope.put(P_PURPOSE, transaction.kind().purpose());
         envelope.put(P_EXPIRES_AT, transaction.expiresAt().toEpochMilli());
-        envelope.put(P_VERSION, transaction.version());
         envelope.set(P_PAYLOAD, payloadJson.valueToTree(transaction.payload()));
         return payloadJson.writeValueAsString(envelope);
     }
@@ -76,19 +74,18 @@ public final class TransactionJsonCodec {
                 return Optional.empty();
             }
             Instant expiresAt = Instant.ofEpochMilli(nonNegative(envelope.get(P_EXPIRES_AT)));
-            long version = nonNegative(envelope.get(P_VERSION));
             P payload = payloadJson.treeToValue(envelope.get(P_PAYLOAD), kind.payloadType());
             if (payload == null) {
                 return Optional.empty();
             }
-            return Optional.of(new CacheTransaction<>(kind, id, expiresAt, version, payload));
+            return Optional.of(new CacheTransaction<>(kind, id, expiresAt, payload));
         } catch (IllegalArgumentException | JacksonException malformed) {
             // Text that is not JSON, a number out of range, a payload record refusing its values.
             return Optional.empty();
         }
     }
 
-    /** Exactly the five properties, this schema, and the purpose the caller asked for. */
+    /** Exactly the four properties, this schema, and the purpose the caller asked for. */
     private static boolean isEnvelopeOf(TransactionKind<?> kind, JsonNode envelope) {
         if (!envelope.isObject() || !PROPERTIES.equals(Set.copyOf(envelope.propertyNames()))) {
             return false;

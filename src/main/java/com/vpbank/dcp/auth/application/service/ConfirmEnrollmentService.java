@@ -78,7 +78,7 @@ public final class ConfirmEnrollmentService implements ConfirmEnrollmentUseCase 
     }
 
     /**
-     * Only one confirm commits: it claims the transaction first (compare-and-set on its version), then consumes the
+     * Only one confirm commits: it claims the transaction first (removed only if still as read), then consumes the
      * restricted session (one already gone, a logout, commits nothing), then trusts the device.
      */
     private ConfirmEnrollmentResult commitTrust(ConfirmEnrollmentCommand command,

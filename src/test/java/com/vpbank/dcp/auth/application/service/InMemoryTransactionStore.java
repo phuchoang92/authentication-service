@@ -10,7 +10,7 @@ import java.util.Optional;
 
 /**
  * Test double with the store's contract: one record per kind and ID; a save or a removal succeeds only while the
- * store still holds exactly the transaction the caller read; version + 1 per save.
+ * store still holds exactly the transaction the caller read.
  */
 final class InMemoryTransactionStore implements TransactionStore {
     record Key(String purpose, String id) {

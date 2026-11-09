@@ -19,7 +19,7 @@ import lombok.RequiredArgsConstructor;
 /**
  * The primary enrollment's view of the shared {@link TransactionStore} (slice 11). A device has at most one
  * transaction, started by one restricted session and open for the lifetime of that session. The services ask
- * for what the flow needs; the transaction kind, its address and the envelope version stay here.
+ * for what the flow needs; the transaction kind and its address stay here.
  */
 @RequiredArgsConstructor
 public final class EnrollmentTransactions {
@@ -85,7 +85,7 @@ public final class EnrollmentTransactions {
         return deviceTransaction;
     }
 
-    /** Writes the changed enrollment over the version read; empty when another request changed it first. */
+    /** Writes the changed enrollment over the one read; empty when another request changed it first. */
     public Optional<CacheTransaction<EnrollmentTransaction>> update(CacheTransaction<EnrollmentTransaction> transaction,
                                                                     EnrollmentTransaction changedEnrollment) {
         return transactionStore.saveIfCurrent(transaction, changedEnrollment);

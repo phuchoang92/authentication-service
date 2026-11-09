@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
 
-/** The envelope is five string fields; the payload is one JSON field read back strictly into the flow's record. */
+/** The envelope is four fixed properties; the payload is one of them, read back strictly into the flow's record. */
 class TransactionJsonCodecTest {
     /** A payload as any flow might declare one: value objects, an enum, a list, a nullable, a required field. */
     record SamplePayload(CustomerId customerId, Step step, List<String> notes, String optional, int attempts) {
@@ -43,7 +43,7 @@ class TransactionJsonCodecTest {
 
     @Test
     void theTextIsTheEnvelopeInAFixedOrderWithThePayloadInside() {
-        assertThat(text).isEqualTo("{\"schemaVersion\":2,\"purpose\":\"sample\",\"expiresAtMs\":1793787000123,\"version\":0,"
+        assertThat(text).isEqualTo("{\"schemaVersion\":3,\"purpose\":\"sample\",\"expiresAtMs\":1793787000123,"
                 + "\"payload\":{\"customerId\":{\"value\":\"90359\"},\"step\":\"STARTED\",\"notes\":[\"a\",\"b\"],"
                 + "\"optional\":null,\"attempts\":1}}");
         assertThat(codec.decode(KIND, "MOBILE:90359:tablet-2", text)).contains(transaction);
@@ -63,9 +63,9 @@ class TransactionJsonCodecTest {
         CacheTransaction<SamplePayload> readBack = codec.decode(KIND, transaction.id(), text).orElseThrow();
         assertThat(codec.encode(readBack)).isEqualTo(text);
 
-        // Every saved state differs from the one before, even when the payload returns to an earlier value.
-        CacheTransaction<SamplePayload> movedAndBack = transaction.next(transaction.payload());
-        assertThat(codec.encode(movedAndBack)).isNotEqualTo(text);
+        // No version counter: the text is the address, the deadline and the payload, nothing else.
+        CacheTransaction<SamplePayload> samePayloadAgain = transaction.next(transaction.payload());
+        assertThat(codec.encode(samePayloadAgain)).isEqualTo(text);
     }
 
     /** The payload of the real flow: a text it was decoded from is the text it encodes to. */
@@ -84,15 +84,19 @@ class TransactionJsonCodecTest {
                 .build();
         CacheTransaction<EnrollmentTransaction> opened =
                 enrollments.open("MOBILE:90359:tablet-2", EXPIRES, EnrollmentTransaction.keyExchange(start));
-        CacheTransaction<EnrollmentTransaction> mfaRequired =
-                opened.next(opened.payload().countVerifyAttempt().markMfaRequired("mfa-1"));
+        CacheTransaction<EnrollmentTransaction> counted = opened.next(opened.payload().countVerifyAttempt());
+        CacheTransaction<EnrollmentTransaction> mfaRequired = counted.next(counted.payload().markMfaRequired("mfa-1"));
+        List<CacheTransaction<EnrollmentTransaction>> steps = List.of(opened, counted, mfaRequired);
 
-        for (CacheTransaction<EnrollmentTransaction> state : List.of(opened, mfaRequired)) {
+        for (CacheTransaction<EnrollmentTransaction> state : steps) {
             String stored = codec.encode(state);
             CacheTransaction<EnrollmentTransaction> readBack = codec.decode(enrollments, state.id(), stored).orElseThrow();
             assertThat(readBack).isEqualTo(state);
             assertThat(codec.encode(readBack)).isEqualTo(stored);
         }
+
+        // The compare-and-set has no version to lean on: every step of the flow must give a text of its own.
+        assertThat(steps.stream().map(codec::encode)).doesNotHaveDuplicates();
     }
 
     @Test
@@ -101,17 +105,19 @@ class TransactionJsonCodecTest {
         assertThat(codec.decode(KIND, "id", "")).isEmpty();
         assertThat(codec.decode(KIND, "id", "not json")).isEmpty();
         assertThat(codec.decode(KIND, "id", "[" + text + "]")).isEmpty();
-        assertThat(codec.decode(KIND, "id", text.replace("\"version\":0,", ""))).isEmpty();                    // a property missing
-        assertThat(codec.decode(KIND, "id", text.replace("\"version\":0,", "\"version\":0,\"extra\":1,"))).isEmpty();
-        assertThat(codec.decode(KIND, "id", text.replace("\"schemaVersion\":2", "\"schemaVersion\":1"))).isEmpty();
-        assertThat(codec.decode(KIND, "id", text.replace("\"schemaVersion\":2", "\"schemaVersion\":\"2\""))).isEmpty();
+        String purposeProperty = "\"purpose\":\"sample\",";
+        assertThat(codec.decode(KIND, "id", text.replace(purposeProperty, ""))).isEmpty();                     // a property missing
+        assertThat(codec.decode(KIND, "id", text.replace(purposeProperty, purposeProperty + "\"extra\":1,"))).isEmpty();
+        // The record of schema 2 carried a version counter: it is not read.
+        assertThat(codec.decode(KIND, "id", text.replace(purposeProperty, purposeProperty + "\"version\":0,"))).isEmpty();
+        assertThat(codec.decode(KIND, "id", text.replace("\"schemaVersion\":3", "\"schemaVersion\":2"))).isEmpty();
+        assertThat(codec.decode(KIND, "id", text.replace("\"schemaVersion\":3", "\"schemaVersion\":\"3\""))).isEmpty();
         assertThat(codec.decode(KIND, "id", text.replace("\"purpose\":\"sample\"", "\"purpose\":\"other-flow\""))).isEmpty(); // not this kind
-        assertThat(codec.decode(KIND, "id", text.replace("\"version\":0", "\"version\":-1"))).isEmpty();
-        assertThat(codec.decode(KIND, "id", text.replace("\"version\":0", "\"version\":\"0\""))).isEmpty();
-        assertThat(codec.decode(KIND, "id", text.replace("\"version\":0", "\"version\":0.5"))).isEmpty();
         assertThat(codec.decode(KIND, "id", text.replace("1793787000123", "-5"))).isEmpty();
+        assertThat(codec.decode(KIND, "id", text.replace("1793787000123", "\"1793787000123\""))).isEmpty();
+        assertThat(codec.decode(KIND, "id", text.replace("1793787000123", "0.5"))).isEmpty();
         assertThat(codec.decode(KIND, "id",
-                "{\"schemaVersion\":2,\"purpose\":\"sample\",\"expiresAtMs\":1,\"version\":0,\"payload\":null}")).isEmpty();
+                "{\"schemaVersion\":3,\"purpose\":\"sample\",\"expiresAtMs\":1,\"payload\":null}")).isEmpty();
         // Strict payload: an unknown property, a value the record refuses, a wrong type.
         assertThat(codec.decode(KIND, "id", text.replace("\"attempts\":1", "\"attempts\":1,\"x\":1"))).isEmpty();
         assertThat(codec.decode(KIND, "id", text.replace("\"attempts\":1", "\"attempts\":-1"))).isEmpty();

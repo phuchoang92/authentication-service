@@ -44,7 +44,7 @@ class ValkeyTransactionAdapterIT {
     private static final TransactionKind<Enrollment> ENROLLMENT = new TransactionKind<>("enrollment", Enrollment.class);
     private static final TransactionKind<Credential> CREDENTIAL = new TransactionKind<>("credential", Credential.class);
     private static final String TABLET = "MOBILE:90359:tablet-2";
-    private static final String TABLET_KEY = "tx:v2:enrollment:" + TABLET;
+    private static final String TABLET_KEY = "tx:v3:enrollment:" + TABLET;
 
     private static LettuceConnectionFactory connections;
     private static StringRedisTemplate redis;
@@ -84,13 +84,13 @@ class ValkeyTransactionAdapterIT {
 
         // One JSON STRING, forgotten by the server at the deadline.
         assertThat(redis.type(TABLET_KEY)).isEqualTo(DataType.STRING);
-        assertThat(redis.opsForValue().get(TABLET_KEY)).startsWith("{\"schemaVersion\":2,\"purpose\":\"enrollment\",")
-                .contains("\"version\":0").contains("\"secret\":\"k1\"");
+        assertThat(redis.opsForValue().get(TABLET_KEY)).startsWith("{\"schemaVersion\":3,\"purpose\":\"enrollment\",")
+                .doesNotContain("\"version\"").contains("\"secret\":\"k1\"");
         assertThat(redis.getExpire(TABLET_KEY, TimeUnit.SECONDS)).isBetween(590L, 600L);
     }
 
     @Test
-    void overwriteReplacesWhateverTheIdHeldAndStartsAtVersionZero() {
+    void overwriteReplacesWhateverTheIdHeld() {
         CacheTransaction<Enrollment> first = enrollment("s-1");
         store.createIfAbsent(first);
         store.saveIfCurrent(first, new Enrollment("s-1", 1, "k1")).orElseThrow();
@@ -100,8 +100,6 @@ class ValkeyTransactionAdapterIT {
 
         assertThat(store.find(ENROLLMENT, TABLET)).contains(replacement);
         assertThat(redis.getExpire(TABLET_KEY, TimeUnit.SECONDS)).isBetween(590L, 600L);
-        assertThatThrownBy(() -> store.overwrite(replacement.next(new Enrollment("s-2", 1, "k1"))))
-                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -110,22 +108,18 @@ class ValkeyTransactionAdapterIT {
         store.createIfAbsent(started);
 
         Optional<CacheTransaction<Enrollment>> counted = store.saveIfCurrent(started, new Enrollment("s-1", 1, "k1"));
-        assertThat(counted).hasValueSatisfying(saved -> {
-            assertThat(saved.version()).isEqualTo(1);
-            assertThat(saved.payload().attempts()).isEqualTo(1);
-        });
-        assertThat(store.saveIfCurrent(started, new Enrollment("s-1", 1, "k1"))).isEmpty(); // version 0 is stale
+        assertThat(counted).hasValueSatisfying(saved -> assertThat(saved.payload().attempts()).isEqualTo(1));
+        assertThat(store.saveIfCurrent(started, new Enrollment("s-1", 2, "k1"))).isEmpty(); // what was read is stale
 
         CacheTransaction<Enrollment> proven = store.saveIfCurrent(counted.get(), new Enrollment("s-1", 1, "k2")).orElseThrow();
-        assertThat(proven.version()).isEqualTo(2);
         assertThat(store.find(ENROLLMENT, TABLET)).contains(proven);
         assertThat(redis.getExpire(TABLET_KEY, TimeUnit.SECONDS)).isBetween(590L, 600L);
 
-        // The right version is not enough: the caller must hold the stored transaction itself.
-        CacheTransaction<Enrollment> sameVersionOtherPayload =
-                new CacheTransaction<>(ENROLLMENT, TABLET, proven.expiresAt(), 2, new Enrollment("s-9", 1, "k2"));
-        assertThat(store.saveIfCurrent(sameVersionOtherPayload, new Enrollment("s-9", 2, "k2"))).isEmpty();
-        assertThat(store.deleteIfCurrent(sameVersionOtherPayload)).isFalse();
+        // The address and the deadline are not enough: the caller must hold the stored payload too.
+        CacheTransaction<Enrollment> otherPayload =
+                new CacheTransaction<>(ENROLLMENT, TABLET, proven.expiresAt(), new Enrollment("s-9", 1, "k2"));
+        assertThat(store.saveIfCurrent(otherPayload, new Enrollment("s-9", 2, "k2"))).isEmpty();
+        assertThat(store.deleteIfCurrent(otherPayload)).isFalse();
         assertThat(store.find(ENROLLMENT, TABLET)).contains(proven);
     }
 
@@ -148,7 +142,7 @@ class ValkeyTransactionAdapterIT {
                 }
             }
             assertThat(winners).isEqualTo(1);
-            assertThat(store.find(ENROLLMENT, TABLET).orElseThrow().version()).isEqualTo(1);
+            assertThat(store.find(ENROLLMENT, TABLET).orElseThrow().payload().attempts()).isBetween(1, writers);
         } finally {
             pool.shutdownNow();
         }

@@ -14,7 +14,7 @@ import org.springframework.dao.DataAccessException;
  * {@link TransactionStore} on Valkey: one JSON STRING per transaction under {@link TransactionKeys}, forgotten by
  * the server at {@code expiresAt}. Every call is one command ({@link ValkeyRecordCommands}). A save or a removal
  * names the text of the transaction the caller read, and Valkey applies it only while the key still holds that
- * text; {@code version} makes every saved state a different text. Spring exceptions never leave this class.
+ * text. Spring exceptions never leave this class.
  */
 @RequiredArgsConstructor
 public final class ValkeyTransactionAdapter implements TransactionStore {
@@ -24,18 +24,12 @@ public final class ValkeyTransactionAdapter implements TransactionStore {
 
     @Override
     public <P> boolean createIfAbsent(CacheTransaction<P> fresh) {
-        if (fresh.version() != 0) {
-            throw new IllegalArgumentException("A new transaction starts at version 0");
-        }
         ValkeyRecord freshRecord = recordOf(fresh);
         return translate(() -> recordCommands.createIfAbsent(freshRecord));
     }
 
     @Override
     public <P> void overwrite(CacheTransaction<P> fresh) {
-        if (fresh.version() != 0) {
-            throw new IllegalArgumentException("A new transaction starts at version 0");
-        }
         ValkeyRecord freshRecord = recordOf(fresh);
         translate(() -> {
             recordCommands.write(freshRecord);

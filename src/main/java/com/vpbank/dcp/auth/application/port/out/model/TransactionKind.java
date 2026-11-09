@@ -18,8 +18,8 @@ public record TransactionKind<P>(@NonNull String purpose, @NonNull Class<P> payl
         }
     }
 
-    /** A transaction of this kind that does not exist in the store yet (version 0), kept until {@code expiresAt}. */
+    /** A transaction of this kind that does not exist in the store yet, kept until {@code expiresAt}. */
     public CacheTransaction<P> open(String id, Instant expiresAt, P payload) {
-        return new CacheTransaction<>(this, id, expiresAt, 0, payload);
+        return new CacheTransaction<>(this, id, expiresAt, payload);
     }
 }

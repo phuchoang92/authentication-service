@@ -14,10 +14,10 @@ class TransactionKeysTest {
     @Test
     void theKeyIsNamespacePurposeAndIdInClear() {
         assertThat(new TransactionKeys().forTransaction(KIND, "MOBILE:90359:tablet-2"))
-                .isEqualTo("tx:v2:enrollment:MOBILE:90359:tablet-2");
-        assertThat(new TransactionKeys("auth:tx:v2:").forTransaction(KIND, "abc")).isEqualTo("auth:tx:v2:enrollment:abc");
+                .isEqualTo("tx:v3:enrollment:MOBILE:90359:tablet-2");
+        assertThat(new TransactionKeys("auth:tx:v3:").forTransaction(KIND, "abc")).isEqualTo("auth:tx:v3:enrollment:abc");
         CacheTransaction<String> transaction = KIND.open("abc", Instant.now(), "payload");
-        assertThat(new TransactionKeys().forTransaction(transaction)).isEqualTo("tx:v2:enrollment:abc");
+        assertThat(new TransactionKeys().forTransaction(transaction)).isEqualTo("tx:v3:enrollment:abc");
     }
 
     @Test

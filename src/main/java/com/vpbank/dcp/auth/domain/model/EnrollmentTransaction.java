@@ -13,7 +13,8 @@ import lombok.NonNull;
  * trust, the server key pair of this transaction (Ksrv; its private part lives only here, DD 20 §4), the digest
  * of the challenge sent, the attempts made and, after the key proof, the MFA transaction. KEY_EXCHANGE after
  * init, MFA_REQUIRED after verify; failure, expiry and the trust commit end it by removing the transaction, so
- * it has no terminal state. The deadline and the compare-and-set version belong to the transaction envelope.
+ * it has no terminal state. The deadline belongs to the transaction envelope. Every step moves the record
+ * forward (one more attempt, the next state): the store tells two moments apart by this record alone.
  */
 @Builder(toBuilder = true)
 public record EnrollmentTransaction(@NonNull EnrollmentId id,

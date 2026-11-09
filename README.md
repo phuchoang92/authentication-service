@@ -107,8 +107,9 @@ writes, in one SQL transaction, the new trusted row (replacing a previous row of
 installation, expiring the oldest beyond the cap), the primary row (`FACE_CONFIRMED`), the
 enrollment row (inserted `COMPLETED`) and the audit trail; the restricted session is consumed and a new ACTIVE
 session is sealed to the key sent at confirm. Until then the steps share one Valkey record per device
-(`tx:v2:enrollment:<channel>:<customerId>:<deviceId>`, one JSON STRING in the generic transaction store, slice 11): Ksrv, challenge digest, attempts and MFA
-transaction, compare-and-set on every step; nothing reaches SQL before the commit, and a failure removes the
+(`tx:v3:enrollment:<channel>:<customerId>:<deviceId>`, one JSON STRING in the generic transaction store,
+slice 11): Ksrv, challenge digest, attempts and MFA transaction, compare-and-set on every step (the stored text
+itself is compared; the record has no version counter); nothing reaches SQL before the commit, and a failure removes the
 record and ends the session. The MFA contract is an assumption until the MFA team confirms it.
 
 **Approval by the primary device (phase 4, second path, slice 6):** a new installation on a restricted
@@ -126,7 +127,7 @@ stays trusted. Auth stores only the token's SHA-256. Push notification to the pr
 **Lockout (phase 2):** consecutive password failures on one identity escalate — after 2 the next
 login is not tried: it answers `428 CAPTCHA_REQUIRED` with the customer's challenge in its headers
 (`X-Captcha-Image`, `X-Captcha-Expires-At`; decided 2026-11-08, no CAPTCHA route of its own), and the next
-login carries `captchaAnswer`. A customer has one open challenge at a time (Valkey `tx:v2:captcha:<customerId>`,
+login carries `captchaAnswer`. A customer has one open challenge at a time (Valkey `tx:v3:captcha:<customerId>`,
 5 min, HMAC of the answer only); any answer consumes it, and a wrong one gets a fresh challenge with the next
 `428`. The image is a 16-colour PNG of about 2 KB as base64, so it fits the usual 8 KB response-header limit
 of Tomcat and proxies. At 3 the account is locked 15 min, at 4 for 24 h, at 5 permanently

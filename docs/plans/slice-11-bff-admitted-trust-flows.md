@@ -206,6 +206,18 @@
     3 commands (`GET`, claim, `DEL`) / 0.72 ms against 2 / 0.46 ms with `DELIFEQ` on 9.1. The hot path (extend)
     is unchanged; only removals pay the extra command. Renamed the same day to
     `CaptchaChallengeStore`: it no longer talks to Valkey itself, only to the transaction store.
+20. **Done 2026-11-09.** The transaction record loses its `version` counter (decided the same day: a flow is one
+    restricted session of one device, and the store already compares the whole stored text, so the counter only
+    repeated what the payload says). `CacheTransaction(kind, id, expiresAt, payload)`; the record is
+    `{"schemaVersion":3,"purpose",…,"expiresAtMs",…,"payload":{…}}` at `tx:v3:<purpose>:<id>`. The commands are
+    the same (`SET … NX|IFEQ … PXAT`, tombstone claim + `DEL`), so latency does not change. What replaces the
+    counter is a rule on the flow: its payload moves forward only (a counter goes up, a state moves on), so an
+    earlier text never comes back; `TransactionJsonCodecTest` checks that every step of the enrollment gives a
+    text of its own. `createIfAbsent`/`overwrite` no longer refuse a "non-fresh" transaction (there is no such
+    thing any more). Records at `tx:v2:` are not read: they lived at most 10 minutes (enrollment) or 5 minutes
+    (CAPTCHA), so an enrollment or a challenge in flight at deploy starts again. The session record
+    (`session:v3`, `sessionVersion`) is untouched: it is the contract shared with the BFF (DD 22).
+    `mvn -o verify`: 341 unit tests, 45 ITs.
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
 and a database guard for one open approval request per device.
