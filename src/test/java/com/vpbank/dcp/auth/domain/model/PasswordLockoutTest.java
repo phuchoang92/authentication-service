@@ -21,7 +21,8 @@ class PasswordLockoutTest {
         PasswordLockout four = three.afterFailure(T0.plus(Duration.ofMinutes(16)), policy);
         PasswordLockout five = four.afterFailure(T0.plus(Duration.ofHours(25)), policy);
 
-        assertThat(one.captchaRequired(policy)).isFalse();
+        assertThat(PasswordLockout.none().captchaRequired(policy)).isFalse();
+        assertThat(one.captchaRequired(policy)).isTrue(); // from the first failure on (2026-11-09)
         assertThat(two.captchaRequired(policy)).isTrue();
         assertThat(two.isLocked(T0)).isFalse();
         assertThat(three.status()).isEqualTo(PasswordStatus.LOCKED);

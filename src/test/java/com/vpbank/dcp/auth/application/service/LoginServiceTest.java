@@ -10,6 +10,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
 import com.vpbank.dcp.auth.application.port.out.model.DeviceProofBindings;
 import com.vpbank.dcp.auth.application.port.out.model.SecurityAuditEvent;
+import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
@@ -156,8 +157,10 @@ class LoginServiceTest {
     @Test
     void unknownUserAndWrongPasswordGiveTheSameAnswerAndBothAskKeycloak() {
         identities.rows.clear();
-        assertThat(service.login(command())).isInstanceOf(LoginResult.InvalidCredentials.class);
+        // An unknown user gets no challenge (decided 2026-11-09).
+        assertThat(service.login(command())).isEqualTo(LoginResult.InvalidCredentials.withoutChallenge());
         verify(credentials).verify(eq(ALICE), any());
+        assertThat(captchas.challenges).isEmpty();
 
         identities.rows.put(CUSTOMER, identity("ACTIVE", PasswordLockout.none()));
         when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Rejected());
@@ -166,12 +169,48 @@ class LoginServiceTest {
         verifyNoInteractions(sealer);
     }
 
+    /** The first wrong password already carries the challenge, so the app shows it with the error. */
+    @Test
+    void theFirstWrongPasswordCarriesTheChallengeTheNextLoginAnswers() {
+        when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Rejected());
+
+        LoginResult first = service.login(command());
+
+        CaptchaChallenge challenge = ((LoginResult.InvalidCredentials) first).nextChallenge();
+        assertThat(challenge.expiresAt()).isEqualTo(NOW.plusSeconds(300));
+        assertThat(captchas.challenges).containsOnlyKeys(CUSTOMER);
+        assertThat(identities.only().lockout().failedCount()).isEqualTo(1);
+
+        // The right CAPTCHA with a wrong password: counted, and again a challenge for the next login.
+        LoginResult second = service.login(withCaptchaAnswer(command(), "ab3cd"));
+        assertThat(((LoginResult.InvalidCredentials) second).nextChallenge()).isNotNull();
+        assertThat(captchas.challenges).containsOnlyKeys(CUSTOMER);
+        assertThat(identities.only().lockout().failedCount()).isEqualTo(2);
+
+        when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Verified("iss", "sub-1"));
+        assertThat(service.login(withCaptchaAnswer(command(), "ab3cd"))).isInstanceOf(LoginResult.Authenticated.class);
+        assertThat(identities.only().lockout()).isEqualTo(PasswordLockout.none());
+    }
+
+    @Test
+    void aChallengeTheStoreCannotKeepIsLeftOutAndTheNextLoginAsksForOne() {
+        when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Rejected());
+        captchas.unavailable = true;
+
+        assertThat(service.login(command())).isEqualTo(LoginResult.InvalidCredentials.withoutChallenge());
+        assertThat(identities.only().lockout().failedCount()).isEqualTo(1); // the failure still counts
+
+        captchas.unavailable = false;
+        assertThat(service.login(command())).isInstanceOf(LoginResult.CaptchaRequired.class);
+        verify(credentials, org.mockito.Mockito.times(1)).verify(eq(ALICE), any());
+    }
+
     @Test
     void eachFailureIsCountedAndTheThirdLocksWithoutAskingKeycloakAfterwards() {
         when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Rejected());
 
         assertThat(service.login(command())).isInstanceOf(LoginResult.InvalidCredentials.class);
-        assertThat(service.login(command())).isInstanceOf(LoginResult.InvalidCredentials.class);
+        assertThat(service.login(withCaptcha(command()))).isInstanceOf(LoginResult.InvalidCredentials.class);
         assertThat(identities.only().lockout().failedCount()).isEqualTo(2);
         assertThat(service.login(withCaptcha(command()))).isInstanceOf(LoginResult.AccountLocked.class);
         assertThat(identities.only().lockout().status()).isEqualTo(PasswordStatus.LOCKED);
@@ -212,13 +251,13 @@ class LoginServiceTest {
         identities.rows.put(CUSTOMER, identity("ACTIVE", new PasswordLockout(PasswordStatus.ACTIVE, 1, null)));
         identities.concurrentFailures = 1; // another attempt lands first: count becomes 2
 
-        assertThat(service.login(command())).isInstanceOf(LoginResult.AccountLocked.class);
+        assertThat(service.login(withCaptcha(command()))).isInstanceOf(LoginResult.AccountLocked.class);
         assertThat(identities.only().lockout().failedCount()).isEqualTo(3);
     }
 
     @Test
-    void afterTwoFailuresALoginAnswersWithAChallengeAndAMissingOrWrongAnswerCostsNoAttempt() {
-        identities.rows.put(CUSTOMER, identity("ACTIVE", new PasswordLockout(PasswordStatus.ACTIVE, 2, null)));
+    void afterAFailureALoginAnswersWithAChallengeAndAMissingOrWrongAnswerCostsNoAttempt() {
+        identities.rows.put(CUSTOMER, identity("ACTIVE", new PasswordLockout(PasswordStatus.ACTIVE, 1, null)));
 
         // No answer: the login is not tried; the customer gets a challenge to answer next time.
         LoginResult first = service.login(command());
@@ -226,7 +265,7 @@ class LoginServiceTest {
         assertThat(((LoginResult.CaptchaRequired) first).challenge().expiresAt()).isEqualTo(NOW.plusSeconds(300));
         assertThat(captchas.challenges).containsOnlyKeys(CUSTOMER);
         verify(credentials, never()).verify(any(), any());
-        assertThat(identities.only().lockout().failedCount()).isEqualTo(2);
+        assertThat(identities.only().lockout().failedCount()).isEqualTo(1);
 
         // A wrong answer burns the challenge and gets a fresh one, still without trying the password.
         assertThat(service.login(withCaptchaAnswer(command(), "WRONG")))
@@ -336,7 +375,7 @@ class LoginServiceTest {
     void theFailureThatLocksIsAuditedAsLockedWithTheCountThatLocked() {
         when(credentials.verify(eq(ALICE), any())).thenReturn(new VerificationResult.Rejected());
         service.login(command());
-        service.login(command());
+        service.login(withCaptcha(command()));
         service.login(withCaptcha(command()));
 
         assertThat(audit.events).extracting(SecurityAuditEvent::reason).containsExactly(

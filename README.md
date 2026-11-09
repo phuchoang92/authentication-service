@@ -128,10 +128,14 @@ customer's primary (`PRIMARY_MODE = OLD_DEVICE_APPROVAL`), expires the oldest de
 completes the request and writes the audit trail with the approving device as actor. The old primary
 stays trusted. Auth stores only the token's SHA-256. Push notification to the primary is a follow-up.
 
-**Lockout (phase 2):** consecutive password failures on one identity escalate — after 2 the next
-login is not tried: it answers `428 CAPTCHA_REQUIRED` with the customer's challenge in its headers
-(`X-Captcha-Image`, `X-Captcha-Expires-At`; decided 2026-11-08, no CAPTCHA route of its own), and the next
-login carries `captchaAnswer`. A customer has one open challenge at a time (Valkey `tx:v4:captcha:<customerId>`,
+**Lockout (phase 2):** consecutive password failures on one identity escalate. From the first failure on
+(since 2026-11-09; was 2) a CAPTCHA is required: the `401 INVALID_CREDENTIALS` of that failure, and of every
+later wrong password, already carries the customer's challenge in its headers (`X-Captcha-Image`,
+`X-Captcha-Expires-At`), so the app shows it with the error; the next login carries `captchaAnswer`. A login
+without the right answer is not tried: it answers `428 CAPTCHA_REQUIRED` with a fresh challenge in the same
+headers (decided 2026-11-08, no CAPTCHA route of its own). An unknown user name gets a plain `401` without a
+challenge (decided 2026-11-09), so a wrong password on an existing account can be told apart from an unknown
+user name by the headers. A customer has one open challenge at a time (Valkey `tx:v4:captcha:<customerId>`,
 5 min, HMAC of the answer only); any answer consumes it, and a wrong one gets a fresh challenge with the next
 `428`. The image is a 16-colour PNG of about 2 KB as base64, so it fits the usual 8 KB response-header limit
 of Tomcat and proxies. At 3 the account is locked 15 min, at 4 for 24 h, at 5 permanently

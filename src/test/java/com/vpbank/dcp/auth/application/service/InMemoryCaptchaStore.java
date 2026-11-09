@@ -1,5 +1,6 @@
 package com.vpbank.dcp.auth.application.service;
 
+import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.repository.CaptchaStore;
 import com.vpbank.dcp.auth.domain.model.CaptchaAnswer;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
@@ -12,9 +13,13 @@ final class InMemoryCaptchaStore implements CaptchaStore {
     record Challenge(String answer, Instant expiresAt) { }
 
     final Map<CustomerId, Challenge> challenges = new HashMap<>();
+    boolean unavailable;
 
     @Override
     public void issue(CustomerId customerId, CaptchaAnswer answer, Instant expiresAt) {
+        if (unavailable) {
+            throw new RepositoryUnavailableException(new RuntimeException("down"));
+        }
         challenges.put(customerId, new Challenge(answer.normalized(), expiresAt));
     }
 

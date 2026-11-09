@@ -20,8 +20,17 @@ public sealed interface LoginResult {
         }
     }
 
-    /** Unknown user or wrong password: one answer for both, so nothing reveals account existence. */
-    record InvalidCredentials() implements LoginResult { }
+    /**
+     * Unknown user or wrong password: the same status and code for both. A known customer whose failures reached
+     * the CAPTCHA threshold also gets {@code nextChallenge}, the challenge the next login answers, so the app can
+     * show it at once; an unknown user never gets one (decided 2026-11-09), nor does a customer whose challenge
+     * could not be stored. Null otherwise.
+     */
+    record InvalidCredentials(CaptchaChallenge nextChallenge) implements LoginResult {
+        public static InvalidCredentials withoutChallenge() {
+            return new InvalidCredentials(null);
+        }
+    }
 
     /** The identity exists but is not ACTIVE in Auth. */
     record AccountNotReady() implements LoginResult { }
@@ -29,7 +38,6 @@ public sealed interface LoginResult {
     /** Too many failures: temporarily or permanently locked. The password was not sent to Keycloak. */
     record AccountLocked() implements LoginResult { }
 
-    /** Two or more failures: this attempt needs a solved CAPTCHA bound to the customer first. */
     /** The identity has failed too often: this login was not tried, here is the challenge the next one answers. */
     record CaptchaRequired(@NonNull CaptchaChallenge challenge) implements LoginResult { }
 

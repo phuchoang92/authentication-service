@@ -80,7 +80,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * The whole application boots against real MySQL and Valkey with registration and login on. One
- * customer is registered, fails twice (CAPTCHA now required), solves a CAPTCHA, logs in (token
+ * customer is registered, fails once (the answer carries a CAPTCHA), solves a CAPTCHA, logs in (token
  * envelope decrypted with the test's Kenc), extends the session the BFF way, logs out, then fails
  * until locked and is unlocked by the bank; finally a second device gets a restricted session that
  * can neither list devices nor extend, while the first device sees itself as the trusted primary. The
@@ -165,7 +165,7 @@ class ApplicationBootIT {
                 .content(REGISTER)).andExpect(status().isCreated());
         assertThat(identities.findById("90359").orElseThrow().getIdentitySubject()).isEqualTo("sub-1");
 
-        // Two wrong passwords (same answer as an unknown user); the third attempt needs a CAPTCHA.
+        // One wrong password (same status as an unknown user) already carries the CAPTCHA (2026-11-09).
         ECKey kenc = new ECKeyGenerator(Curve.P_256).generate();
         String loginBody = "{\"userName\":\"alice\",\"password\":\"Secret123\","
                 + "\"tokenEncryptionKey\":" + kenc.toPublicJWK().toJSONString() + "}";
@@ -176,10 +176,11 @@ class ApplicationBootIT {
         deviceRows.saveAndFlush(TrustedDevicePersistenceMapper.toEntity(phone, deviceIdProtection));
         primaryRows.saveAndFlush(TrustedDevicePersistenceMapper.toPrimary(phone, Instant.now()));
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Rejected());
-        for (int i = 0; i < 2; i++) {
-            mvc.perform(login(loginBody, "dev-1", "ANDROID"))
-                    .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"));
-        }
+        mvc.perform(login(loginBody, "dev-1", "ANDROID"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"))
+                .andExpect(header().string("X-Captcha-Image", Base64.getEncoder().encodeToString(new byte[]{1})))
+                .andExpect(header().exists("X-Captcha-Expires-At"));
+        // A login without the answer is refused before the password, with a fresh challenge.
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Verified(ISSUER, "sub-1"));
         mvc.perform(login(loginBody, "dev-1", "ANDROID"))
                 .andExpect(status().isPreconditionRequired()).andExpect(jsonPath("$.error.code").value("CAPTCHA_REQUIRED"))
@@ -200,13 +201,13 @@ class ApplicationBootIT {
         String token = field(jwe.getPayload().toString(), "token");
         assertThat(token).matches("s1:auth:session:MOBILE:[0-9a-f-]{36}:[A-Za-z0-9_-]{43}");
 
-        // The audit writer runs behind the request: two counted failures, one refusal, one success, in order.
-        List<SecurityAuditEventEntity> timeline = auditTimelineOf("90359", 4);
+        // The audit writer runs behind the request: one counted failure, one refusal, one success, in order.
+        List<SecurityAuditEventEntity> timeline = auditTimelineOf("90359", 3);
         assertThat(timeline).extracting(SecurityAuditEventEntity::getEventType)
-                .containsExactly("LOGIN_FAILED", "LOGIN_FAILED", "LOGIN_REFUSED", "LOGIN_SUCCEEDED");
+                .containsExactly("LOGIN_FAILED", "LOGIN_REFUSED", "LOGIN_SUCCEEDED");
         assertThat(timeline).extracting(SecurityAuditEventEntity::getReasonCode)
-                .containsExactly("WRONG_PASSWORD", "WRONG_PASSWORD", "CAPTCHA_REQUIRED", "FULL_SESSION");
-        assertThat(timeline).extracting(SecurityAuditEventEntity::getFailedCount).containsExactly(1, 2, 2, null);
+                .containsExactly("WRONG_PASSWORD", "CAPTCHA_REQUIRED", "FULL_SESSION");
+        assertThat(timeline).extracting(SecurityAuditEventEntity::getFailedCount).containsExactly(1, 1, null);
         assertThat(timeline.getLast().getSessionId().toString()).isEqualTo(token.split(":")[4]);
         assertThat(timeline).allSatisfy(row -> assertThat(row.getRecordedAt()).isAfterOrEqualTo(row.getOccurredAt()));
 
@@ -224,15 +225,15 @@ class ApplicationBootIT {
         mvc.perform(post("/internal/v1/sessions/extend").contentType(MediaType.APPLICATION_JSON).content(extendBody))
                 .andExpect(status().isGone());
 
-        // The success reset the counter: two failures, then CAPTCHA + a third failure locks for 15 minutes.
+        // The success reset the counter: a failure (with its challenge), a second one with the CAPTCHA answered
+        // (with the next challenge), then a third locks for 15 minutes.
         when(credentials.verify(eq(new UserName("alice")), any())).thenReturn(new VerificationResult.Rejected());
-        for (int i = 0; i < 2; i++) {
-            mvc.perform(login(loginBody, "dev-1", "ANDROID"))
-                    .andExpect(status().isUnauthorized());
-        }
-        mvc.perform(login(loginBody, "dev-1", "ANDROID")).andExpect(status().isPreconditionRequired()); // hands out the challenge
-        String third = loginBody.replace("\"userName\":\"alice\",", "\"userName\":\"alice\",\"captchaAnswer\":\"AB3CD\",");
-        mvc.perform(login(third, "dev-1", "ANDROID"))
+        mvc.perform(login(loginBody, "dev-1", "ANDROID"))
+                .andExpect(status().isUnauthorized()).andExpect(header().exists("X-Captcha-Image"));
+        String answered = loginBody.replace("\"userName\":\"alice\",", "\"userName\":\"alice\",\"captchaAnswer\":\"AB3CD\",");
+        mvc.perform(login(answered, "dev-1", "ANDROID"))
+                .andExpect(status().isUnauthorized()).andExpect(header().exists("X-Captcha-Image"));
+        mvc.perform(login(answered, "dev-1", "ANDROID"))
                 .andExpect(status().isLocked()).andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
         assertThat(identities.findById("90359").orElseThrow().getPasswordFailedCount()).isEqualTo(3);
         assertThat(identities.findById("90359").orElseThrow().getPasswordLockoutTime()).isNotNull();

@@ -8,8 +8,8 @@ open ("Auth lockout vs Keycloak brute-force", "CAPTCHA after three failures — 
 
 | Consecutive failures on one identity | Effect |
 |---|---|
-| 1 | `401 INVALID_CREDENTIALS` |
-| 2 | `401 INVALID_CREDENTIALS`; from now on a login for this customer must carry a solved CAPTCHA |
+| 1 | `401 INVALID_CREDENTIALS`; since 2026-11-09 the answer carries the CAPTCHA challenge in its headers and from now on a login for this customer must carry a solved CAPTCHA |
+| 2 | `401 INVALID_CREDENTIALS` with the next challenge (until 2026-11-09: plain `401`, CAPTCHA required from here) |
 | 3 | `PASSWORD_STATUS=LOCKED`, `PASSWORD_LOCKOUT_TIME = now + 15 min` → `423 ACCOUNT_LOCKED` |
 | 4 (after the 15-min lock expired) | `LOCKED`, lockout time `now + 24 h` |
 | 5 | `PASSWORD_STATUS=PERMANENTLY_LOCKED` — only the bank can unlock |
@@ -25,6 +25,13 @@ open ("Auth lockout vs Keycloak brute-force", "CAPTCHA after three failures — 
 
 ## CAPTCHA (needs your confirmation, see questions)
 
+> **Changed 2026-11-09.** The CAPTCHA is required from the first failure (`captcha-after` default 1, was 2), and
+> every `401 INVALID_CREDENTIALS` of a counted failure past the threshold carries the next challenge in the same
+> headers as a `428`, so the app shows it with the error (`LoginResult.InvalidCredentials(nextChallenge)`). A
+> challenge the store cannot keep is left out of the `401`; the next login then gets `428`. An unknown user name
+> gets a plain `401` (user decision): the headers tell an existing account from an unknown user name after one
+> attempt.
+>
 > **Changed 2026-11-08.** No CAPTCHA route any more: the login itself answers `428 CAPTCHA_REQUIRED` with the
 > challenge in the headers `X-Captcha-Image` (PNG, base64) and `X-Captcha-Expires-At`, and the next login sends
 > `captchaAnswer` in its body; there is no `captchaId`. A customer has one open challenge, keyed by customer

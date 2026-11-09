@@ -321,7 +321,7 @@ class LoginRestTest {
 
     @Test
     void loginRefusalsHaveTheirStatusCodeAndLocalizedText() throws Exception {
-        when(login.login(any())).thenReturn(new LoginResult.InvalidCredentials());
+        when(login.login(any())).thenReturn(LoginResult.InvalidCredentials.withoutChallenge());
         mvc.perform(mobileLogin(LOGIN_BODY).header("Accept-Language", "en"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"))
@@ -342,6 +342,23 @@ class LoginRestTest {
 
     /** The challenge rides on the 428 itself (decided 2026-11-08): image and deadline as headers, no second call. */
     @Test
+    void aWrongPasswordPastTheThresholdCarriesTheNextChallengeInTheSameHeaders() throws Exception {
+        CaptchaChallenge challenge = new CaptchaChallenge(new byte[]{1, 2, 3}, IDLE);
+        when(login.login(any())).thenReturn(new LoginResult.InvalidCredentials(challenge));
+        mvc.perform(mobileLogin(LOGIN_BODY))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"))
+                .andExpect(header().string("X-Captcha-Image", "AQID"))
+                .andExpect(header().string("X-Captcha-Expires-At", "2026-10-25T10:15:00Z"));
+
+        when(login.login(any())).thenReturn(LoginResult.InvalidCredentials.withoutChallenge());
+        mvc.perform(mobileLogin(LOGIN_BODY))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist("X-Captcha-Image"))
+                .andExpect(header().doesNotExist("X-Captcha-Expires-At"));
+    }
+
+    @Test
     void aCaptchaRequiredAnswerCarriesTheChallengeInItsHeadersAndTheNextLoginSendsTheAnswer() throws Exception {
         CaptchaChallenge challenge = new CaptchaChallenge(new byte[]{1, 2, 3}, IDLE);
         when(login.login(any())).thenReturn(new LoginResult.CaptchaRequired(challenge));
@@ -352,7 +369,7 @@ class LoginRestTest {
                 .andExpect(header().string("X-Captcha-Image", "AQID"))
                 .andExpect(header().string("X-Captcha-Expires-At", "2026-10-25T10:15:00Z"));
 
-        when(login.login(any())).thenReturn(new LoginResult.InvalidCredentials());
+        when(login.login(any())).thenReturn(LoginResult.InvalidCredentials.withoutChallenge());
         String withAnswer = LOGIN_BODY.replace("\"userName\":\"alice\",",
                 "\"userName\":\"alice\",\"captchaAnswer\":\"ab3cd\",");
         mvc.perform(mobileLogin(withAnswer)).andExpect(status().isUnauthorized());

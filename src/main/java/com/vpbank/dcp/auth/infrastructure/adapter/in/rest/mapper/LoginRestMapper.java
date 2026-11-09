@@ -74,8 +74,7 @@ public final class LoginRestMapper {
     public ResponseEntity<ApiEnvelope<LoginResponse>> toResponse(LoginResult result) {
         return switch (result) {
             case LoginResult.Authenticated authenticated -> authenticated(authenticated);
-            case LoginResult.InvalidCredentials() ->
-                    errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.INVALID_CREDENTIALS);
+            case LoginResult.InvalidCredentials(CaptchaChallenge nextChallenge) -> invalidCredentials(nextChallenge);
             case LoginResult.AccountNotReady() ->
                     errorMessages.failure(HttpStatus.FORBIDDEN, ErrorCodes.ACCOUNT_NOT_READY);
             case LoginResult.AccountLocked() ->
@@ -120,7 +119,24 @@ public final class LoginRestMapper {
     private ResponseEntity<ApiEnvelope<LoginResponse>> captchaRequired(CaptchaChallenge challenge) {
         ResponseEntity<ApiEnvelope<LoginResponse>> refusal =
                 errorMessages.failure(HttpStatus.PRECONDITION_REQUIRED, ErrorCodes.CAPTCHA_REQUIRED);
-        return ResponseEntity.status(HttpStatus.PRECONDITION_REQUIRED)
+        return withChallenge(refusal, challenge);
+    }
+
+    /** 401; once a CAPTCHA is due, with the challenge the next login answers in the same headers as a 428. */
+    private ResponseEntity<ApiEnvelope<LoginResponse>> invalidCredentials(CaptchaChallenge nextChallenge) {
+        ResponseEntity<ApiEnvelope<LoginResponse>> refusal =
+                errorMessages.failure(HttpStatus.UNAUTHORIZED, ErrorCodes.INVALID_CREDENTIALS);
+        if (nextChallenge == null) {
+            return refusal;
+        }
+        return withChallenge(refusal, nextChallenge);
+    }
+
+    /** The refusal as it is, plus the challenge: the image as base64 PNG and its deadline. */
+    private static ResponseEntity<ApiEnvelope<LoginResponse>> withChallenge(ResponseEntity<ApiEnvelope<LoginResponse>> refusal,
+                                                                           CaptchaChallenge challenge) {
+        return ResponseEntity.status(refusal.getStatusCode())
+                .headers(refusal.getHeaders())
                 .header(CaptchaHeaders.IMAGE, Base64.getEncoder().encodeToString(challenge.imagePng()))
                 .header(CaptchaHeaders.EXPIRES_AT, challenge.expiresAt().toString())
                 .body(refusal.getBody());

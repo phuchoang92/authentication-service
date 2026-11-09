@@ -24,9 +24,9 @@ public record LockoutPolicy(int captchaAfter, @NonNull SortedMap<Integer, Durati
         }
     }
 
-    /** The default policy: CAPTCHA after 2, 15 min at 3, 24 h at 4, permanent at 5. */
+    /** The default policy: CAPTCHA after 1 (since 2026-11-09; was 2), 15 min at 3, 24 h at 4, permanent at 5. */
     public static LockoutPolicy standard() {
-        return new LockoutPolicy(2, new TreeMap<>(Map.of(3, Duration.ofMinutes(15), 4, Duration.ofHours(24))), 5);
+        return new LockoutPolicy(1, new TreeMap<>(Map.of(3, Duration.ofMinutes(15), 4, Duration.ofHours(24))), 5);
     }
 
     /** The temporary lock to apply at exactly this failure count, if any. */

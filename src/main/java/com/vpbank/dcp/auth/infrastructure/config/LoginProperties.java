@@ -33,11 +33,11 @@ public record LoginProperties(boolean enabled, @Valid @NotNull Keycloak keycloak
     }
 
     /**
-     * Escalating lockout (slice 3): CAPTCHA after N failures, temporary locks at given failure
+     * Escalating lockout (slice 3): CAPTCHA after N failures (default 1 since 2026-11-09), temporary locks at given failure
      * counts, permanent at the last. An absent {@code temporaryLocks} map means 3 → 15 min, 4 → 24 h
      * (Spring cannot default a map through {@code @DefaultValue}).
      */
-    public record Lockout(@Min(1) @DefaultValue("2") int captchaAfter,
+    public record Lockout(@Min(1) @DefaultValue("1") int captchaAfter,
                           Map<Integer, Duration> temporaryLocks,
                           @Min(2) @DefaultValue("5") int permanentAt,
                           @NotNull @DefaultValue("PT5M") Duration captchaLifetime) {

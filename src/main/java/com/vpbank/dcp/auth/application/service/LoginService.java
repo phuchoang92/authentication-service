@@ -43,7 +43,8 @@ import lombok.RequiredArgsConstructor;
  * identity answers from the database alone; once the CAPTCHA threshold is reached, an attempt
  * without the right answer to the customer's challenge is refused before Keycloak, with the next
  * challenge in the answer, and does not count as
- * a password failure (slice 3 policy). Every failure on an existing identity
+ * a password failure (slice 3 policy). The wrong password that reaches the threshold (the first one, by
+ * default) already carries the challenge in its answer, and so does every later wrong password. Every failure on an existing identity
  * is counted with compare-and-set; only a success resets the count. The password is wiped as soon
  * as the provider has answered. After the password, {@link TrustedDeviceService} decides whether this
  * device gets a full ACTIVE session or a restricted NEED_TRUSTED_DEVICE one (DD 20 §2).
@@ -119,7 +120,8 @@ public final class LoginService implements LoginUseCase {
         VerificationResult verificationResult =
                 credentialVerifierPort.verify(command.userName(), command.password());
         if (foundIdentity.isEmpty()) {
-            return new Decision(new LoginResult.InvalidCredentials(), SecurityEventReason.UNKNOWN_USER, null, null);
+            LoginResult.InvalidCredentials unknownUser = LoginResult.InvalidCredentials.withoutChallenge();
+            return new Decision(unknownUser, SecurityEventReason.UNKNOWN_USER, null, null);
         }
         CustomerAuthentication identity = foundIdentity.get();
 
@@ -239,7 +241,27 @@ public final class LoginService implements LoginUseCase {
         if (identityAfterFailure.lockout().isLocked(now)) {
             return new Decision(new LoginResult.AccountLocked(), SecurityEventReason.LOCKED, identityAfterFailure, null);
         }
-        return new Decision(new LoginResult.InvalidCredentials(), SecurityEventReason.WRONG_PASSWORD, identityAfterFailure, null);
+        LoginResult.InvalidCredentials wrongPassword = invalidCredentialsFor(identityAfterFailure);
+        return new Decision(wrongPassword, SecurityEventReason.WRONG_PASSWORD, identityAfterFailure, null);
+    }
+
+    /**
+     * The wrong-password answer. Once this failure brings the identity to the CAPTCHA threshold, it carries the
+     * challenge the next login answers, so the app shows it with the error and no extra round trip is needed. A
+     * challenge the store could not keep is left out: the answer is still a wrong password, and the next login
+     * gets {@code CaptchaRequired} with a challenge.
+     */
+    private LoginResult.InvalidCredentials invalidCredentialsFor(CustomerAuthentication identityAfterFailure) {
+        boolean captchaDue = identityAfterFailure.lockout().captchaRequired(lockoutPolicy);
+        if (!captchaDue) {
+            return LoginResult.InvalidCredentials.withoutChallenge();
+        }
+        try {
+            CaptchaChallenge nextChallenge = captchaService.issueFor(identityAfterFailure.customerId());
+            return new LoginResult.InvalidCredentials(nextChallenge);
+        } catch (RepositoryUnavailableException failure) {
+            return LoginResult.InvalidCredentials.withoutChallenge();
+        }
     }
 
     /**
