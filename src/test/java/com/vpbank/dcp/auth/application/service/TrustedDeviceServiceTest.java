@@ -158,7 +158,7 @@ class TrustedDeviceServiceTest {
                 .receiptDigest("receipt")
                 .correlationId("corr-c")
                 .build();
-        TrustedDevice trusted = service.confirmTrust(trust);
+        TrustedDevice trusted = service.confirmTrust(trust).orElseThrow();
 
         assertThat(trusted.publicKey()).isEqualTo("{new}");
         assertThat(devices.rows.get(oldTablet.id()).status()).isEqualTo(DeviceStatus.EXPIRED); // replaced, not counted as a peer

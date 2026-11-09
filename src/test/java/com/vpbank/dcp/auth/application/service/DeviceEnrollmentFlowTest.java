@@ -351,9 +351,9 @@ class DeviceEnrollmentFlowTest {
     void ofTwoConfirmsThatBothSawThePassedMfaOnlyOneCommits() {
         initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
         verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
-        // The racing confirm removes the transaction while this one waits for MFA.
+        // The racing confirm commits the trust while this one waits for MFA, and has not yet ended the session.
         when(mfa.check(any())).thenAnswer(invocation -> {
-            transactions.rows.clear();
+            devices.committedEnrollments.add(ENROLLMENT);
             return new CheckResult.Passed("receipt");
         });
 
@@ -361,6 +361,63 @@ class DeviceEnrollmentFlowTest {
                 .isInstanceOf(ConfirmEnrollmentResult.Conflict.class);
         assertThat(devices.confirmations).isEmpty();
         assertThat(sessions.findByToken(RESTRICTED)).isPresent();
+        verify(tokens, never()).next(any(), any());
+    }
+
+    /** The database fails at the trust commit: nothing changed, so the app calls confirm again and it works. */
+    @Test
+    void aDatabaseFailureAtTheCommitLeavesTheEnrollmentAndTheSessionForAnotherConfirm() {
+        initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
+        when(mfa.check(any())).thenReturn(new CheckResult.Passed("receipt"));
+        CacheTransaction<EnrollmentTransaction> waiting = transactions.only();
+        devices.unavailable = true;
+
+        assertThat(confirmEnrollment.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}")))
+                .isInstanceOf(ConfirmEnrollmentResult.Unavailable.class);
+        assertThat(transactions.<EnrollmentTransaction>only()).isEqualTo(waiting);
+        assertThat(sessions.findByToken(RESTRICTED)).isPresent();
+        verify(tokens, never()).next(any(), any());
+
+        devices.unavailable = false;
+        assertThat(confirmEnrollment.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}")))
+                .isInstanceOf(ConfirmEnrollmentResult.Trusted.class);
+        assertThat(devices.confirmations).hasSize(1);
+        assertThat(transactions.rows).isEmpty();
+        assertThat(sessions.findByToken(RESTRICTED)).isEmpty();
+    }
+
+    /** The commit went through but the answer did not (the cache failed after it): a repeat commits nothing. */
+    @Test
+    void aConfirmRepeatedAfterTheCommitWentThroughCommitsNothingMore() {
+        initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
+        when(mfa.check(any())).thenReturn(new CheckResult.Passed("receipt"));
+        devices.afterTrustConfirmed = () -> transactions.unavailable = true;
+
+        assertThat(confirmEnrollment.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}")))
+                .isInstanceOf(ConfirmEnrollmentResult.Unavailable.class);
+        transactions.unavailable = false;
+
+        assertThat(confirmEnrollment.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}")))
+                .isInstanceOf(ConfirmEnrollmentResult.Conflict.class);
+        assertThat(devices.confirmations).hasSize(1);
+        assertThat(devices.findLive(ALICE, Channel.MOBILE, TABLET)).isPresent(); // trusted: the next login is ACTIVE
+        verify(tokens, never()).next(any(), any());
+    }
+
+    /** A logout between the commit and the session's consumption: the device stays trusted, no ACTIVE session. */
+    @Test
+    void aSessionEndedRightAfterTheCommitLeavesTheDeviceTrustedWithoutAnActiveSession() {
+        initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
+        when(mfa.check(any())).thenReturn(new CheckResult.Passed("receipt"));
+        devices.afterTrustConfirmed = sessions.rows::clear;
+
+        assertThat(confirmEnrollment.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}")))
+                .isInstanceOf(ConfirmEnrollmentResult.Conflict.class);
+        assertThat(devices.confirmations).hasSize(1);
+        assertThat(transactions.rows).isEmpty();
         verify(tokens, never()).next(any(), any());
     }
 

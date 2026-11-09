@@ -105,8 +105,10 @@ wrong answer fails the enrollment and ends the session), which opens a FACE tran
 service. `confirm` reads the signed receipt (ES256 from a pinned key, exact claim set) and on PASSED
 writes, in one SQL transaction, the new trusted row (replacing a previous row of the same
 installation, expiring the oldest beyond the cap), the primary row (`FACE_CONFIRMED`), the
-enrollment row (inserted `COMPLETED`) and the audit trail; the restricted session is consumed and a new ACTIVE
-session is sealed to the key sent at confirm. Until then the steps share one Valkey record per device
+enrollment row (inserted `COMPLETED`) and the audit trail; only then are the Valkey record removed and the
+restricted session consumed, and a new ACTIVE session is sealed to the key sent at confirm. A database failure at
+the commit changes nothing, so the app calls confirm again; a second commit of the same enrollment writes nothing
+and answers `409`. Until then the steps share one Valkey record per device
 (`tx:v4:enrollment:<channel>:<customerId>:<deviceId>`, one JSON STRING in the generic transaction store,
 slice 11): Ksrv, challenge digest, attempts and MFA transaction, compare-and-set on every step (the stored text
 itself is compared; the record has no version counter); nothing reaches SQL before the commit, and a failure removes the

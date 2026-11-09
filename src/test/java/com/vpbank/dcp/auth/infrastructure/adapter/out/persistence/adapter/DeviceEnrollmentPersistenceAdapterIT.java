@@ -176,7 +176,7 @@ class DeviceEnrollmentPersistenceAdapterIT {
         TrustedDevice trusted = devices.trustConfirmed(TrustConfirmation.builder().device(newTablet)
                 .replaced(oldTablet.expire()).expiredByCap(List.of()).enrollment(enrollment.complete())
                 .primaryMode(PrimaryMode.FACE_CONFIRMED).faceAuthenticated(true)
-                .receiptDigest("receipt-sha").creationSessionId(restrictedSession).build(), "corr-1");
+                .receiptDigest("receipt-sha").creationSessionId(restrictedSession).build(), "corr-1").orElseThrow();
 
         assertThat(trusted.publicKey()).isEqualTo("{new}");
         assertThat(devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow().id()).isEqualTo(newTablet.id());
@@ -206,6 +206,19 @@ class DeviceEnrollmentPersistenceAdapterIT {
                 assertThat(a.getEnrollmentId()).isEqualTo(enrollment.id().value()));
         // The direct primary of the phone kept its mode.
         assertThat(jdbc.sql("SELECT COUNT(*) FROM PRIMARY_TRUSTED_DEVICE").query(Long.class).single()).isEqualTo(1L);
+
+        // The same enrollment committed again (a confirm repeated after an uncertain commit) writes nothing.
+        TrustedDevice againTablet = TrustedDevice.trustedByEnrollment(
+                DomainFixtures.newDevice(ALICE_TABLET, DevicePlatform.IOS, "{new}", now), DevicePolicy.standard());
+        TrustedDevice firstCommit = devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow();
+        long rowsBefore = deviceRows.count();
+        assertThat(devices.trustConfirmed(TrustConfirmation.builder().device(againTablet)
+                .replaced(firstCommit.expire()).expiredByCap(List.of()).enrollment(enrollment.complete())
+                .primaryMode(PrimaryMode.FACE_CONFIRMED).faceAuthenticated(true)
+                .receiptDigest("receipt-sha").creationSessionId(restrictedSession).build(), "corr-2")).isEmpty();
+        assertThat(deviceRows.count()).isEqualTo(rowsBefore);
+        assertThat(devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow().id()).isEqualTo(newTablet.id());
+        assertThat(audit.findByCorrelationIdOrderByEventSequenceAsc("corr-2")).isEmpty();
     }
 
     @Test
@@ -268,7 +281,7 @@ class DeviceEnrollmentPersistenceAdapterIT {
                 .trustByApproval(now.plusSeconds(60), DevicePolicy.standard());
         TrustedDevice trusted = devices.trustConfirmed(TrustConfirmation.builder().device(approvedWatch).replaced(null)
                 .expiredByCap(List.of()).enrollment(consumed).primaryMode(PrimaryMode.OLD_DEVICE_APPROVAL)
-                .faceAuthenticated(false).actorDeviceId(phone.id()).build(), "corr-c");
+                .faceAuthenticated(false).actorDeviceId(phone.id()).build(), "corr-c").orElseThrow();
 
         assertThat(trusted.id()).isEqualTo(watch.id());
         assertThat(deviceRows.count()).isEqualTo(2); // the pending row moved, no new row

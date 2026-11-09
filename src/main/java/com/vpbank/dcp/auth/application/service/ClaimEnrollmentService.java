@@ -119,8 +119,12 @@ public final class ClaimEnrollmentService implements ClaimEnrollmentUseCase {
         }
         DeviceEnrollment consumedRequest = countedRequest.consumeAuthorization(clock.instant());
         String correlationId = newDeviceSession.sessionId().toString();
-        TrustedDevice trustedDevice = trustedDeviceService.confirmTrustByApproval(consumedRequest, correlationId);
-        return issueActiveSession(trustedDevice, command);
+        Optional<TrustedDevice> trustedDevice =
+                trustedDeviceService.confirmTrustByApproval(consumedRequest, correlationId);
+        if (trustedDevice.isEmpty()) {
+            return new ClaimEnrollmentResult.Conflict();
+        }
+        return issueActiveSession(trustedDevice.get(), command);
     }
 
     /** The full ACTIVE session of the newly trusted device, sealed to the key the app sent with this request. */

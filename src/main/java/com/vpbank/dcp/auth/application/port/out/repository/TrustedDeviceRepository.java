@@ -28,8 +28,12 @@ public interface TrustedDeviceRepository {
      * The enrollment flow's commit (DD 20 §4, one transaction): replaced and capped rows become EXPIRED,
      * the new row is inserted, the primary row points at it (FACE_CONFIRMED, enrollment ID, face flag),
      * the enrollment is COMPLETED and the audit events are written with the enrollment ID.
+     *
+     * <p>Empty, with nothing written, when another commit got there first: the primary enrollment's row
+     * already exists (it is inserted only here), or a racing commit changed the same rows. Of two commits
+     * of one enrollment exactly one returns the trusted device.
      */
-    TrustedDevice trustConfirmed(TrustConfirmation confirmation, String correlationId);
+    Optional<TrustedDevice> trustConfirmed(TrustConfirmation confirmation, String correlationId);
 
     /**
      * Slice 6: a new installation waits for approval as a PENDING live row, written with one audit event.

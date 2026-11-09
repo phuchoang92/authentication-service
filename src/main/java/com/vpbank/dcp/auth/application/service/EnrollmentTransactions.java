@@ -101,12 +101,7 @@ public final class EnrollmentTransactions {
         return transactionStore.saveIfCurrent(transaction, changedEnrollment);
     }
 
-    /** Takes the transaction for the one confirm that commits; false when another request changed it first. */
-    public boolean claim(CacheTransaction<EnrollmentTransaction> transaction) {
-        return transactionStore.deleteIfCurrent(transaction);
-    }
-
-    /** Drops a failed or expired enrollment; a transaction another request already changed is left to it. */
+    /** Drops a finished, failed or expired enrollment; a transaction another request already changed is left to it. */
     public void remove(CacheTransaction<EnrollmentTransaction> transaction) {
         transactionStore.deleteIfCurrent(transaction);
     }

@@ -262,6 +262,28 @@
     request at whichever step. With turns 21 and 22, a lost response at `init`, `verify`, `approve` or
     `authorize` no longer strands the customer.
     `mvn -o verify`: 352 unit tests, 45 ITs (Valkey 9.1).
+24. **Done 2026-11-09.** `confirm` commits to the database before it changes anything in the cache (decided the
+    same day; it replaces turn 3's order "claim the transaction → consume the session → trust commit"). Before, a
+    database failure at the commit left neither the transaction nor the restricted session, so the `503 RETRY` led
+    to `401 START_NEW_LOGIN` (DD 20 §6a open point 2). Now, after MFA `PASSED`:
+    session still live (one `GET`; gone → remove the transaction, `409`, nothing committed, as before) → trust
+    commit → remove the transaction → consume the session → issue ACTIVE. A database failure changes nothing and
+    a repeated confirm works.
+    - The one-shot moved from the Valkey claim to the database: `TrustedDeviceRepository.trustConfirmed` returns
+      `Optional` and is empty, with nothing written, when the primary enrollment's row already exists (checked
+      first: a repeat after an uncertain commit) or a racing commit wins on the database guards (enrollment
+      primary key, one live row per installation, row versions; `DataIntegrityViolationException` /
+      `OptimisticLockingFailureException` → rollback, empty). Empty → `409`. Without the existence check a second
+      commit would have gone through: the enrollment row is saved by merge and the first commit's device row
+      would have been "replaced".
+    - What changes for the customer: a logout in the few milliseconds between the session check and its
+      consumption leaves the device trusted without an ACTIVE session (`409`; the next login is ACTIVE). Before,
+      the same window lay between the consumption and the commit, with the same result.
+    - The cache failing after the commit gives `503`; the repeat finds the enrollment committed and gets `409`,
+      and the next login is ACTIVE.
+    - `EnrollmentTransactions.claim` is gone (unused); `SessionService.isLive(SessionLookup)` is new. `claim`
+      of the approval path keeps its order (consume, then commit) and maps an empty commit to `409`.
+    `mvn -o verify`: 355 unit tests, 45 ITs (Valkey 9.1).
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
 and a database guard for one open approval request per device.

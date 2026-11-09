@@ -129,8 +129,9 @@ public final class TrustedDeviceService {
      * is replaced (a reinstall or a re-trust), the device cap is enforced, and everything is written in
      * one transaction with the enrollment and its audit trail. The old primary stays trusted (§7).
      * The enrollment row is written here for the first time (slice 11), bound to the restricted session.
+     * Empty when this enrollment was committed already, or a racing commit got there first: nothing is written.
      */
-    public TrustedDevice confirmTrust(@NonNull ConfirmTrustCommand command) {
+    public Optional<TrustedDevice> confirmTrust(@NonNull ConfirmTrustCommand command) {
         DeviceEnrollment enrollment = command.enrollment();
         List<TrustedDevice> liveTrustedDevices =
                 trustedDeviceRepository.findLive(enrollment.customerId(), enrollment.channel());
@@ -253,8 +254,9 @@ public final class TrustedDeviceService {
      * Slice 6: the primary device approved this installation and the QR token was claimed. The target row
      * (PENDING, or a known live row) becomes trusted and the customer's primary on the channel in one
      * transaction with the completed enrollment and the audit trail. The old primary stays trusted (§7).
+     * Empty when a racing commit got there first: nothing is written.
      */
-    public TrustedDevice confirmTrustByApproval(@NonNull DeviceEnrollment consumedEnrollment,
+    public Optional<TrustedDevice> confirmTrustByApproval(@NonNull DeviceEnrollment consumedEnrollment,
                                                 @NonNull String correlationId) {
         Instant now = clock.instant();
         List<TrustedDevice> liveDevices =

@@ -24,8 +24,10 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Step 3 of a new device trusting itself (DD 20 §4): reads the FACE outcome. PASSED trusts the device in one SQL
- * commit (the enrollment row is inserted already COMPLETED), ends the restricted session and issues a full ACTIVE
- * one; FAILED and EXPIRED remove the transaction and end the restricted session.
+ * commit (the enrollment row is inserted already COMPLETED), then removes the transaction, ends the restricted
+ * session and issues a full ACTIVE one; FAILED and EXPIRED remove the transaction and end the restricted session.
+ * The SQL commit comes before anything in the cache changes, so a database failure leaves the enrollment as it
+ * was and the app calls confirm again.
  */
 @RequiredArgsConstructor
 public final class ConfirmEnrollmentService implements ConfirmEnrollmentUseCase {
@@ -78,29 +80,40 @@ public final class ConfirmEnrollmentService implements ConfirmEnrollmentUseCase 
     }
 
     /**
-     * Only one confirm commits: it claims the transaction first (removed only if still as read), then consumes the
-     * restricted session (one already gone, a logout, commits nothing), then trusts the device.
+     * The database commit comes first. A failure there changes nothing, and confirm can be called again. The commit
+     * is also what lets only one confirm through: a second one finds the enrollment row and commits nothing. A
+     * restricted session already gone (a logout) commits nothing. The session ending between this check and its
+     * consumption leaves the device trusted without an ACTIVE session: the next login is ACTIVE.
      */
     private ConfirmEnrollmentResult commitTrust(ConfirmEnrollmentCommand command,
                                                 CacheTransaction<EnrollmentTransaction> transaction,
                                                 String receiptDigest) {
         AdmittedSession newDeviceSession = command.admitted();
-        boolean claimedTheTransaction = enrollmentTransactions.claim(transaction);
-        if (!claimedTheTransaction) {
+        SessionLookup restrictedSession = restrictedSessionOf(newDeviceSession);
+        if (!sessionService.isLive(restrictedSession)) {
+            enrollmentTransactions.remove(transaction);
             return new ConfirmEnrollmentResult.Conflict();
         }
-        boolean sessionConsumed = sessionService.consume(restrictedSessionOf(newDeviceSession));
+        Optional<TrustedDevice> trustedDevice = trustDevice(newDeviceSession, transaction, receiptDigest);
+        if (trustedDevice.isEmpty()) {
+            return new ConfirmEnrollmentResult.Conflict();
+        }
+
+        enrollmentTransactions.remove(transaction);
+        boolean sessionConsumed = sessionService.consume(restrictedSession);
         if (!sessionConsumed) {
             return new ConfirmEnrollmentResult.Conflict();
         }
-        TrustedDevice trustedDevice = trustDevice(newDeviceSession, transaction, receiptDigest);
-        return issueActiveSession(trustedDevice, command);
+        return issueActiveSession(trustedDevice.get(), command);
     }
 
-    /** Inserts the enrollment row already COMPLETED and makes the device trusted, in one database commit. */
-    private TrustedDevice trustDevice(AdmittedSession newDeviceSession,
-                                      CacheTransaction<EnrollmentTransaction> transaction,
-                                      String receiptDigest) {
+    /**
+     * Inserts the enrollment row already COMPLETED and makes the device trusted, in one database commit; empty when
+     * this enrollment was committed already.
+     */
+    private Optional<TrustedDevice> trustDevice(AdmittedSession newDeviceSession,
+                                                CacheTransaction<EnrollmentTransaction> transaction,
+                                                String receiptDigest) {
         EnrollmentTransaction enrollment = transaction.payload();
         ConfirmTrustCommand trust = ConfirmTrustCommand.builder()
                 .enrollment(DeviceEnrollment.fromTransaction(enrollment, transaction.expiresAt()))

@@ -31,6 +31,7 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
@@ -104,16 +105,26 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
      * the primary row re-pointed (FACE_CONFIRMED, enrollment, face flag), the enrollment COMPLETED, and
      * the audit trail 0..n under the correlation ID with the enrollment ID and the MFA receipt digest. A primary
      * enrollment's row is inserted here, already COMPLETED (slice 11); an approval's existing row is updated.
+     *
+     * <p>Only one commit of an enrollment goes through. A primary enrollment whose row exists was committed
+     * before (the confirm is a repeat): nothing is written. Two commits racing each other meet on the database's
+     * guards (the enrollment's primary key, one live row per installation, row versions): the loser's
+     * transaction is rolled back and it gets empty.
      */
     @Override
     @Transactional
-    public TrustedDevice trustConfirmed(TrustConfirmation confirmation, String correlationId) {
+    public Optional<TrustedDevice> trustConfirmed(TrustConfirmation confirmation, String correlationId) {
         Instant now = clock.instant();
         TrustedDevice newTrustedDevice = confirmation.device();
         UUID enrollmentId = confirmation.enrollment().id().value();
+        boolean firstWriteOfTheEnrollment = confirmation.creationSessionId() != null;
         // These audit events carry no extra metadata; only the trust event records what proved the trust.
         String noMetadata = null;
         try {
+            if (firstWriteOfTheEnrollment && deviceEnrollmentJpaRepository.existsById(enrollmentId)) {
+                return Optional.empty();
+            }
+
             // The approval path already wrote DEVICE_REGISTERED under this correlation ID: continue its sequence.
             int sequence = trustedDeviceAuditJpaRepository.countByCorrelationId(correlationId);
 
@@ -168,7 +179,6 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
             primaryTrustedDeviceJpaRepository.saveAndFlush(primaryEntity);
 
             DeviceEnrollmentEntity enrollmentEntity;
-            boolean firstWriteOfTheEnrollment = confirmation.creationSessionId() != null;
             if (firstWriteOfTheEnrollment) {
                 enrollmentEntity = DeviceEnrollmentPersistenceMapper.toEntity(
                         confirmation.enrollment(),
@@ -210,7 +220,12 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
                     noMetadata);
             trustedDeviceAuditJpaRepository.saveAndFlush(primaryChangedAudit);
 
-            return TrustedDevicePersistenceMapper.toDomain(savedDeviceEntity, deviceIdProtection).orElseThrow();
+            TrustedDevice trustedDevice =
+                    TrustedDevicePersistenceMapper.toDomain(savedDeviceEntity, deviceIdProtection).orElseThrow();
+            return Optional.of(trustedDevice);
+        } catch (DataIntegrityViolationException | OptimisticLockingFailureException racingCommitWon) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            return Optional.empty();
         } catch (DataAccessException failure) {
             throw new RepositoryUnavailableException(failure); // a RuntimeException: the transaction rolls back
         }

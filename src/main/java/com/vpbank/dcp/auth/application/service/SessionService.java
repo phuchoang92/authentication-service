@@ -90,6 +90,12 @@ public final class SessionService {
                 .filter(stored -> stored.session().isLive(now));
     }
 
+    /** The session is still stored and live, by its address: one store read. */
+    public boolean isLive(SessionLookup sessionLookup) {
+        Optional<StoredSession> stored = sessionStore.findByLookup(sessionLookup);
+        return stored.isPresent() && stored.get().session().isLive(clock.instant());
+    }
+
     // ---- issue ----
 
     public SessionId newSessionId() {
@@ -169,7 +175,7 @@ public final class SessionService {
 
     /**
      * One-shot consumption: of two racing callers exactly one gets {@code true}, because the delete is
-     * atomic. Used before a trust commit so only one confirm or claim may proceed.
+     * atomic. A claim consumes the restricted session before its trust commit; a confirm after it.
      */
     public boolean consume(SessionLookup sessionLookup) {
         return sessionStore.delete(sessionLookup);

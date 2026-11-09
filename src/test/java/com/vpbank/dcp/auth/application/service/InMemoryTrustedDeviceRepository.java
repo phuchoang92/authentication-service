@@ -6,13 +6,16 @@ import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceReposito
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** Device rows with the adapter's contract: one live row per installation, one primary per customer + channel, CAS. */
 final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
@@ -21,6 +24,10 @@ final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
     final Map<TrustedDeviceId, TrustedDevice> rows = new HashMap<>();
     final Map<Key, TrustedDeviceId> primaries = new HashMap<>();
     final List<String> audit = new ArrayList<>();
+    /** Enrollments whose trust is committed: a primary enrollment's second commit writes nothing. */
+    final Set<EnrollmentId> committedEnrollments = new HashSet<>();
+    /** Runs right after a commit, to let a test change the world between the commit and what follows it. */
+    Runnable afterTrustConfirmed = () -> { };
     boolean unavailable;
 
     @Override
@@ -44,8 +51,13 @@ final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
     final java.util.List<TrustConfirmation> confirmations = new ArrayList<>();
 
     @Override
-    public TrustedDevice trustConfirmed(TrustConfirmation confirmation, String correlationId) {
+    public Optional<TrustedDevice> trustConfirmed(TrustConfirmation confirmation, String correlationId) {
         check();
+        boolean firstWriteOfTheEnrollment = confirmation.creationSessionId() != null;
+        if (firstWriteOfTheEnrollment && committedEnrollments.contains(confirmation.enrollment().id())) {
+            return Optional.empty();
+        }
+        committedEnrollments.add(confirmation.enrollment().id());
         if (confirmation.replaced() != null) {
             rows.put(confirmation.replaced().id(), confirmation.replaced());
         }
@@ -54,7 +66,8 @@ final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
         primaries.put(new Key(confirmation.device().customerId(), confirmation.device().channel()), confirmation.device().id());
         confirmations.add(confirmation);
         audit.add(correlationId + ":DEVICE_TRUSTED:" + confirmation.enrollment().id());
-        return confirmation.device();
+        afterTrustConfirmed.run();
+        return Optional.of(confirmation.device());
     }
 
     @Override
