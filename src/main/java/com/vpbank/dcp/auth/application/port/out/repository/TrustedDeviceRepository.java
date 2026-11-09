@@ -30,8 +30,9 @@ public interface TrustedDeviceRepository {
      * the enrollment is COMPLETED and the audit events are written with the enrollment ID.
      *
      * <p>Empty, with nothing written, when another commit got there first: the primary enrollment's row
-     * already exists (it is inserted only here), or a racing commit changed the same rows. Of two commits
-     * of one enrollment exactly one returns the trusted device.
+     * already exists (it is inserted only here), the approval's row is no longer at the version the claim
+     * read, or a racing commit changed the same rows. Of two commits of one enrollment exactly one returns the
+     * trusted device.
      */
     Optional<TrustedDevice> trustConfirmed(TrustConfirmation confirmation, String correlationId);
 

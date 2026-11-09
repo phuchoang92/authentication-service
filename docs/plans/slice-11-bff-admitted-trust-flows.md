@@ -284,6 +284,19 @@
     - `EnrollmentTransactions.claim` is gone (unused); `SessionService.isLive(SessionLookup)` is new. `claim`
       of the approval path keeps its order (consume, then commit) and maps an empty commit to `409`.
     `mvn -o verify`: 355 unit tests, 45 ITs (Valkey 9.1).
+25. **Done 2026-11-09.** `claim` of the approval path in the same order as `confirm` (turn 24): right token →
+    session still live (gone → `409`, nothing committed) → trust commit → consume the session → issue ACTIVE.
+    Before, the session was consumed first, so a database failure at the commit left the device with no session
+    and the request still waiting until the token's 180 s ran out. Now the request still waits for its token and
+    the device claims again; the attempt counted before the failure stays counted (5 in all).
+    - The one-shot is the database here too: `trustConfirmed` for an approval goes on only while the request row
+      is at the version the claim counted (`anotherCommitGotThereFirst`; a racing update still meets the row
+      version at flush). A second claim, or a claim that read the request before another claim counted, gets
+      `409` and writes nothing. A commit already done moved the row to COMPLETED, so a repeated claim finds no
+      request waiting for a token (`409`), as before.
+    - A logout between the commit and the consumption leaves the device trusted and primary without an ACTIVE
+      session (`409`; the next login is ACTIVE), as for `confirm`.
+    `mvn -o verify`: 358 unit tests, 45 ITs (Valkey 9.1).
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
 and a database guard for one open approval request per device.

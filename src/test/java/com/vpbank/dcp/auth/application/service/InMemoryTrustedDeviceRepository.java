@@ -24,7 +24,7 @@ final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
     final Map<TrustedDeviceId, TrustedDevice> rows = new HashMap<>();
     final Map<Key, TrustedDeviceId> primaries = new HashMap<>();
     final List<String> audit = new ArrayList<>();
-    /** Enrollments whose trust is committed: a primary enrollment's second commit writes nothing. */
+    /** Enrollments whose trust is committed: a second commit of either path writes nothing. */
     final Set<EnrollmentId> committedEnrollments = new HashSet<>();
     /** Runs right after a commit, to let a test change the world between the commit and what follows it. */
     Runnable afterTrustConfirmed = () -> { };
@@ -53,8 +53,7 @@ final class InMemoryTrustedDeviceRepository implements TrustedDeviceRepository {
     @Override
     public Optional<TrustedDevice> trustConfirmed(TrustConfirmation confirmation, String correlationId) {
         check();
-        boolean firstWriteOfTheEnrollment = confirmation.creationSessionId() != null;
-        if (firstWriteOfTheEnrollment && committedEnrollments.contains(confirmation.enrollment().id())) {
+        if (committedEnrollments.contains(confirmation.enrollment().id())) {
             return Optional.empty();
         }
         committedEnrollments.add(confirmation.enrollment().id());

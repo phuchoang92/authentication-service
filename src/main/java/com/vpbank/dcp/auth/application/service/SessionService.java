@@ -175,7 +175,7 @@ public final class SessionService {
 
     /**
      * One-shot consumption: of two racing callers exactly one gets {@code true}, because the delete is
-     * atomic. A claim consumes the restricted session before its trust commit; a confirm after it.
+     * atomic. Confirm and claim consume the restricted session after their trust commit.
      */
     public boolean consume(SessionLookup sessionLookup) {
         return sessionStore.delete(sessionLookup);

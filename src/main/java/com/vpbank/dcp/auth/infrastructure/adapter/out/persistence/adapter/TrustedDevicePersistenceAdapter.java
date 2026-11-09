@@ -8,6 +8,7 @@ import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.domain.enums.PrimaryMode;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
@@ -107,8 +108,9 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
      * enrollment's row is inserted here, already COMPLETED (slice 11); an approval's existing row is updated.
      *
      * <p>Only one commit of an enrollment goes through. A primary enrollment whose row exists was committed
-     * before (the confirm is a repeat): nothing is written. Two commits racing each other meet on the database's
-     * guards (the enrollment's primary key, one live row per installation, row versions): the loser's
+     * before (the confirm is a repeat), and an approval whose row is no longer at the version the claim read was
+     * changed or committed by another claim: nothing is written. Two commits racing each other meet on the
+     * database's guards (the enrollment's primary key, one live row per installation, row versions): the loser's
      * transaction is rolled back and it gets empty.
      */
     @Override
@@ -121,7 +123,7 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
         // These audit events carry no extra metadata; only the trust event records what proved the trust.
         String noMetadata = null;
         try {
-            if (firstWriteOfTheEnrollment && deviceEnrollmentJpaRepository.existsById(enrollmentId)) {
+            if (anotherCommitGotThereFirst(confirmation)) {
                 return Optional.empty();
             }
 
@@ -229,6 +231,21 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
         } catch (DataAccessException failure) {
             throw new RepositoryUnavailableException(failure); // a RuntimeException: the transaction rolls back
         }
+    }
+
+    /**
+     * The enrollment was committed, or changed, before this commit started: a primary enrollment's row exists
+     * already (it is inserted only by its commit), or an approval's row is no longer at the version read.
+     */
+    private boolean anotherCommitGotThereFirst(TrustConfirmation confirmation) {
+        DeviceEnrollment enrollment = confirmation.enrollment();
+        UUID enrollmentId = enrollment.id().value();
+        boolean firstWriteOfTheEnrollment = confirmation.creationSessionId() != null;
+        if (firstWriteOfTheEnrollment) {
+            return deviceEnrollmentJpaRepository.existsById(enrollmentId);
+        }
+        Optional<DeviceEnrollmentEntity> storedRow = deviceEnrollmentJpaRepository.findById(enrollmentId);
+        return storedRow.isEmpty() || storedRow.get().getVersion() != enrollment.version();
     }
 
     /**

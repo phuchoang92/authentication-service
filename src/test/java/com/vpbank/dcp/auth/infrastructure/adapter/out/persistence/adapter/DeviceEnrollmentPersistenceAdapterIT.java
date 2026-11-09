@@ -279,6 +279,17 @@ class DeviceEnrollmentPersistenceAdapterIT {
         DeviceEnrollment consumed = counted.consumeAuthorization(now.plusSeconds(60));
         TrustedDevice approvedWatch = devices.findLive(ALICE, Channel.MOBILE, watchId).orElseThrow()
                 .trustByApproval(now.plusSeconds(60), DevicePolicy.standard());
+
+        // A claim that read the request before another claim counted its attempt commits nothing.
+        DeviceEnrollment readBeforeTheCount = authorized.consumeAuthorization(now.plusSeconds(60));
+        assertThat(devices.trustConfirmed(TrustConfirmation.builder().device(approvedWatch).replaced(null)
+                .expiredByCap(List.of()).enrollment(readBeforeTheCount).primaryMode(PrimaryMode.OLD_DEVICE_APPROVAL)
+                .faceAuthenticated(false).actorDeviceId(phone.id()).build(), "corr-stale")).isEmpty();
+        assertThat(deviceRows.findById(watch.id().value()).orElseThrow().getStatus()).isEqualTo(DeviceStatus.PENDING);
+        assertThat(enrollmentRows.findById(requested.id().value()).orElseThrow().getState())
+                .isEqualTo(EnrollmentState.WAITING_AUTHORIZATION);
+        assertThat(audit.findByCorrelationIdOrderByEventSequenceAsc("corr-stale")).isEmpty();
+
         TrustedDevice trusted = devices.trustConfirmed(TrustConfirmation.builder().device(approvedWatch).replaced(null)
                 .expiredByCap(List.of()).enrollment(consumed).primaryMode(PrimaryMode.OLD_DEVICE_APPROVAL)
                 .faceAuthenticated(false).actorDeviceId(phone.id()).build(), "corr-c").orElseThrow();
@@ -298,6 +309,13 @@ class DeviceEnrollmentPersistenceAdapterIT {
         assertThat(completedRow.getAuthorizationConsumedAt()).isEqualTo(now.plusSeconds(60));
         assertThat(completedRow.getAuthorizedSessionRefDigest()).isEqualTo(completedRow.getCreationIdempotencyDigest());
         assertThat(enrollments.findOpenApprovals(ALICE, Channel.MOBILE)).isEmpty();
+
+        // The same claim committed again writes nothing: the row moved on to COMPLETED.
+        long auditBefore = audit.count();
+        assertThat(devices.trustConfirmed(TrustConfirmation.builder().device(approvedWatch).replaced(null)
+                .expiredByCap(List.of()).enrollment(consumed).primaryMode(PrimaryMode.OLD_DEVICE_APPROVAL)
+                .faceAuthenticated(false).actorDeviceId(phone.id()).build(), "corr-again")).isEmpty();
+        assertThat(audit.count()).isEqualTo(auditBefore);
         List<TrustedDeviceAuditEntity> events = audit.findByCorrelationIdOrderByEventSequenceAsc("corr-c");
         assertThat(events).extracting(TrustedDeviceAuditEntity::getEventType)
                 .containsExactly("DEVICE_REGISTERED", "DEVICE_TRUSTED", "PRIMARY_CHANGED");

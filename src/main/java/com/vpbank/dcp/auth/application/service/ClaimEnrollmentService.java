@@ -21,7 +21,8 @@ import lombok.RequiredArgsConstructor;
  * The new device claims the one-time token the primary device showed as a QR (slice 6), from any of its restricted
  * sessions. The right token makes the device trusted and primary in one SQL commit, ends the restricted session and
  * issues a full ACTIVE one; the last wrong token, or a token past its deadline, closes the request and ends the
- * restricted session.
+ * restricted session. The SQL commit comes before the session is ended, so a database failure leaves the request
+ * waiting for its token and the app claims again.
  */
 @RequiredArgsConstructor
 public final class ClaimEnrollmentService implements ClaimEnrollmentUseCase {
@@ -110,11 +111,17 @@ public final class ClaimEnrollmentService implements ClaimEnrollmentUseCase {
         return new ClaimEnrollmentResult.WrongAuthorization(attemptsLeft);
     }
 
-    /** Only one claim commits: the restricted session is consumed first, then the device is trusted. */
+    /**
+     * The database commit comes first. A failure there changes nothing but the attempt already counted, and the
+     * app claims again. The commit is also what lets only one claim through: it goes on only while the request is
+     * at the version this claim counted. A restricted session already gone (a logout) commits nothing. The session
+     * ending between this check and its consumption leaves the device trusted without an ACTIVE session: the next
+     * login is ACTIVE.
+     */
     private ClaimEnrollmentResult commitTrust(ClaimEnrollmentCommand command, DeviceEnrollment countedRequest) {
         AdmittedSession newDeviceSession = command.admitted();
-        boolean sessionConsumed = sessionService.consume(restrictedSessionOf(newDeviceSession));
-        if (!sessionConsumed) {
+        SessionLookup restrictedSession = restrictedSessionOf(newDeviceSession);
+        if (!sessionService.isLive(restrictedSession)) {
             return new ClaimEnrollmentResult.Conflict();
         }
         DeviceEnrollment consumedRequest = countedRequest.consumeAuthorization(clock.instant());
@@ -122,6 +129,11 @@ public final class ClaimEnrollmentService implements ClaimEnrollmentUseCase {
         Optional<TrustedDevice> trustedDevice =
                 trustedDeviceService.confirmTrustByApproval(consumedRequest, correlationId);
         if (trustedDevice.isEmpty()) {
+            return new ClaimEnrollmentResult.Conflict();
+        }
+
+        boolean sessionConsumed = sessionService.consume(restrictedSession);
+        if (!sessionConsumed) {
             return new ClaimEnrollmentResult.Conflict();
         }
         return issueActiveSession(trustedDevice.get(), command);

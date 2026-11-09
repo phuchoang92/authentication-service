@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -402,6 +403,59 @@ class DeviceApprovalFlowTest {
         // The BFF would no longer admit that session; if it did, the completed request cannot be claimed again.
         assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
+    }
+
+    /** The database fails at the trust commit: the request still waits for its token and the watch claims again. */
+    @Test
+    void aDatabaseFailureAtTheCommitLeavesTheRequestAndTheSessionForAnotherClaim() {
+        authorizeTheWatch();
+        devices.unavailable = true;
+
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+                .isInstanceOf(ClaimEnrollmentResult.Unavailable.class);
+        DeviceEnrollment stillWaiting = enrollments.only();
+        assertThat(stillWaiting.state()).isEqualTo(EnrollmentState.WAITING_AUTHORIZATION);
+        assertThat(stillWaiting.authorizationAttempts()).isEqualTo(1); // the attempt was counted before the commit
+        assertThat(sessions.findByToken(WATCH_TOKEN)).isPresent();
+        verify(tokens, never()).next(any(), any());
+
+        devices.unavailable = false;
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+                .isInstanceOf(ClaimEnrollmentResult.Trusted.class);
+        assertThat(devices.confirmations).hasSize(1);
+        assertThat(sessions.findByToken(WATCH_TOKEN)).isEmpty();
+    }
+
+    @Test
+    void aClaimFromASessionAlreadyGoneOrAfterAnotherClaimCommittedCommitsNothing() {
+        authorizeTheWatch();
+        devices.committedEnrollments.add(ENROLLMENT); // another claim of the watch committed meanwhile
+
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+                .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
+        assertThat(devices.confirmations).isEmpty();
+        assertThat(sessions.findByToken(WATCH_TOKEN)).isPresent();
+
+        devices.committedEnrollments.clear();
+        sessions.rows.clear(); // logged out after the BFF admitted the claim
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+                .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
+        assertThat(devices.confirmations).isEmpty();
+        verify(tokens, never()).next(any(), any());
+    }
+
+    /** A logout between the commit and the session's consumption: the watch stays trusted, no ACTIVE session. */
+    @Test
+    void aSessionEndedRightAfterTheClaimCommittedLeavesTheWatchTrustedWithoutAnActiveSession() {
+        authorizeTheWatch();
+        devices.afterTrustConfirmed = sessions.rows::clear;
+
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+                .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
+        assertThat(devices.confirmations).hasSize(1);
+        assertThat(devices.findPrimary(ALICE, Channel.MOBILE))
+                .contains(devices.findLive(ALICE, Channel.MOBILE, WATCH).orElseThrow().id());
+        verify(tokens, never()).next(any(), any());
     }
 
     @Test
