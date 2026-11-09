@@ -60,6 +60,10 @@ class DeviceEnrollmentTest {
         assertThat(approved.state()).isEqualTo(EnrollmentState.WAITING_APPROVAL);
         assertThat(approved.actorDeviceId()).isEqualTo(primary);
         assertThat(approved.hasApprovalInProgress()).isTrue();
+        assertThat(approved.wasApprovedBy(primary)).isTrue();
+        assertThat(approved.wasApprovedBy(TrustedDeviceId.random())).isFalse();
+        assertThat(requested.wasApprovedBy(primary)).isFalse(); // nobody approved it yet
+        assertThat(approved.isAuthorized()).isFalse();
         assertThatThrownBy(() -> approved.approveBy(primary, "mfa-10")).isInstanceOf(EnrollmentStateException.class);
 
         DeviceEnrollment authorized = approved.authorize("digest", T0.plusSeconds(180), "FACE+OTP");
@@ -68,6 +72,19 @@ class DeviceEnrollmentTest {
         assertThat(authorized.authorizationExpired(T0.plusSeconds(179))).isFalse();
         assertThat(authorized.authorizationExpired(T0.plusSeconds(180))).isTrue();
         assertThat(authorized.mfaMethod()).isEqualTo("FACE+OTP");
+        assertThat(authorized.isAuthorized()).isTrue();
+        assertThat(authorized.wasApprovedBy(primary)).isTrue();
+
+        // Asking for the token again changes the token only: same deadline, same attempts, same state.
+        DeviceEnrollment reissued = authorized.countClaimAttempt().reissueAuthorization("digest-2", T0.plusSeconds(60));
+        assertThat(reissued.authorizationTokenDigest()).isEqualTo("digest-2");
+        assertThat(reissued.authorizationExpiresAt()).isEqualTo(T0.plusSeconds(180));
+        assertThat(reissued.authorizationAttempts()).isEqualTo(1);
+        assertThat(reissued.state()).isEqualTo(EnrollmentState.WAITING_AUTHORIZATION);
+        assertThatThrownBy(() -> authorized.reissueAuthorization("digest-2", T0.plusSeconds(180)))
+                .isInstanceOf(EnrollmentStateException.class); // past the token's deadline
+        assertThatThrownBy(() -> approved.reissueAuthorization("digest-2", T0))
+                .isInstanceOf(EnrollmentStateException.class); // no token is out yet
 
         DeviceEnrollment counted = authorized.countClaimAttempt().countClaimAttempt();
         assertThat(counted.authorizationAttempts()).isEqualTo(2);

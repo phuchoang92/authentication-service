@@ -32,6 +32,10 @@ phone   POST /api/v1/trusted-device/pending/{id}/authorize  200 {status: WAITING
 watch   POST /api/v1/trusted-device/claim {authorizationToken, tokenEncryptionKey} → 201 {tokenEnvelope, status: ACTIVE, idleExpiresAt, absoluteExpiresAt}
 ```
 
+> Since 2026-11-09 a repeated `approve` by the device that approved gets the same MFA check again instead of
+> `409` (slice 11 plan, turn 22), and a repeated `authorize` gets a new token in place of the first, with the
+> same deadline and claim count (turn 23). Auth still stores only the token's digest.
+
 Status table: `409 STATE_CONFLICT` (wrong session kind, other path in progress, out of order, another approver),
 `400 DEVICE_KEY_REQUIRED`, `409 TOO_MANY_PENDING_DEVICES`, `403 NOT_PRIMARY_DEVICE`, MFA outcomes as in slice 5
 (`409 MFA_NOT_PASSED`, `401 MFA_FAILED`, `401 MFA_EXPIRED`, `400 REQUEST_REJECTED`, `403 NO_USABLE_FACTOR`),

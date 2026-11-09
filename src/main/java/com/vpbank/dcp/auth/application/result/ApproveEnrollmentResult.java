@@ -9,7 +9,7 @@ public sealed interface ApproveEnrollmentResult {
 
     record NotPrimaryDevice() implements ApproveEnrollmentResult { }
 
-    /** Unknown request, not waiting for approval, or an approval is already in progress. */
+    /** Unknown request, not waiting for approval, or another device's approval is already in progress. */
     record Conflict() implements ApproveEnrollmentResult { }
 
     record NoUsableFactor() implements ApproveEnrollmentResult { }

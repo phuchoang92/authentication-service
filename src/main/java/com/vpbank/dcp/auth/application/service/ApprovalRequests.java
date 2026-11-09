@@ -49,10 +49,8 @@ public final class ApprovalRequests {
                 .toList();
     }
 
-    /** The request the primary device names, when it is an approval request, still open and at this step. */
-    public Optional<DeviceEnrollment> findOpenAt(EnrollmentId enrollmentId,
-                                                 AdmittedSession primaryDeviceSession,
-                                                 EnrollmentState step) {
+    /** The request the primary device names, when it is an approval request and still open, at whichever step. */
+    public Optional<DeviceEnrollment> findOpen(EnrollmentId enrollmentId, AdmittedSession primaryDeviceSession) {
         Optional<DeviceEnrollment> found = enrollmentRepository.findApproval(
                 enrollmentId,
                 primaryDeviceSession.customerId(),
@@ -61,13 +59,22 @@ public final class ApprovalRequests {
             return Optional.empty();
         }
         DeviceEnrollment request = found.get();
-        boolean openAtThisStep = request.isApproval()
-                && request.isOpen(clock.instant())
-                && request.state() == step;
-        if (!openAtThisStep) {
+        boolean openApproval = request.isApproval() && request.isOpen(clock.instant());
+        if (!openApproval) {
             return Optional.empty();
         }
         return found;
+    }
+
+    /** The request the primary device names, when it is an approval request, still open and at this step. */
+    public Optional<DeviceEnrollment> findOpenAt(EnrollmentId enrollmentId,
+                                                 AdmittedSession primaryDeviceSession,
+                                                 EnrollmentState step) {
+        Optional<DeviceEnrollment> openRequest = findOpen(enrollmentId, primaryDeviceSession);
+        if (openRequest.isEmpty() || openRequest.get().state() != step) {
+            return Optional.empty();
+        }
+        return openRequest;
     }
 
     /** Writes the changed request over the version read; empty when another request changed it first. */

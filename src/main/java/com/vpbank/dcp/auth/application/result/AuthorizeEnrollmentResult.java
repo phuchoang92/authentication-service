@@ -5,7 +5,7 @@ import java.time.Instant;
 
 /** Outcome of the primary device asking for the one-time token after MFA (slice 6). */
 public sealed interface AuthorizeEnrollmentResult {
-    /** The token the app renders as a QR; Auth keeps only its digest. */
+    /** The token the app renders as a QR; Auth keeps only its digest. Asking again gives a new token, same deadline. */
     record Authorized(EnrollmentId enrollmentId, String authorizationToken, Instant expiresAt)
             implements AuthorizeEnrollmentResult {
         @Override
@@ -24,7 +24,7 @@ public sealed interface AuthorizeEnrollmentResult {
 
     record NotPrimaryDevice() implements AuthorizeEnrollmentResult { }
 
-    /** Unknown request, no approval in progress, or approved by another device. */
+    /** Unknown request, no approval in progress, approved by another device, or the token's deadline has passed. */
     record Conflict() implements AuthorizeEnrollmentResult { }
 
     record Unavailable() implements AuthorizeEnrollmentResult { }

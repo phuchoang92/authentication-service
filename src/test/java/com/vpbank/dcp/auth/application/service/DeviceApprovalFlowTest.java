@@ -222,11 +222,53 @@ class DeviceApprovalFlowTest {
         assertThat(stored.actorDeviceId()).isEqualTo(phone.id());
         assertThat(stored.mfaTransactionId()).isEqualTo("mfa-7");
 
-        // Approving twice, or claiming before the token exists, is a conflict.
-        assertThat(approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
-                .isInstanceOf(ApproveEnrollmentResult.Conflict.class);
+        // Claiming before the token exists is a conflict.
         assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
                 .isInstanceOf(ClaimEnrollmentResult.Conflict.class);
+    }
+
+    /** The phone lost approve's answer, or sent approve twice: the same FACE + OTP check again, nothing rewritten. */
+    @Test
+    void aRepeatedApproveByTheSameDeviceGetsTheSameCheckAgain() {
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        ApproveEnrollmentCommand approve = new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT);
+        ApproveEnrollmentResult first = approveEnrollment.approve(approve);
+        DeviceEnrollment afterFirst = enrollments.only();
+
+        assertThat(approveEnrollment.approve(approve)).isEqualTo(first);
+
+        assertThat(enrollments.only()).isEqualTo(afterFirst); // same row, same version
+        // Both calls sent the MFA service the same create, so it can answer the repeat with the first check.
+        var creates = org.mockito.ArgumentCaptor.forClass(MfaTransactionRequest.class);
+        verify(mfa, org.mockito.Mockito.times(2)).create(creates.capture());
+        assertThat(creates.getAllValues().get(1)).isEqualTo(creates.getAllValues().get(0));
+    }
+
+    @Test
+    void aRepeatedApproveIsRefusedWhenTheMfaServiceAnswersWithAnotherCheck() {
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-8", NOW.plus(Duration.ofMinutes(5))));
+
+        assertThat(approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+                .isInstanceOf(ApproveEnrollmentResult.Conflict.class);
+
+        assertThat(enrollments.only().mfaTransactionId()).isEqualTo("mfa-7"); // the request keeps the first check
+    }
+
+    @Test
+    void aRequestOneDeviceApprovedCannotBeApprovedByAnotherPrimaryDevice() {
+        requestApproval.request(new RequestApprovalCommand(WATCH_SESSION, WATCH_KEY, DevicePlatform.IOS));
+        approveEnrollment.approve(new ApproveEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+        // The tablet became the primary device after the phone approved.
+        TrustedDevice tablet = devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow();
+        devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), tablet.id());
+
+        assertThat(approveEnrollment.approve(new ApproveEnrollmentCommand(TABLET_SESSION, ENROLLMENT)))
+                .isInstanceOf(ApproveEnrollmentResult.Conflict.class);
+
+        verify(mfa).create(any()); // only the phone's approve reached the MFA service
+        assertThat(enrollments.only().actorDeviceId()).isEqualTo(phone.id());
     }
 
     @Test
@@ -254,9 +296,52 @@ class DeviceApprovalFlowTest {
         assertThat(approvalStatus.status(new ApprovalStatusCommand(WATCH_SESSION)))
                 .isEqualTo(new ApprovalStatusResult.Status(ENROLLMENT, EnrollmentState.WAITING_AUTHORIZATION, stored.expiresAt()));
 
-        // A second authorize finds no approval in progress any more.
-        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+    }
+
+    /** The phone lost authorize's answer, or sent it twice: only the digest was kept, so it gets a new token. */
+    @Test
+    void aRepeatedAuthorizeReplacesTheTokenAndKeepsItsDeadlineAndTheClaimAttempts() {
+        authorizeTheWatch();
+        claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, "wrong-token", "{watch-kenc}"));
+        DeviceEnrollment afterFirst = enrollments.only();
+        String secondToken = "r".repeat(43);
+        when(qrTokens.next()).thenReturn(secondToken);
+
+        AuthorizeEnrollmentResult again = authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT));
+
+        assertThat(again).isEqualTo(new AuthorizeEnrollmentResult.Authorized(ENROLLMENT, secondToken, NOW.plusSeconds(180)));
+        DeviceEnrollment reissued = enrollments.only();
+        assertThat(reissued.state()).isEqualTo(EnrollmentState.WAITING_AUTHORIZATION);
+        assertThat(reissued.authorizationTokenDigest()).isNotEqualTo(afterFirst.authorizationTokenDigest());
+        assertThat(reissued.authorizationExpiresAt()).isEqualTo(afterFirst.authorizationExpiresAt());
+        assertThat(reissued.authorizationAttempts()).isEqualTo(1); // the wrong claim before the repeat still counts
+        verify(mfa).check(any()); // the MFA outcome is not read again
+
+        // The first token no longer opens anything; the new one does.
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}")))
+                .isEqualTo(new ClaimEnrollmentResult.WrongAuthorization(3));
+        assertThat(claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, secondToken, "{watch-kenc}")))
+                .isInstanceOf(ClaimEnrollmentResult.Trusted.class);
+    }
+
+    @Test
+    void aRepeatedAuthorizeIsOnlyForTheApprovingDeviceAndOnlyWhileTheRequestIsOpen() {
+        authorizeTheWatch();
+        DeviceEnrollment authorized = enrollments.only();
+
+        // The tablet became the primary device after the phone collected the token.
+        TrustedDevice tablet = devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow();
+        devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), tablet.id());
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(TABLET_SESSION, ENROLLMENT)))
                 .isInstanceOf(AuthorizeEnrollmentResult.Conflict.class);
+        assertThat(enrollments.only()).isEqualTo(authorized);
+
+        // Once the watch has claimed, it is the primary device and the request is closed: nothing to hand out.
+        devices.primaries.put(new InMemoryTrustedDeviceRepository.Key(ALICE, Channel.MOBILE), phone.id());
+        claimEnrollment.claim(new ClaimEnrollmentCommand(WATCH_SESSION, QR_TOKEN, "{watch-kenc}"));
+        assertThat(authorizeEnrollment.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+                .isInstanceOf(AuthorizeEnrollmentResult.NotPrimaryDevice.class);
+        verify(qrTokens).next(); // only the first token was ever made
     }
 
     @Test
@@ -355,6 +440,21 @@ class DeviceApprovalFlowTest {
                 .isInstanceOf(ClaimEnrollmentResult.AuthorizationExpired.class);
         assertThat(enrollments.only().state()).isEqualTo(EnrollmentState.EXPIRED);
         assertThat(sessions.findByToken(WATCH_TOKEN)).isEmpty();
+    }
+
+    @Test
+    void aRepeatedAuthorizeAfterTheTokensDeadlineHandsOutNothingAndCannotExtendIt() {
+        authorizeTheWatch();
+        DeviceEnrollment authorized = enrollments.only();
+        Clock later = Clock.fixed(NOW.plusSeconds(180), ZoneOffset.UTC);
+        AuthorizeEnrollmentService laterAuthorize = new AuthorizeEnrollmentService(trustedDevices,
+                new ApprovalRequests(enrollments, later), mfa, qrTokens, EnrollmentPolicy.standard(), later);
+
+        assertThat(laterAuthorize.authorize(new AuthorizeEnrollmentCommand(PHONE_SESSION, ENROLLMENT)))
+                .isInstanceOf(AuthorizeEnrollmentResult.Conflict.class);
+
+        assertThat(enrollments.only()).isEqualTo(authorized);
+        verify(qrTokens).next(); // no second token
     }
 
     @Test

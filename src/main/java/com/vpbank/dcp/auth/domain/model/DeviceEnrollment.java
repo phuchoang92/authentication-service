@@ -138,6 +138,16 @@ public record DeviceEnrollment(@NonNull EnrollmentId id,
         return state == EnrollmentState.WAITING_APPROVAL && mfaTransactionId != null;
     }
 
+    /** This device is the one that approved the request; only it may go on to collect the token. */
+    public boolean wasApprovedBy(@NonNull TrustedDeviceId deviceId) {
+        return deviceId.equals(actorDeviceId);
+    }
+
+    /** The approver passed MFA and a token is out; the request waits for the new device to claim it. */
+    public boolean isAuthorized() {
+        return state == EnrollmentState.WAITING_AUTHORIZATION;
+    }
+
     /** The approver's MFA passed: the one-time token is issued; only its digest and deadline are kept. */
     public DeviceEnrollment authorize(@NonNull String tokenDigest,
                                       @NonNull Instant tokenExpiresAt,
@@ -152,6 +162,18 @@ public record DeviceEnrollment(@NonNull EnrollmentId id,
                 .authorizationExpiresAt(tokenExpiresAt)
                 .mfaMethod(confirmedMfaMethod)
                 .build();
+    }
+
+    /**
+     * The approver asked for the token again: a new token replaces the one issued, which stops working. The
+     * deadline and the claim attempts stay, so asking again buys the token no more time and no more tries.
+     */
+    public DeviceEnrollment reissueAuthorization(@NonNull String newTokenDigest, @NonNull Instant now) {
+        requireState(EnrollmentState.WAITING_AUTHORIZATION);
+        if (authorizationExpired(now)) {
+            throw new EnrollmentStateException("Authorization token expired");
+        }
+        return toBuilder().authorizationTokenDigest(newTokenDigest).build();
     }
 
     public boolean authorizationExpired(Instant now) {

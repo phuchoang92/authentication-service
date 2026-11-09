@@ -238,6 +238,30 @@
     - Not changed: `confirm` (a repeat after the commit is still `409`), and `approve` / `authorize` of the
       approval path (database), which still answer `409` on a repeat.
     `mvn -o verify`: 346 unit tests, 45 ITs (Valkey 9.1).
+22. **Done 2026-11-09.** A repeated `approve` by the device that approved gets the same FACE + OTP check again
+    (decided the same day; before, `409`, and the request then hung until its 24 h window ended because the
+    primary device could not get the `mfaTransactionId` back). The row keeps the MFA transaction but not its
+    deadline, so `approve` sends the MFA service the same `create` again (same `authOperationId` and body: the
+    create is built from values approve does not change) and the service answers with the check it already
+    opened (DD 20 §5.2). No migration, nothing written on a repeat. Guards: a request another device approved is
+    still `409` and does not reach the MFA service; when the MFA service answers a repeat with another transaction
+    than the row holds, the repeat is `409` and the row keeps the first. Cost of a repeat: one MFA call. This
+    leans on the MFA service returning the same transaction for the same `authOperationId`, which the MFA team has
+    not confirmed yet (DD 20 §5.7); until it does, the guard keeps a repeat from switching the request to a
+    second check. `authorize` is not changed in this turn.
+    `mvn -o verify`: 349 unit tests, 45 ITs (Valkey 9.1).
+23. **Done 2026-11-09.** A repeated `authorize` by the approving device, once the token is out, gets a new token
+    (decided the same day; before, `409`, and the QR could never be shown when the first answer was lost). The
+    first token cannot be handed out again because Auth keeps only its digest (slice 6), so the repeat makes a
+    new one and overwrites the digest: the earlier token stops working. What does not move: `authorizationExpiresAt`
+    (a repeat cannot buy the QR more than its 180 s) and the claim attempts already counted. The MFA service is
+    not asked again; `MFA_CONFIRMED_AT` keeps the time of the first authorize. `409` when the token's deadline has
+    passed (nothing is written; the new device's claim closes the request as before), when another device
+    approved, or when a racing claim changed the row first (version compare). `DeviceEnrollment` gained
+    `reissueAuthorization`, `wasApprovedBy` and `isAuthorized`; `ApprovalRequests.findOpen` reads the open
+    request at whichever step. With turns 21 and 22, a lost response at `init`, `verify`, `approve` or
+    `authorize` no longer strands the customer.
+    `mvn -o verify`: 352 unit tests, 45 ITs (Valkey 9.1).
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
 and a database guard for one open approval request per device.
