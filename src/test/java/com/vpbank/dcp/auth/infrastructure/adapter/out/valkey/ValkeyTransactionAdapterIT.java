@@ -44,7 +44,7 @@ class ValkeyTransactionAdapterIT {
     private static final TransactionKind<Enrollment> ENROLLMENT = new TransactionKind<>("enrollment", Enrollment.class);
     private static final TransactionKind<Credential> CREDENTIAL = new TransactionKind<>("credential", Credential.class);
     private static final String TABLET = "MOBILE:90359:tablet-2";
-    private static final String TABLET_KEY = "tx:v3:enrollment:" + TABLET;
+    private static final String TABLET_KEY = "tx:v4:enrollment:" + TABLET;
 
     private static LettuceConnectionFactory connections;
     private static StringRedisTemplate redis;
@@ -84,7 +84,7 @@ class ValkeyTransactionAdapterIT {
 
         // One JSON STRING, forgotten by the server at the deadline.
         assertThat(redis.type(TABLET_KEY)).isEqualTo(DataType.STRING);
-        assertThat(redis.opsForValue().get(TABLET_KEY)).startsWith("{\"schemaVersion\":3,\"purpose\":\"enrollment\",")
+        assertThat(redis.opsForValue().get(TABLET_KEY)).startsWith("{\"schemaVersion\":4,\"purpose\":\"enrollment\",")
                 .doesNotContain("\"version\"").contains("\"secret\":\"k1\"");
         assertThat(redis.getExpire(TABLET_KEY, TimeUnit.SECONDS)).isBetween(590L, 600L);
     }

@@ -43,7 +43,7 @@ class TransactionJsonCodecTest {
 
     @Test
     void theTextIsTheEnvelopeInAFixedOrderWithThePayloadInside() {
-        assertThat(text).isEqualTo("{\"schemaVersion\":3,\"purpose\":\"sample\",\"expiresAtMs\":1793787000123,"
+        assertThat(text).isEqualTo("{\"schemaVersion\":4,\"purpose\":\"sample\",\"expiresAtMs\":1793787000123,"
                 + "\"payload\":{\"customerId\":{\"value\":\"90359\"},\"step\":\"STARTED\",\"notes\":[\"a\",\"b\"],"
                 + "\"optional\":null,\"attempts\":1}}");
         assertThat(codec.decode(KIND, "MOBILE:90359:tablet-2", text)).contains(transaction);
@@ -81,11 +81,12 @@ class TransactionJsonCodecTest {
                 .serverPublicJwk("{srv-pub}")
                 .serverPrivateJwk("{srv-priv}")
                 .challengeDigest("digest")
+                .sealedChallenge("jwe.challenge")
                 .build();
         CacheTransaction<EnrollmentTransaction> opened =
                 enrollments.open("MOBILE:90359:tablet-2", EXPIRES, EnrollmentTransaction.keyExchange(start));
         CacheTransaction<EnrollmentTransaction> counted = opened.next(opened.payload().countVerifyAttempt());
-        CacheTransaction<EnrollmentTransaction> mfaRequired = counted.next(counted.payload().markMfaRequired("mfa-1"));
+        CacheTransaction<EnrollmentTransaction> mfaRequired = counted.next(counted.payload().markMfaRequired("mfa-1", EXPIRES.minusSeconds(300)));
         List<CacheTransaction<EnrollmentTransaction>> steps = List.of(opened, counted, mfaRequired);
 
         for (CacheTransaction<EnrollmentTransaction> state : steps) {
@@ -97,6 +98,11 @@ class TransactionJsonCodecTest {
 
         // The compare-and-set has no version to lean on: every step of the flow must give a text of its own.
         assertThat(steps.stream().map(codec::encode)).doesNotHaveDuplicates();
+
+        // An enrollment written before it kept init's answer (schema 3) has no sealed challenge: it is not read.
+        String withoutSealedChallenge = codec.encode(opened).replace("\"sealedChallenge\":\"jwe.challenge\",", "");
+        assertThat(withoutSealedChallenge).isNotEqualTo(codec.encode(opened));
+        assertThat(codec.decode(enrollments, opened.id(), withoutSealedChallenge)).isEmpty();
     }
 
     @Test
@@ -108,16 +114,16 @@ class TransactionJsonCodecTest {
         String purposeProperty = "\"purpose\":\"sample\",";
         assertThat(codec.decode(KIND, "id", text.replace(purposeProperty, ""))).isEmpty();                     // a property missing
         assertThat(codec.decode(KIND, "id", text.replace(purposeProperty, purposeProperty + "\"extra\":1,"))).isEmpty();
-        // The record of schema 2 carried a version counter: it is not read.
+        // The record of schema 2 carried a version counter: it is not read. Nor is a record of an earlier schema.
         assertThat(codec.decode(KIND, "id", text.replace(purposeProperty, purposeProperty + "\"version\":0,"))).isEmpty();
-        assertThat(codec.decode(KIND, "id", text.replace("\"schemaVersion\":3", "\"schemaVersion\":2"))).isEmpty();
-        assertThat(codec.decode(KIND, "id", text.replace("\"schemaVersion\":3", "\"schemaVersion\":\"3\""))).isEmpty();
+        assertThat(codec.decode(KIND, "id", text.replace("\"schemaVersion\":4", "\"schemaVersion\":3"))).isEmpty();
+        assertThat(codec.decode(KIND, "id", text.replace("\"schemaVersion\":4", "\"schemaVersion\":\"4\""))).isEmpty();
         assertThat(codec.decode(KIND, "id", text.replace("\"purpose\":\"sample\"", "\"purpose\":\"other-flow\""))).isEmpty(); // not this kind
         assertThat(codec.decode(KIND, "id", text.replace("1793787000123", "-5"))).isEmpty();
         assertThat(codec.decode(KIND, "id", text.replace("1793787000123", "\"1793787000123\""))).isEmpty();
         assertThat(codec.decode(KIND, "id", text.replace("1793787000123", "0.5"))).isEmpty();
         assertThat(codec.decode(KIND, "id",
-                "{\"schemaVersion\":3,\"purpose\":\"sample\",\"expiresAtMs\":1,\"payload\":null}")).isEmpty();
+                "{\"schemaVersion\":4,\"purpose\":\"sample\",\"expiresAtMs\":1,\"payload\":null}")).isEmpty();
         // Strict payload: an unknown property, a value the record refuses, a wrong type.
         assertThat(codec.decode(KIND, "id", text.replace("\"attempts\":1", "\"attempts\":1,\"x\":1"))).isEmpty();
         assertThat(codec.decode(KIND, "id", text.replace("\"attempts\":1", "\"attempts\":-1"))).isEmpty();

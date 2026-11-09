@@ -141,12 +141,50 @@ class DeviceEnrollmentFlowTest {
         assertThat(transaction.payload().platform()).isEqualTo(DevicePlatform.IOS);
         assertThat(transaction.payload().belongsTo(TABLET_SESSION)).isTrue();
         assertThat(transaction.payload().challengeDigest()).isEqualTo(EnrollmentDigests.digest(CHALLENGE));
+        assertThat(transaction.payload().sealedChallenge()).isEqualTo("jwe.challenge");
         // The restricted session is left as it was; nothing goes to SQL before the commit.
         assertThat(sessions.findByToken(RESTRICTED).orElseThrow().session().sessionVersion()).isZero();
         assertThat(devices.confirmations).isEmpty();
+    }
 
-        assertThat(initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS)))
-                .isInstanceOf(InitEnrollmentResult.Conflict.class); // init runs once per session
+    /** The app lost init's answer, or sent init twice: it gets the first answer again and nothing is redone. */
+    @Test
+    void aRepeatedInitGetsTheFirstAnswerAgainWithoutANewKeyOrChallenge() {
+        InitEnrollmentCommand init = new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS);
+        InitEnrollmentResult first = initEnrollment.init(init);
+        CacheTransaction<EnrollmentTransaction> afterFirst = transactions.only();
+
+        assertThat(initEnrollment.init(init)).isEqualTo(first);
+        // A repeat may leave out what the first init already gave.
+        assertThat(initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, null, null))).isEqualTo(first);
+
+        assertThat(transactions.<EnrollmentTransaction>only()).isEqualTo(afterFirst);
+        verify(serverKeys).next();
+        verify(challenges).newChallenge();
+    }
+
+    @Test
+    void aRepeatedInitNamingAnotherKeyOrPlatformIsRefusedAndChangesNothing() {
+        initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        CacheTransaction<EnrollmentTransaction> afterFirst = transactions.only();
+
+        assertThat(initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, "{other-key}", DevicePlatform.IOS)))
+                .isInstanceOf(InitEnrollmentResult.Conflict.class);
+        assertThat(initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.ANDROID)))
+                .isInstanceOf(InitEnrollmentResult.Conflict.class);
+
+        assertThat(transactions.<EnrollmentTransaction>only()).isEqualTo(afterFirst);
+        verify(serverKeys).next();
+    }
+
+    @Test
+    void initRepeatedAfterVerifyStillAnswersTheSameAndLeavesTheEnrollmentWaitingForFace() {
+        InitEnrollmentCommand init = new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS);
+        InitEnrollmentResult first = initEnrollment.init(init);
+        verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
+
+        assertThat(initEnrollment.init(init)).isEqualTo(first);
+        assertThat(payload(transactions).state()).isEqualTo(EnrollmentState.MFA_REQUIRED);
     }
 
     @Test
@@ -211,8 +249,36 @@ class DeviceEnrollmentFlowTest {
         assertThat(request.getValue().notAfter()).isEqualTo(NOW.plus(ENROLLMENT_LIFETIME));
         assertThat(request.getValue().contextDigest()).isEqualTo(EnrollmentDigests.contextDigest(payload(transactions)));
 
-        assertThat(verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer")))
-                .isInstanceOf(VerifyEnrollmentResult.Conflict.class); // verify runs once
+    }
+
+    /** The app lost verify's answer, or sent verify twice: the same FACE transaction again, at no cost. */
+    @Test
+    void aRepeatedVerifyAfterTheKeyProofGetsTheFirstAnswerAgainWithoutAnAttemptOrASecondMfaTransaction() {
+        initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+        VerifyEnrollmentResult first = verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
+        CacheTransaction<EnrollmentTransaction> afterFirst = transactions.only();
+        assertThat(first).isEqualTo(new VerifyEnrollmentResult.MfaRequired("mfa-1", NOW.plus(Duration.ofMinutes(5))));
+        assertThat(afterFirst.payload().mfaExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(5)));
+
+        assertThat(verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"))).isEqualTo(first);
+        // The key is already proven on this session: the answer is not checked again.
+        assertThat(verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.garbage"))).isEqualTo(first);
+
+        assertThat(transactions.<EnrollmentTransaction>only()).isEqualTo(afterFirst);
+        assertThat(afterFirst.payload().verifyAttempts()).isEqualTo(1);
+        verify(mfa).create(any());
+        assertThat(sessions.findByToken(RESTRICTED)).isPresent();
+    }
+
+    @Test
+    void theFaceDeadlineTheAppGetsNeverPassesTheEnrollmentDeadline() {
+        when(mfa.create(any())).thenReturn(new CreateResult.Created("mfa-1", NOW.plus(Duration.ofHours(1))));
+        initEnrollment.init(new InitEnrollmentCommand(TABLET_SESSION, DEVICE_KEY, DevicePlatform.IOS));
+
+        VerifyEnrollmentResult first = verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"));
+
+        assertThat(first).isEqualTo(new VerifyEnrollmentResult.MfaRequired("mfa-1", NOW.plus(ENROLLMENT_LIFETIME)));
+        assertThat(verifyEnrollment.verify(new VerifyEnrollmentCommand(TABLET_SESSION, "jwe.answer"))).isEqualTo(first);
     }
 
     @Test

@@ -447,6 +447,7 @@ class DeviceApprovalFlowTest {
                 .serverPublicJwk("{srv-pub}")
                 .serverPrivateJwk("{srv-priv}")
                 .challengeDigest("digest")
+                .sealedChallenge("jwe.challenge")
                 .build();
         EnrollmentTransaction startedOnThisSession = EnrollmentTransaction.keyExchange(start);
         enrollmentTransactions.open(startedOnThisSession);

@@ -25,10 +25,11 @@ class DeviceEnrollmentTest {
             .serverPublicJwk("{pub}")
             .serverPrivateJwk("{priv}")
             .challengeDigest("digest")
+            .sealedChallenge("jwe.challenge")
             .build();
     /** A primary enrollment's row as the trust commit first sees it: past its key proof in the cache (slice 11). */
     private final DeviceEnrollment primaryRow = DeviceEnrollment.fromTransaction(
-            EnrollmentTransaction.keyExchange(TABLET_START).markMfaRequired("mfa-1"),
+            EnrollmentTransaction.keyExchange(TABLET_START).markMfaRequired("mfa-1", T0.plusSeconds(300)),
             T0.plus(Duration.ofMinutes(10)));
 
     @Test
@@ -108,9 +109,10 @@ class DeviceEnrollmentTest {
                 .serverPublicJwk("{pub}")
                 .serverPrivateJwk("{priv}")
                 .challengeDigest("digest")
+                .sealedChallenge("jwe.challenge")
                 .build();
         EnrollmentTransaction started = EnrollmentTransaction.keyExchange(start);
-        EnrollmentTransaction passed = started.countVerifyAttempt().markMfaRequired("mfa-1");
+        EnrollmentTransaction passed = started.countVerifyAttempt().markMfaRequired("mfa-1", T0.plusSeconds(300));
 
         DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed, T0.plusSeconds(600));
 

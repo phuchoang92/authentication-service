@@ -12,6 +12,7 @@ public sealed interface VerifyEnrollmentResult {
     /** The customer has no FACE factor: the enrollment ended, the branch must help. */
     record NoUsableFactor() implements VerifyEnrollmentResult { }
 
+    /** Not a restricted session, no enrollment started by it, or another request changed it first. */
     record Conflict() implements VerifyEnrollmentResult { }
 
     record Unavailable() implements VerifyEnrollmentResult { }

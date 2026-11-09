@@ -4,6 +4,7 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.exception.EnrollmentStateException;
+import java.time.Instant;
 import lombok.Builder;
 import lombok.NonNull;
 
@@ -15,6 +16,10 @@ import lombok.NonNull;
  * init, MFA_REQUIRED after verify; failure, expiry and the trust commit end it by removing the transaction, so
  * it has no terminal state. The deadline belongs to the transaction envelope. Every step moves the record
  * forward (one more attempt, the next state): the store tells two moments apart by this record alone.
+ *
+ * <p>It also keeps what init and verify answered, so a repeated call gets its first answer again: the challenge
+ * as sealed to the device key ({@code sealedChallenge}; Auth cannot open it and still keeps only the digest of
+ * the challenge itself), and the deadline of the FACE check ({@code mfaExpiresAt}).
  */
 @Builder(toBuilder = true)
 public record EnrollmentTransaction(@NonNull EnrollmentId id,
@@ -29,16 +34,20 @@ public record EnrollmentTransaction(@NonNull EnrollmentId id,
                                     @NonNull String serverPublicJwk,
                                     @NonNull String serverPrivateJwk,
                                     @NonNull String challengeDigest,
+                                    @NonNull String sealedChallenge,
                                     int verifyAttempts,
-                                    String mfaTransactionId) {
+                                    String mfaTransactionId,
+                                    Instant mfaExpiresAt) {
     public EnrollmentTransaction {
         if (state != EnrollmentState.KEY_EXCHANGE && state != EnrollmentState.MFA_REQUIRED) {
             throw new IllegalArgumentException("An enrollment transaction is KEY_EXCHANGE or MFA_REQUIRED");
         }
-        // The MFA transaction exists exactly from the key proof on.
+        // The MFA transaction and its deadline exist exactly from the key proof on.
+        boolean keyProven = state == EnrollmentState.MFA_REQUIRED;
         boolean hasMfaTransaction = mfaTransactionId != null;
-        if (hasMfaTransaction != (state == EnrollmentState.MFA_REQUIRED)) {
-            throw new IllegalArgumentException("MFA_REQUIRED, and only MFA_REQUIRED, carries the MFA transaction ID");
+        boolean hasMfaDeadline = mfaExpiresAt != null;
+        if (hasMfaTransaction != keyProven || hasMfaDeadline != keyProven) {
+            throw new IllegalArgumentException("MFA_REQUIRED, and only MFA_REQUIRED, carries the MFA transaction and its deadline");
         }
         if (verifyAttempts < 0) {
             throw new IllegalArgumentException("Attempts cannot be negative");
@@ -62,6 +71,7 @@ public record EnrollmentTransaction(@NonNull EnrollmentId id,
                 .serverPublicJwk(start.serverPublicJwk())
                 .serverPrivateJwk(start.serverPrivateJwk())
                 .challengeDigest(start.challengeDigest())
+                .sealedChallenge(start.sealedChallenge())
                 .verifyAttempts(0)
                 .build();
     }
@@ -84,13 +94,22 @@ public record EnrollmentTransaction(@NonNull EnrollmentId id,
         return verifyAttempts >= policy.maxVerifyAttempts();
     }
 
-    /** The device proved its key; the MFA service now holds a FACE transaction for this enrollment. */
-    public EnrollmentTransaction markMfaRequired(@NonNull String mfaTransactionId) {
+    /**
+     * The device proved its key; the MFA service now holds a FACE transaction for this enrollment, to be passed
+     * before {@code mfaExpiresAt}.
+     */
+    public EnrollmentTransaction markMfaRequired(@NonNull String mfaTransactionId, @NonNull Instant mfaExpiresAt) {
         requireState(EnrollmentState.KEY_EXCHANGE);
         return toBuilder()
                 .state(EnrollmentState.MFA_REQUIRED)
                 .mfaTransactionId(mfaTransactionId)
+                .mfaExpiresAt(mfaExpiresAt)
                 .build();
+    }
+
+    /** Verify already accepted this device's key proof; the enrollment waits for the FACE check. */
+    public boolean keyProven() {
+        return state == EnrollmentState.MFA_REQUIRED;
     }
 
     private void requireState(EnrollmentState expected) {

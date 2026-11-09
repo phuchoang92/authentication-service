@@ -33,8 +33,8 @@ without a customer session (onboarding), issued to an internal service that pres
 |---|---|---|
 | `POST /api/ns/v1/login` | app via BFF, no session | `201 {tokenEnvelope, status, idleExpiresAt, absoluteExpiresAt}`; `401 INVALID_CREDENTIALS`; `403 ACCOUNT_NOT_READY`; `423 ACCOUNT_LOCKED`; `428 CAPTCHA_REQUIRED` with the challenge in the headers `X-Captcha-Image` (base64 PNG) and `X-Captcha-Expires-At`, answered by `captchaAnswer` in the next login; `503 LOGIN_UNAVAILABLE` |
 | `POST /api/v1/logout` | app, `Authorization: Bearer s1:auth:session:<channel>:<sessionId>:<secret>` (ACTIVE or restricted) | `204`; `401 SESSION_REQUIRED` |
-| `POST /api/v1/trusted-device/init` | BFF for the app (restricted session) | `200 {status:"KEY_EXCHANGE", enrollmentId, serverPublicJwk, challenge (JWE to the device key), expiresAt}`; `400 DEVICE_KEY_REQUIRED`; `409 STATE_CONFLICT` (ACTIVE session or init already done) |
-| `POST /api/v1/trusted-device/verify` | BFF for the app (restricted session) | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}`; `401 WRONG_CHALLENGE` + detail `attemptsLeft`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT`; `503` |
+| `POST /api/v1/trusted-device/init` | BFF for the app (restricted session) | `200 {status:"KEY_EXCHANGE", enrollmentId, serverPublicJwk, challenge (JWE to the device key), expiresAt}`; `400 DEVICE_KEY_REQUIRED`; `409 STATE_CONFLICT` (ACTIVE session, or a repeated init naming another key). A repeated init of the same session gets the first answer again |
+| `POST /api/v1/trusted-device/verify` | BFF for the app (restricted session) | `200 {status:"MFA_REQUIRED", mfaTransactionId, expiresAt}`; `401 WRONG_CHALLENGE` + detail `attemptsLeft`; `403 NO_USABLE_FACTOR`; `409 STATE_CONFLICT`; `503`. A repeated verify after the key proof gets the first answer again |
 | `POST /api/v1/trusted-device/confirm` | BFF for the app (restricted session) | `201 {tokenEnvelope, status:"ACTIVE", idleExpiresAt, absoluteExpiresAt}` sealed to the key sent at confirm; `409 MFA_NOT_PASSED`; `401 MFA_FAILED`; `401 MFA_EXPIRED`; `400 REQUEST_REJECTED`; `409 STATE_CONFLICT`; `503` |
 | `POST /api/v1/trusted-device/request` | BFF for the new device (restricted session) | `200 {status:"WAITING_APPROVAL", enrollmentId, expiresAt}` (same answer on repeat); `400 DEVICE_KEY_REQUIRED`; `409 TOO_MANY_PENDING_DEVICES`; `409 STATE_CONFLICT` |
 | `GET /api/v1/trusted-device/status` | BFF for the new device (restricted session) | `200 {status, enrollmentId, expiresAt}` — `WAITING_APPROVAL`, `WAITING_AUTHORIZATION`, `FAILED`, `EXPIRED`; `409 STATE_CONFLICT` without a request |
@@ -107,10 +107,12 @@ writes, in one SQL transaction, the new trusted row (replacing a previous row of
 installation, expiring the oldest beyond the cap), the primary row (`FACE_CONFIRMED`), the
 enrollment row (inserted `COMPLETED`) and the audit trail; the restricted session is consumed and a new ACTIVE
 session is sealed to the key sent at confirm. Until then the steps share one Valkey record per device
-(`tx:v3:enrollment:<channel>:<customerId>:<deviceId>`, one JSON STRING in the generic transaction store,
+(`tx:v4:enrollment:<channel>:<customerId>:<deviceId>`, one JSON STRING in the generic transaction store,
 slice 11): Ksrv, challenge digest, attempts and MFA transaction, compare-and-set on every step (the stored text
 itself is compared; the record has no version counter); nothing reaches SQL before the commit, and a failure removes the
-record and ends the session. The MFA contract is an assumption until the MFA team confirms it.
+record and ends the session. The record also keeps what `init` and `verify` answered (the challenge as sealed to
+the device key, the FACE deadline), so an app that lost a response calls the step again and gets the same answer:
+no new Ksrv or challenge, no attempt counted, no second MFA transaction. The MFA contract is an assumption until the MFA team confirms it.
 
 **Approval by the primary device (phase 4, second path, slice 6):** a new installation on a restricted
 session calls `request` with its public key; Auth keeps a `PENDING` device row (not trusted, at most 3
@@ -127,7 +129,7 @@ stays trusted. Auth stores only the token's SHA-256. Push notification to the pr
 **Lockout (phase 2):** consecutive password failures on one identity escalate — after 2 the next
 login is not tried: it answers `428 CAPTCHA_REQUIRED` with the customer's challenge in its headers
 (`X-Captcha-Image`, `X-Captcha-Expires-At`; decided 2026-11-08, no CAPTCHA route of its own), and the next
-login carries `captchaAnswer`. A customer has one open challenge at a time (Valkey `tx:v3:captcha:<customerId>`,
+login carries `captchaAnswer`. A customer has one open challenge at a time (Valkey `tx:v4:captcha:<customerId>`,
 5 min, HMAC of the answer only); any answer consumes it, and a wrong one gets a fresh challenge with the next
 `428`. The image is a 16-colour PNG of about 2 KB as base64, so it fits the usual 8 KB response-header limit
 of Tomcat and proxies. At 3 the account is locked 15 min, at 4 for 24 h, at 5 permanently

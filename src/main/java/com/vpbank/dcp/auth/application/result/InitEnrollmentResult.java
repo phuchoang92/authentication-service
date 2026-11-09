@@ -16,7 +16,7 @@ public sealed interface InitEnrollmentResult {
     /** An unknown device sent no (usable) public key or no platform. */
     record DeviceKeyRequired() implements InitEnrollmentResult { }
 
-    /** Not a restricted session, or init was already done on it. */
+    /** Not a restricted session, a repeated init naming another key, or a racing init of the same device. */
     record Conflict() implements InitEnrollmentResult { }
 
     record Unavailable() implements InitEnrollmentResult { }

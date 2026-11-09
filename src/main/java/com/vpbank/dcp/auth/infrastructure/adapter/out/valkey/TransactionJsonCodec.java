@@ -17,9 +17,10 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Cache transaction ↔ the one JSON text Valkey keeps for it:
- * {@code {"schemaVersion":3,"purpose":…,"expiresAtMs":…,"payload":{…}}}. The envelope is four fixed properties in
+ * {@code {"schemaVersion":4,"purpose":…,"expiresAtMs":…,"payload":{…}}}. The envelope is four fixed properties in
  * that order; the payload is the flow's own record, so this codec serves every flow without knowing any. Schema 3
  * dropped the {@code version} counter of schema 2: the store compares the whole text, so the payload is enough.
+ * Schema 4 has the same envelope; the enrollment payload gained the answers init and verify repeat.
  *
  * <p>Encoding is deterministic: equal transactions give the same text. The store relies on it, because its
  * compare-and-set asks Valkey whether the stored text still equals the text of the transaction the caller read.
@@ -32,7 +33,7 @@ import tools.jackson.databind.node.ObjectNode;
  */
 @RequiredArgsConstructor
 public final class TransactionJsonCodec {
-    static final int SCHEMA_VERSION = 3;
+    static final int SCHEMA_VERSION = 4;
     static final String P_SCHEMA = "schemaVersion";
     static final String P_PURPOSE = "purpose";
     static final String P_EXPIRES_AT = "expiresAtMs";

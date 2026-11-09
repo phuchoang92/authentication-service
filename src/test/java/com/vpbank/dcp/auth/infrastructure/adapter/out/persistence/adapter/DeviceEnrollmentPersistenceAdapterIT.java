@@ -163,10 +163,11 @@ class DeviceEnrollmentPersistenceAdapterIT {
                 .serverPublicJwk("{srv-pub}")
                 .serverPrivateJwk("{srv-priv}")
                 .challengeDigest("digest")
+                .sealedChallenge("jwe.challenge")
                 .build();
         EnrollmentTransaction passed = EnrollmentTransaction.keyExchange(start)
                 .countVerifyAttempt()
-                .markMfaRequired("mfa-1");
+                .markMfaRequired("mfa-1", now.plusSeconds(300));
         DeviceEnrollment enrollment = DeviceEnrollment.fromTransaction(passed, now.plusSeconds(600));
         assertThat(enrollmentRows.findById(enrollment.id().value())).isEmpty();
         NewDevice newTabletRow = DomainFixtures.newDevice(ALICE_TABLET, DevicePlatform.IOS, "{new}", now);

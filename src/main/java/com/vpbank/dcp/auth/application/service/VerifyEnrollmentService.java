@@ -11,7 +11,6 @@ import com.vpbank.dcp.auth.application.port.out.model.CacheTransaction;
 import com.vpbank.dcp.auth.application.port.out.model.OpenedChallenge;
 import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.result.VerifyEnrollmentResult;
-import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
 import com.vpbank.dcp.auth.domain.model.EnrollmentTransaction;
@@ -23,7 +22,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * Step 2 of a new device trusting itself (DD 20 §4): checks the device opened init's challenge with its key, then
  * asks the MFA service for a FACE check bound to this enrollment. Each answer counts as an attempt; the last wrong
- * one, or no usable factor, removes the transaction and ends the restricted session.
+ * one, or no usable factor, removes the transaction and ends the restricted session. Once the key is proven, a
+ * repeated verify gets the first answer again.
  */
 @RequiredArgsConstructor
 public final class VerifyEnrollmentService implements VerifyEnrollmentUseCase {
@@ -48,32 +48,44 @@ public final class VerifyEnrollmentService implements VerifyEnrollmentUseCase {
             return new VerifyEnrollmentResult.Conflict();
         }
         try {
-            Optional<CacheTransaction<EnrollmentTransaction>> counted = countVerifyAttempt(newDeviceSession);
-            if (counted.isEmpty()) {
+            Optional<CacheTransaction<EnrollmentTransaction>> started =
+                    enrollmentTransactions.findStartedBy(newDeviceSession);
+            if (started.isEmpty()) {
                 return new VerifyEnrollmentResult.Conflict();
             }
-            CacheTransaction<EnrollmentTransaction> transaction = counted.get();
-            if (!provesDeviceKey(transaction.payload(), command.challengeResponse())) {
-                return wrongChallenge(newDeviceSession, transaction);
+            CacheTransaction<EnrollmentTransaction> transaction = started.get();
+            if (transaction.payload().keyProven()) {
+                return faceCheckAnswer(transaction.payload());
             }
-            return startFaceCheck(newDeviceSession, transaction);
+            return checkKeyProof(command, transaction);
         } catch (RepositoryUnavailableException | PartnerUnavailableException failure) {
             return new VerifyEnrollmentResult.Unavailable();
         }
     }
 
-    /**
-     * This session's KEY_EXCHANGE transaction with one more attempt, counted before the answer is checked so a lost
-     * race cannot grant a free try; empty when there is none or another request changed it first.
-     */
-    private Optional<CacheTransaction<EnrollmentTransaction>> countVerifyAttempt(AdmittedSession newDeviceSession) {
-        Optional<CacheTransaction<EnrollmentTransaction>> waiting =
-                enrollmentTransactions.findOpenAt(newDeviceSession, EnrollmentState.KEY_EXCHANGE);
-        if (waiting.isEmpty()) {
-            return Optional.empty();
+    /** Counts the attempt, checks the device's answer, and on the right answer starts the FACE check. */
+    private VerifyEnrollmentResult checkKeyProof(VerifyEnrollmentCommand command,
+                                                 CacheTransaction<EnrollmentTransaction> waiting) {
+        AdmittedSession newDeviceSession = command.admitted();
+        Optional<CacheTransaction<EnrollmentTransaction>> counted = countVerifyAttempt(waiting);
+        if (counted.isEmpty()) {
+            return new VerifyEnrollmentResult.Conflict();
         }
-        EnrollmentTransaction withAttempt = waiting.get().payload().countVerifyAttempt();
-        return enrollmentTransactions.update(waiting.get(), withAttempt);
+        CacheTransaction<EnrollmentTransaction> transaction = counted.get();
+        if (!provesDeviceKey(transaction.payload(), command.challengeResponse())) {
+            return wrongChallenge(newDeviceSession, transaction);
+        }
+        return startFaceCheck(newDeviceSession, transaction);
+    }
+
+    /**
+     * One more attempt on the transaction, counted before the answer is checked so a lost race cannot grant a free
+     * try; empty when another request changed the transaction first.
+     */
+    private Optional<CacheTransaction<EnrollmentTransaction>> countVerifyAttempt(
+            CacheTransaction<EnrollmentTransaction> waiting) {
+        EnrollmentTransaction withAttempt = waiting.payload().countVerifyAttempt();
+        return enrollmentTransactions.update(waiting, withAttempt);
     }
 
     /** The response opens with Ksrv and echoes this enrollment and the exact challenge; compared in constant time. */
@@ -116,13 +128,23 @@ public final class VerifyEnrollmentService implements VerifyEnrollmentUseCase {
     /** Moves the enrollment to MFA_REQUIRED; the app gets the earlier of the FACE and the enrollment deadlines. */
     private VerifyEnrollmentResult recordMfaRequired(CacheTransaction<EnrollmentTransaction> transaction,
                                                      CreateResult.Created faceTransaction) {
-        EnrollmentTransaction mfaRequired = transaction.payload().markMfaRequired(faceTransaction.mfaTransactionId());
+        Instant faceCheckDeadline = earlierOf(faceTransaction.expiresAt(), transaction.expiresAt());
+        EnrollmentTransaction mfaRequired =
+                transaction.payload().markMfaRequired(faceTransaction.mfaTransactionId(), faceCheckDeadline);
         Optional<CacheTransaction<EnrollmentTransaction>> saved = enrollmentTransactions.update(transaction, mfaRequired);
         if (saved.isEmpty()) {
             return new VerifyEnrollmentResult.Conflict();
         }
-        Instant expiresAt = earlierOf(faceTransaction.expiresAt(), transaction.expiresAt());
-        return new VerifyEnrollmentResult.MfaRequired(faceTransaction.mfaTransactionId(), expiresAt);
+        return faceCheckAnswer(mfaRequired);
+    }
+
+    /**
+     * The FACE transaction and its deadline, read from the enrollment, so the verify that proved the key and its
+     * repeats answer the same. A repeat (the app lost the first answer, or sent the request twice) is not checked
+     * again and costs no attempt: this session has already proven the key.
+     */
+    private static VerifyEnrollmentResult faceCheckAnswer(EnrollmentTransaction mfaRequired) {
+        return new VerifyEnrollmentResult.MfaRequired(mfaRequired.mfaTransactionId(), mfaRequired.mfaExpiresAt());
     }
 
     /** A failed enrollment leaves nothing behind: the transaction goes, then the restricted session. */

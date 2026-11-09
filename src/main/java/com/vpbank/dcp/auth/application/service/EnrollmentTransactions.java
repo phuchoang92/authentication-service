@@ -40,19 +40,21 @@ public final class EnrollmentTransactions {
         return deviceTransaction.isPresent() && deviceTransaction.get().payload().belongsTo(newDeviceSession);
     }
 
+    /** The device's transaction, whichever login started it. The store drops it at its deadline. */
+    public Optional<CacheTransaction<EnrollmentTransaction>> findOfDevice(AdmittedSession newDeviceSession) {
+        String deviceAddress = addressOf(
+                newDeviceSession.channel(),
+                newDeviceSession.customerId(),
+                newDeviceSession.deviceId());
+        return transactionStore.find(KIND, deviceAddress);
+    }
+
     /**
-     * Clears the way for this restricted session to start: the transaction an earlier login of the same device
-     * left is removed. False when this session already started one, or another request changed it first.
+     * Clears the way for a new login of the device to start: the transaction an earlier login left is removed.
+     * False when another request changed it first.
      */
-    public boolean makeRoomFor(AdmittedSession newDeviceSession) {
-        Optional<CacheTransaction<EnrollmentTransaction>> earlierTransaction = findOfDevice(newDeviceSession);
-        if (earlierTransaction.isEmpty()) {
-            return true;
-        }
-        if (earlierTransaction.get().payload().belongsTo(newDeviceSession)) {
-            return false;
-        }
-        return transactionStore.deleteIfCurrent(earlierTransaction.get());
+    public boolean makeRoomFor(CacheTransaction<EnrollmentTransaction> earlierTransaction) {
+        return transactionStore.deleteIfCurrent(earlierTransaction);
     }
 
     /** Opens the transaction init started; empty when a racing init of the same device got there first. */
@@ -68,21 +70,29 @@ public final class EnrollmentTransactions {
         return Optional.of(freshTransaction);
     }
 
-    /** The device's transaction, when this restricted session started it, it is still open and it waits at this step. */
-    public Optional<CacheTransaction<EnrollmentTransaction>> findOpenAt(AdmittedSession newDeviceSession,
-                                                                        EnrollmentState step) {
+    /** The device's transaction, when this restricted session started it and it is still open, at whichever step. */
+    public Optional<CacheTransaction<EnrollmentTransaction>> findStartedBy(AdmittedSession newDeviceSession) {
         Optional<CacheTransaction<EnrollmentTransaction>> deviceTransaction = findOfDevice(newDeviceSession);
         if (deviceTransaction.isEmpty()) {
             return Optional.empty();
         }
         CacheTransaction<EnrollmentTransaction> transaction = deviceTransaction.get();
-        boolean waitsForThisSession = transaction.payload().belongsTo(newDeviceSession)
-                && transaction.isOpen(clock.instant())
-                && transaction.payload().state() == step;
-        if (!waitsForThisSession) {
+        boolean openForThisSession = transaction.payload().belongsTo(newDeviceSession)
+                && transaction.isOpen(clock.instant());
+        if (!openForThisSession) {
             return Optional.empty();
         }
         return deviceTransaction;
+    }
+
+    /** The transaction this restricted session started, when it is still open and it waits at this step. */
+    public Optional<CacheTransaction<EnrollmentTransaction>> findOpenAt(AdmittedSession newDeviceSession,
+                                                                        EnrollmentState step) {
+        Optional<CacheTransaction<EnrollmentTransaction>> started = findStartedBy(newDeviceSession);
+        if (started.isEmpty() || started.get().payload().state() != step) {
+            return Optional.empty();
+        }
+        return started;
     }
 
     /** Writes the changed enrollment over the one read; empty when another request changed it first. */
@@ -99,14 +109,6 @@ public final class EnrollmentTransactions {
     /** Drops a failed or expired enrollment; a transaction another request already changed is left to it. */
     public void remove(CacheTransaction<EnrollmentTransaction> transaction) {
         transactionStore.deleteIfCurrent(transaction);
-    }
-
-    private Optional<CacheTransaction<EnrollmentTransaction>> findOfDevice(AdmittedSession newDeviceSession) {
-        String deviceAddress = addressOf(
-                newDeviceSession.channel(),
-                newDeviceSession.customerId(),
-                newDeviceSession.deviceId());
-        return transactionStore.find(KIND, deviceAddress);
     }
 
     /** One transaction per device, whichever login started it: {@code <channel>:<customerId>:<deviceId>}. */

@@ -62,7 +62,7 @@ class CaptchaChallengeStoreIT {
     void storesTheDigestNotTheAnswerUnderTheCustomerWithTheExpiryAsTtlAndConsumesOnce() {
         store.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
 
-        String key = "tx:v3:captcha:90359";
+        String key = "tx:v4:captcha:90359";
         assertThat(redis.type(key)).isEqualTo(DataType.STRING);
         assertThat(redis.opsForValue().get(key))
                 .contains(digests.of(new CaptchaAnswer("AB3CD"))).doesNotContain("AB3CD");
@@ -79,14 +79,14 @@ class CaptchaChallengeStoreIT {
         store.issue(ALICE, new CaptchaAnswer("XY7ZW"), Instant.now().plusSeconds(300));
 
         assertThat(store.consume(ALICE, new CaptchaAnswer("AB3CD"))).isFalse(); // the earlier answer is gone
-        assertThat(redis.hasKey("tx:v3:captcha:90359")).isFalse(); // and the attempt consumed the new one
+        assertThat(redis.hasKey("tx:v4:captcha:90359")).isFalse(); // and the attempt consumed the new one
     }
 
     @Test
     void wrongAnswerOtherCustomerOrExpiredIsFalseAndStillConsumes() {
         store.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
         assertThat(store.consume(ALICE, new CaptchaAnswer("AB3CE"))).isFalse();
-        assertThat(redis.hasKey("tx:v3:captcha:90359")).isFalse();
+        assertThat(redis.hasKey("tx:v4:captcha:90359")).isFalse();
 
         CustomerId bob = new CustomerId("77777");
         store.issue(bob, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(300));
@@ -97,7 +97,7 @@ class CaptchaChallengeStoreIT {
         store.issue(ALICE, new CaptchaAnswer("AB3CD"), Instant.now().plusSeconds(2));
         CaptchaChallengeStore later = storeAt(Clock.fixed(Instant.now().plusSeconds(60), ZoneOffset.UTC));
         assertThat(later.consume(ALICE, new CaptchaAnswer("AB3CD"))).isFalse();
-        assertThat(redis.hasKey("tx:v3:captcha:90359")).isFalse(); // consumed all the same
+        assertThat(redis.hasKey("tx:v4:captcha:90359")).isFalse(); // consumed all the same
     }
 
     @Test

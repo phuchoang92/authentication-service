@@ -145,8 +145,9 @@ class TrustedDeviceServiceTest {
                 .serverPublicJwk("{srv-pub}")
                 .serverPrivateJwk("{srv-priv}")
                 .challengeDigest("digest")
+                .sealedChallenge("jwe.challenge")
                 .build();
-        EnrollmentTransaction passed = EnrollmentTransaction.keyExchange(start).markMfaRequired("mfa-1");
+        EnrollmentTransaction passed = EnrollmentTransaction.keyExchange(start).markMfaRequired("mfa-1", NOW.plusSeconds(300));
         com.vpbank.dcp.auth.domain.model.DeviceEnrollment enrollment =
                 com.vpbank.dcp.auth.domain.model.DeviceEnrollment.fromTransaction(passed, NOW.plusSeconds(600));
 

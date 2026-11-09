@@ -218,6 +218,26 @@
     (CAPTCHA), so an enrollment or a challenge in flight at deploy starts again. The session record
     (`session:v3`, `sessionVersion`) is untouched: it is the contract shared with the BFF (DD 22).
     `mvn -o verify`: 341 unit tests, 45 ITs.
+21. **Done 2026-11-09.** A repeated `init` or `verify` gets its first answer again (decided the same day; it
+    replaces "init from the same session twice is `409`" of turn 3 and "verify runs once"). The case is an app
+    that lost the response, or sent the request twice: before, it got `409` and the customer had to log in again.
+    - `init` from the session that already started the enrollment: the same `enrollmentId`, Ksrv, sealed challenge
+      and deadline, read from the transaction; no new key pair, no new challenge, nothing written. It answers the
+      same after `verify` too. A repeat that names another key or platform is another request: `409`. A repeat
+      may leave the key and platform out.
+    - `verify` once the key is proven (`MFA_REQUIRED`): the same `mfaTransactionId` and deadline; the response
+      is not checked again, no attempt is counted, the MFA service is not called. Before the proof nothing
+      changes: every answer costs an attempt, and after an MFA outage the app calls verify again (DD 20 §5.2).
+    - For this the enrollment payload keeps two more values: `sealedChallenge` (the JWE sent to the device; Auth
+      cannot open it and still keeps only the digest of the challenge) and `mfaExpiresAt` (the deadline verify
+      answered: the earlier of the MFA's and the enrollment's). The record moves to `tx:v4:` / `schemaVersion`
+      4; records at `tx:v3:` are not read (they lived at most 10 minutes).
+    - `EnrollmentTransactions`: `findOfDevice` (public), `findStartedBy`, `makeRoomFor(earlierTransaction)`; init
+      still reads the record once. Valkey calls: first init 2 (`GET`, `SET NX`), repeated init 1 (`GET`), repeated
+      verify 1 (`GET`).
+    - Not changed: `confirm` (a repeat after the commit is still `409`), and `approve` / `authorize` of the
+      approval path (database), which still answer `409` on a repeat.
+    `mvn -o verify`: 346 unit tests, 45 ITs (Valkey 9.1).
 
 Slice 11 is complete. Still open (see "Not in this slice"): the BFF minting the assertion, mTLS / key rotation,
 and a database guard for one open approval request per device.

@@ -25,8 +25,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * Step 1 of a new device trusting itself from its restricted session (DD 20 §4): hands the app the server key
  * (Ksrv) and a challenge sealed to the device key, and opens the device's enrollment transaction
- * ({@link EnrollmentTransactions}). Runs once per restricted session; a later login of the same device starts over.
- * Nothing is written to SQL.
+ * ({@link EnrollmentTransactions}). A restricted session starts one enrollment: its repeated init gets the first
+ * answer again; a later login of the same device starts over. Nothing is written to SQL.
  */
 @RequiredArgsConstructor
 public final class InitEnrollmentService implements InitEnrollmentUseCase {
@@ -48,19 +48,63 @@ public final class InitEnrollmentService implements InitEnrollmentUseCase {
             return new InitEnrollmentResult.Conflict();
         }
         try {
-            // init runs once per restricted session; a new login on the same device starts over.
-            if (!enrollmentTransactions.makeRoomFor(newDeviceSession)) {
-                return new InitEnrollmentResult.Conflict();
+            Optional<CacheTransaction<EnrollmentTransaction>> found =
+                    enrollmentTransactions.findOfDevice(newDeviceSession);
+            if (found.isEmpty()) {
+                return startEnrollment(command);
             }
-            Optional<KnownDeviceSummary> knownDevice = knownDeviceOf(newDeviceSession);
-            Optional<DeviceKey> deviceKey = resolveDeviceKey(command, knownDevice);
-            if (deviceKey.isEmpty()) {
-                return new InitEnrollmentResult.DeviceKeyRequired();
+            CacheTransaction<EnrollmentTransaction> deviceTransaction = found.get();
+            boolean startedByThisSession = deviceTransaction.payload().belongsTo(newDeviceSession);
+            if (startedByThisSession) {
+                return answerAgain(command, deviceTransaction);
             }
-            return startKeyExchange(newDeviceSession, knownDevice, deviceKey.get());
+            return startOver(command, deviceTransaction);
         } catch (RepositoryUnavailableException failure) {
             return new InitEnrollmentResult.Unavailable();
         }
+    }
+
+    /**
+     * This session already ran init: the app lost the first answer, or sent the request twice. It gets the same
+     * enrollment, Ksrv, challenge and deadline again; nothing is written. A repeat naming another key or platform
+     * is a different request and is refused.
+     */
+    private static InitEnrollmentResult answerAgain(InitEnrollmentCommand command,
+                                                    CacheTransaction<EnrollmentTransaction> started) {
+        if (!asksForTheSameKey(command, started.payload())) {
+            return new InitEnrollmentResult.Conflict();
+        }
+        return keyExchangeAnswer(started);
+    }
+
+    /** A repeat may leave the key and the platform out; what it does send must be what the first init kept. */
+    private static boolean asksForTheSameKey(InitEnrollmentCommand command, EnrollmentTransaction enrollment) {
+        String sentPublicJwk = command.devicePublicJwk();
+        DevicePlatform sentPlatform = command.platform();
+        boolean sameKey = sentPublicJwk == null || sentPublicJwk.equals(enrollment.devicePublicJwk());
+        boolean samePlatform = sentPlatform == null || sentPlatform == enrollment.platform();
+        return sameKey && samePlatform;
+    }
+
+    /** An earlier login of this device left its transaction: it is removed and this login starts its own. */
+    private InitEnrollmentResult startOver(InitEnrollmentCommand command,
+                                           CacheTransaction<EnrollmentTransaction> earlierTransaction) {
+        boolean removed = enrollmentTransactions.makeRoomFor(earlierTransaction);
+        if (!removed) {
+            return new InitEnrollmentResult.Conflict();
+        }
+        return startEnrollment(command);
+    }
+
+    /** Resolves the key to trust and starts the key exchange with it. */
+    private InitEnrollmentResult startEnrollment(InitEnrollmentCommand command) {
+        AdmittedSession newDeviceSession = command.admitted();
+        Optional<KnownDeviceSummary> knownDevice = knownDeviceOf(newDeviceSession);
+        Optional<DeviceKey> deviceKey = resolveDeviceKey(command, knownDevice);
+        if (deviceKey.isEmpty()) {
+            return new InitEnrollmentResult.DeviceKeyRequired();
+        }
+        return startKeyExchange(newDeviceSession, knownDevice, deviceKey.get());
     }
 
     private Optional<KnownDeviceSummary> knownDeviceOf(AdmittedSession newDeviceSession) {
@@ -107,6 +151,7 @@ public final class InitEnrollmentService implements InitEnrollmentUseCase {
                 .serverPublicJwk(serverKeyPair.publicJwk())
                 .serverPrivateJwk(serverKeyPair.privateJwk())
                 .challengeDigest(challenge.get().digest())
+                .sealedChallenge(challenge.get().sealed())
                 .build();
 
         // A racing init of the same device got there first.
@@ -115,7 +160,7 @@ public final class InitEnrollmentService implements InitEnrollmentUseCase {
         if (opened.isEmpty()) {
             return new InitEnrollmentResult.Conflict();
         }
-        return keyExchangeAnswer(start, challenge.get(), opened.get());
+        return keyExchangeAnswer(opened.get());
     }
 
     /** A fresh challenge sealed to the device key; empty when that key cannot encrypt. */
@@ -129,18 +174,20 @@ public final class InitEnrollmentService implements InitEnrollmentUseCase {
         }
     }
 
-    /** What the app needs to answer: the enrollment, Ksrv, the sealed challenge and the enrollment deadline. */
-    private static InitEnrollmentResult keyExchangeAnswer(KeyExchangeStart start,
-                                                          SealedChallenge challenge,
-                                                          CacheTransaction<EnrollmentTransaction> opened) {
+    /**
+     * What the app needs to answer: the enrollment, Ksrv, the sealed challenge and the enrollment deadline. Read
+     * from the transaction, so the first init and its repeats answer the same.
+     */
+    private static InitEnrollmentResult keyExchangeAnswer(CacheTransaction<EnrollmentTransaction> transaction) {
+        EnrollmentTransaction enrollment = transaction.payload();
         return new InitEnrollmentResult.KeyExchange(
-                start.enrollmentId(),
-                start.serverPublicJwk(),
-                challenge.sealed(),
-                opened.expiresAt());
+                enrollment.id(),
+                enrollment.serverPublicJwk(),
+                enrollment.sealedChallenge(),
+                transaction.expiresAt());
     }
 
-    /** The challenge as init sends it: its digest is kept in the transaction, the sealed JWE goes to the app. */
+    /** The challenge as init sends it: the transaction keeps its digest and the sealed JWE that goes to the app. */
     private record SealedChallenge(String digest, String sealed) {
     }
 }
