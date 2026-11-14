@@ -1,6 +1,7 @@
 package com.vpbank.dcp.auth.application.service;
 
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository.ApprovalReservation;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
@@ -33,9 +34,9 @@ public final class ApprovalRequests {
                 newDeviceSession.deviceId());
     }
 
-    /** Stores a fresh request, or returns the one this restricted session already made (UQ_DE_CREATION). */
-    public DeviceEnrollment create(DeviceEnrollment freshRequest, SessionId creationSessionId) {
-        return enrollmentRepository.create(freshRequest, creationSessionId);
+    /** Reuses an open request or reserves a new one within the customer's approval quota. */
+    public ApprovalReservation reserve(DeviceEnrollment freshRequest, SessionId creationSessionId, int maxPending) {
+        return enrollmentRepository.reserveApproval(freshRequest, creationSessionId, maxPending);
     }
 
     /** The customer's requests the primary device may still act on: waiting and not past their window. */

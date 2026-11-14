@@ -1,17 +1,7 @@
 package com.vpbank.dcp.auth.domain.enums;
 
-/**
- * STATUS of a TRUSTED_DEVICE row. PENDING, ACTIVE and SUSPENDED are live (LIVE_SLOT = 1);
- * EXPIRED and REVOKED are history.
- */
+/** Status of a binding that has completed enrollment. */
 public enum DeviceStatus {
-    PENDING,
     ACTIVE,
-    SUSPENDED,
-    EXPIRED,
-    REVOKED;
-
-    public boolean live() {
-        return this == PENDING || this == ACTIVE || this == SUSPENDED;
-    }
+    SUSPENDED
 }

@@ -6,12 +6,7 @@ import com.vpbank.dcp.auth.application.port.out.gateway.TokenEnvelopeSealer;
 import com.vpbank.dcp.auth.application.port.out.model.SessionLookup;
 import com.vpbank.dcp.auth.application.port.out.model.StoredSession;
 import com.vpbank.dcp.auth.application.port.out.repository.SessionStore;
-import com.vpbank.dcp.auth.domain.model.DevicePolicy;
-import com.vpbank.dcp.auth.domain.model.NewSession;
-import com.vpbank.dcp.auth.domain.model.OpaqueToken;
-import com.vpbank.dcp.auth.domain.model.Session;
-import com.vpbank.dcp.auth.domain.model.SessionId;
-import com.vpbank.dcp.auth.domain.model.SessionPolicy;
+import com.vpbank.dcp.auth.domain.model.*;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
@@ -90,10 +85,12 @@ public final class SessionService {
                 .filter(stored -> stored.session().isLive(now));
     }
 
-    /** The session is still stored and live, by its address: one store read. */
+    /**
+     * The session is still stored and live, by its address: one store read.
+     */
     public boolean isLive(SessionLookup sessionLookup) {
         Optional<StoredSession> stored = sessionStore.findByLookup(sessionLookup);
-        return stored.isPresent() && stored.get().session().isLive(clock.instant());
+        return stored.isEmpty() || !stored.get().session().isLive(clock.instant());
     }
 
     // ---- issue ----

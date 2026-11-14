@@ -5,6 +5,7 @@ import com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceKey;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.SessionId;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
@@ -17,9 +18,8 @@ import java.time.Instant;
 import java.util.Base64;
 
 /**
- * DeviceEnrollment ↔ TRUSTED_DEVICE_ENROLLMENT. The app's device ID is kept only as the HMAC lookup
- * (the aggregate carries it, so reading the row needs the device ID from the restricted session):
- * {@link #toDomain} takes it from the caller. The authorization token digest travels as unpadded
+ * DeviceEnrollment ↔ TRUSTED_DEVICE_ENROLLMENT. Approval stores a protected requester ID
+ * and the candidate key. The authorization token digest travels as unpadded
  * base64url in the aggregate and as 32 raw bytes in the row.
  */
 public final class DeviceEnrollmentPersistenceMapper {
@@ -30,6 +30,10 @@ public final class DeviceEnrollmentPersistenceMapper {
         byte[] deviceLookup = protection.lookup(enrollment.customerId(), enrollment.channel(), enrollment.deviceId());
         // Only the approval path has a requester distinct in role from the target (slice 6).
         byte[] requesterLookup = enrollment.isApproval() ? deviceLookup : null;
+        byte[] requesterCiphertext = enrollment.isApproval()
+                ? protection.encrypt(enrollment.customerId(), enrollment.channel(), enrollment.deviceId())
+                : null;
+        DeviceKey candidateKey = enrollment.candidateKey();
 
         return DeviceEnrollmentEntity.builder()
                 .id(enrollment.id().value())
@@ -41,6 +45,10 @@ public final class DeviceEnrollmentPersistenceMapper {
                 .actorDeviceId(enrollment.actorDeviceId() == null ? null : enrollment.actorDeviceId().value())
                 .targetClientDeviceIdLookup(deviceLookup)
                 .requesterClientDeviceIdLookup(requesterLookup)
+                .requesterClientDeviceIdCiphertext(requesterCiphertext)
+                .requesterClientDeviceIdKeyId(enrollment.isApproval() ? protection.encryptionKeyId() : null)
+                .candidatePlatform(candidateKey == null ? null : candidateKey.platform())
+                .candidatePublicKey(candidateKey == null ? null : candidateKey.publicJwk())
                 .clientDeviceIdLookupKeyId(protection.lookupKeyId())
                 .multifactorId(enrollment.mfaTransactionId())
                 .confirmedMfaMethod(enrollment.mfaMethod())
@@ -58,6 +66,9 @@ public final class DeviceEnrollmentPersistenceMapper {
         boolean approval = entity.getPurpose() == EnrollmentPurpose.TRUST_DEVICE_APPROVAL;
         int verifyAttempts = approval ? 0 : entity.getAuthorizationAttempts();
         int claimAttempts = approval ? entity.getAuthorizationAttempts() : 0;
+        DeviceKey candidateKey = entity.getCandidatePublicKey() == null || entity.getCandidatePlatform() == null
+                ? null
+                : new DeviceKey(entity.getCandidatePublicKey(), entity.getCandidatePlatform());
 
         return DeviceEnrollment.builder()
                 .id(new EnrollmentId(entity.getId()))
@@ -66,6 +77,7 @@ public final class DeviceEnrollmentPersistenceMapper {
                 .deviceId(deviceId)
                 .purpose(entity.getPurpose())
                 .state(entity.getState())
+                .candidateKey(candidateKey)
                 .targetDeviceId(entity.getTargetDeviceId() == null ? null : new TrustedDeviceId(entity.getTargetDeviceId()))
                 .actorDeviceId(entity.getActorDeviceId() == null ? null : new TrustedDeviceId(entity.getActorDeviceId()))
                 .mfaTransactionId(entity.getMultifactorId())

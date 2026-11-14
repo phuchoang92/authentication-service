@@ -6,33 +6,29 @@ import com.vpbank.dcp.auth.application.command.RouteAfterPasswordCommand;
 import com.vpbank.dcp.auth.application.port.in.LoginUseCase;
 import com.vpbank.dcp.auth.application.port.out.exception.PartnerUnavailableException;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
-import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort;
+import com.vpbank.dcp.auth.application.port.out.gateway.CredentialVerifierPort.VerificationResult;
 import com.vpbank.dcp.auth.application.port.out.gateway.DeviceProofVerifier;
 import com.vpbank.dcp.auth.application.port.out.model.CustomerAuthentication;
 import com.vpbank.dcp.auth.application.port.out.model.DeviceProofBindings;
 import com.vpbank.dcp.auth.application.port.out.model.SecurityAuditEvent;
-import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
 import com.vpbank.dcp.auth.application.port.out.repository.CustomerAuthenticationRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.LoginProofReplayStore;
 import com.vpbank.dcp.auth.application.port.out.repository.SecurityAuditStore;
+import com.vpbank.dcp.auth.application.result.CaptchaChallenge;
 import com.vpbank.dcp.auth.application.result.LoginResult;
 import com.vpbank.dcp.auth.application.service.SessionService.IssuedSession;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DevicePossession;
 import com.vpbank.dcp.auth.application.service.TrustedDeviceService.DeviceRouting;
 import com.vpbank.dcp.auth.domain.enums.SecurityEventReason;
 import com.vpbank.dcp.auth.domain.enums.SecurityEventType;
-import com.vpbank.dcp.auth.domain.model.CustomerId;
-import com.vpbank.dcp.auth.domain.model.DeviceProof;
-import com.vpbank.dcp.auth.domain.model.LockoutPolicy;
-import com.vpbank.dcp.auth.domain.model.PasswordLockout;
-import com.vpbank.dcp.auth.domain.model.Session;
-import com.vpbank.dcp.auth.domain.model.SessionId;
+import com.vpbank.dcp.auth.domain.model.*;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
 
 /**
  * Password login: identity row → lockout check → Keycloak password check → same issuer/subject →
@@ -61,18 +57,30 @@ import lombok.RequiredArgsConstructor;
  */
 @RequiredArgsConstructor
 public final class LoginService implements LoginUseCase {
-    @NonNull private final CustomerAuthenticationRepository customerAuthenticationRepository;
-    @NonNull private final CredentialVerifierPort credentialVerifierPort;
-    @NonNull private final CaptchaService captchaService;
-    @NonNull private final SessionService sessionService;
-    @NonNull private final TrustedDeviceService trustedDeviceService;
-    @NonNull private final DeviceProofVerifier deviceProofVerifier;
-    @NonNull private final LoginProofReplayStore loginProofReplayStore;
-    @NonNull private final SecurityAuditStore securityAuditStore;
-    @NonNull private final LockoutPolicy lockoutPolicy;
-    /** Off until the apps sign the login proof; then a trusted device must prove its key for a full session. */
+    @NonNull
+    private final CustomerAuthenticationRepository customerAuthenticationRepository;
+    @NonNull
+    private final CredentialVerifierPort credentialVerifierPort;
+    @NonNull
+    private final CaptchaService captchaService;
+    @NonNull
+    private final SessionService sessionService;
+    @NonNull
+    private final TrustedDeviceService trustedDeviceService;
+    @NonNull
+    private final DeviceProofVerifier deviceProofVerifier;
+    @NonNull
+    private final LoginProofReplayStore loginProofReplayStore;
+    @NonNull
+    private final SecurityAuditStore securityAuditStore;
+    @NonNull
+    private final LockoutPolicy lockoutPolicy;
+    /**
+     * Off until the apps sign the login proof; then a trusted device must prove its key for a full session.
+     */
     private final boolean deviceProofRequired;
-    @NonNull private final Clock clock;
+    @NonNull
+    private final Clock clock;
 
     /**
      * The outcome of one attempt and what the audit needs to say about it: the reason (which names the
@@ -142,12 +150,10 @@ public final class LoginService implements LoginUseCase {
         }
 
         SessionId sessionId = sessionService.newSessionId();
-        String correlationId = sessionId.toString();
         RouteAfterPasswordCommand routing = RouteAfterPasswordCommand.builder()
                 .customerId(identity.customerId())
                 .channel(command.channel())
                 .deviceId(command.deviceId())
-                .correlationId(correlationId)
                 .build();
         DeviceRouting deviceRouting = trustedDeviceService.routeAfterPassword(routing, devicePossession(command));
 
@@ -207,7 +213,9 @@ public final class LoginService implements LoginUseCase {
         };
     }
 
-    /** A challenge is consumed on first use whether right or wrong, so a guess costs a new CAPTCHA. */
+    /**
+     * A challenge is consumed on first use whether right or wrong, so a guess costs a new CAPTCHA.
+     */
     private boolean captchaSolved(LoginCommand command, CustomerId customerId) {
         if (command.captchaAnswer() == null) {
             return false;

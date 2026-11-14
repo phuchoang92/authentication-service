@@ -16,6 +16,7 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.Pri
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceAuditJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.valkey.ValkeyAssertionReplayStore;
+import jakarta.persistence.EntityManager;
 import java.util.Base64;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -46,6 +47,7 @@ class LoginConfigurationTest {
             .withUserConfiguration(RestConfiguration.class, ValkeyConfiguration.class, DeviceConfiguration.class,
                     AuditConfiguration.class, LoginConfiguration.class, LoginController.class)
             .withBean(StringRedisTemplate.class, () -> Mockito.mock(StringRedisTemplate.class))
+            .withBean(EntityManager.class, () -> Mockito.mock(EntityManager.class))
             .withBean(CustomerAuthenticationJpaRepository.class, () -> Mockito.mock(CustomerAuthenticationJpaRepository.class))
             .withBean(TrustedDeviceJpaRepository.class, () -> Mockito.mock(TrustedDeviceJpaRepository.class))
             .withBean(PrimaryTrustedDeviceJpaRepository.class, () -> Mockito.mock(PrimaryTrustedDeviceJpaRepository.class))

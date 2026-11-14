@@ -2,14 +2,19 @@ package com.vpbank.dcp.auth.infrastructure.config;
 
 import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
+import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRevocationStore;
 import com.vpbank.dcp.auth.domain.model.DevicePolicy;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.DeviceEnrollmentPersistenceAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.TrustedDevicePersistenceAdapter;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.adapter.TrustedDeviceRevocationPersistenceAdapter;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.DeviceEnrollmentJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.PrimaryTrustedDeviceJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceAuditJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceRevokeRepository;
+import jakarta.persistence.EntityManager;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.util.Base64;
@@ -54,26 +59,49 @@ public class DeviceConfiguration {
                                                     PrimaryTrustedDeviceJpaRepository primaryTrustedDeviceJpaRepository,
                                                     TrustedDeviceAuditJpaRepository trustedDeviceAuditJpaRepository,
                                                     DeviceEnrollmentJpaRepository deviceEnrollmentJpaRepository,
+                                                    CustomerAuthenticationJpaRepository customerAuthenticationJpaRepository,
                                                     DeviceIdProtection deviceIdProtection,
+                                                    DevicePolicy devicePolicy,
                                                     Clock clock) {
         return new TrustedDevicePersistenceAdapter(
                 trustedDeviceJpaRepository,
                 primaryTrustedDeviceJpaRepository,
                 trustedDeviceAuditJpaRepository,
                 deviceEnrollmentJpaRepository,
+                customerAuthenticationJpaRepository,
                 deviceIdProtection,
+                devicePolicy,
                 clock);
     }
 
     @Bean
     EnrollmentRepository enrollmentRepository(DeviceEnrollmentJpaRepository deviceEnrollmentJpaRepository,
-                                              TrustedDeviceJpaRepository trustedDeviceJpaRepository,
+                                              CustomerAuthenticationJpaRepository customerAuthenticationJpaRepository,
+                                              TrustedDeviceAuditJpaRepository trustedDeviceAuditJpaRepository,
                                               DeviceIdProtection deviceIdProtection,
                                               Clock clock) {
         return new DeviceEnrollmentPersistenceAdapter(
                 deviceEnrollmentJpaRepository,
-                trustedDeviceJpaRepository,
+                customerAuthenticationJpaRepository,
+                trustedDeviceAuditJpaRepository,
                 deviceIdProtection,
+                clock);
+    }
+
+    @Bean
+    TrustedDeviceRevocationStore trustedDeviceRevocationStore(
+            CustomerAuthenticationJpaRepository customerAuthenticationJpaRepository,
+            PrimaryTrustedDeviceJpaRepository primaryTrustedDeviceJpaRepository,
+            TrustedDeviceJpaRepository trustedDeviceJpaRepository,
+            TrustedDeviceAuditJpaRepository trustedDeviceAuditJpaRepository,
+            EntityManager entityManager,
+            Clock clock) {
+        return new TrustedDeviceRevocationPersistenceAdapter(
+                customerAuthenticationJpaRepository,
+                primaryTrustedDeviceJpaRepository,
+                trustedDeviceJpaRepository,
+                new TrustedDeviceRevokeRepository(entityManager),
+                trustedDeviceAuditJpaRepository,
                 clock);
     }
 

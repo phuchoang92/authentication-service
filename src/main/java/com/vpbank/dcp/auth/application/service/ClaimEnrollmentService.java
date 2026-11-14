@@ -121,7 +121,7 @@ public final class ClaimEnrollmentService implements ClaimEnrollmentUseCase {
     private ClaimEnrollmentResult commitTrust(ClaimEnrollmentCommand command, DeviceEnrollment countedRequest) {
         AdmittedSession newDeviceSession = command.admitted();
         SessionLookup restrictedSession = restrictedSessionOf(newDeviceSession);
-        if (!sessionService.isLive(restrictedSession)) {
+        if (sessionService.isLive(restrictedSession)) {
             return new ClaimEnrollmentResult.Conflict();
         }
         DeviceEnrollment consumedRequest = countedRequest.consumeAuthorization(clock.instant());

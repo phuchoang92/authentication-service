@@ -14,11 +14,16 @@ import java.util.Optional;
 public interface EnrollmentRepository {
 
     /**
-     * Stores a new approval request, or returns the one already created from the same restricted
-     * session (UQ_DE_CREATION): a retried request never makes a second row. (A primary enrollment's row is
-     * written by the trust commit instead, slice 11.)
+     * Under the customer lock, reuses an open request for the installation or the request already
+     * created by this session. Applies the quota before inserting a new enrollment.
      */
-    DeviceEnrollment create(DeviceEnrollment fresh, SessionId sessionId);
+    ApprovalReservation reserveApproval(DeviceEnrollment fresh, SessionId sessionId, int maxPending);
+
+    sealed interface ApprovalReservation {
+        record Reserved(DeviceEnrollment enrollment) implements ApprovalReservation { }
+
+        record QuotaReached() implements ApprovalReservation { }
+    }
 
     /** Compare-and-set on version; returns the stored row. Empty = stale. */
     Optional<DeviceEnrollment> saveIfCurrent(DeviceEnrollment changed);
@@ -30,9 +35,8 @@ public interface EnrollmentRepository {
     Optional<DeviceEnrollment> findLatestApproval(CustomerId customerId, Channel channel, DeviceId deviceId);
 
     /**
-     * Slice 6, from the primary device's side: an approval enrollment of the customer on the channel. The
-     * requester's device ID is recovered from the target device row; an enrollment whose target cannot be
-     * read is absent.
+     * From the primary device's side: an approval enrollment of the customer on the channel.
+     * The requester's device ID is recovered from the enrollment's own ciphertext.
      */
     Optional<DeviceEnrollment> findApproval(EnrollmentId id, CustomerId customerId, Channel channel);
 

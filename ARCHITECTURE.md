@@ -12,8 +12,8 @@ implementation status from newly approved documentation targets.
 Business enums in `domain.enums` and adapter-owned `constant` packages (§11.1) are also
 documentation targets; this update does not move enum/constant source files or tests.
 
-This phase builds the business flow bottom-up. It adds no CAS, concurrency or performance
-design; the existing registration, persistence and security contracts remain unchanged.
+This phase builds the business flow bottom-up. The current login persistence path is described
+in §8.
 
 [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md) defines dependency/local naming and readable
 business-step presentation. Package structure belongs here; those code-writing rules apply
@@ -180,8 +180,9 @@ lockout with CAPTCHA (slice 3), trusted devices (slice 4: `TrustedDeviceService`
 `LoginService` — the §6.1 composition is real), device enrollment init → verify → confirm with
 FACE (slice 5: `DeviceEnrollmentService` calls `TrustedDeviceService.confirmTrust`; the MFA
 contract sits behind `MfaTransactionPort`), approval of a new device by the current primary device
-through a one-time QR token (slice 6: `DeviceApprovalService` calls `TrustedDeviceService` for the
-PENDING row, the primary check and `confirmTrustByApproval`; REST IDs are opaque strings per
+through a one-time QR token (slice 6: approval candidates live on the enrollment.
+The flow calls `TrustedDeviceService` for the primary check and `confirmTrustByApproval`.
+REST IDs are opaque strings per
 CODE_CONVENTIONS §5). Slice decisions:
 `docs/plans/slice-2-login-session.md`, `slice-3-password-lockout.md`, `slice-4-trusted-device.md`,
 `slice-5-enrollment.md`, `slice-6-device-approval.md`, `slice-7-session-token.md` (session token
@@ -450,13 +451,40 @@ public class RegistrationEntity extends AuditedEntity {
 }
 ```
 
-- No setters. The persistence mapper has `apply(entity, domain)` that copies the new state
-  from the aggregate; it is the only write path.
-- Generated columns (`OPEN_SLOT`, `LIVE_SLOT`) are mapped read-only so derived queries can
-  use them (`findByCustomerIdAndOpenSlot(customerId, 1)`).
-- Compare-and-set: the adapter loads the row, checks `entity.getVersion() == domain.version()`,
-  applies, `saveAndFlush`. `ObjectOptimisticLockingFailureException` or a version mismatch →
-  "stale" (empty `Optional`), never an exception to the service.
+- No setters. For business state transitions, the persistence mapper's `apply(entity, domain)`
+  copies the state decided by the aggregate.
+- Registration maps the generated `OPEN_SLOT` column read-only. Trusted device bindings use
+  `UQ_TD_INSTALLATION` on `CUSTOMER_ID`, `CHANNEL`, and `CLIENT_DEVICE_ID_LOOKUP`.
+- Login finds the customer with `USER_NAME = ?`. The column's case-insensitive collation
+  provides case-insensitive matching through the existing `UQ_CA_USER_NAME` index.
+- To save an aggregate transition, the adapter loads the row, checks its version, applies
+  the change, and calls `saveAndFlush`. A version mismatch or
+  `ObjectOptimisticLockingFailureException` returns a stale result (empty `Optional`).
+- Mobile login joins the installation's current binding with the primary pointer for
+  the same customer and channel. The service still checks trust and expiry and applies its
+  proof policy. After those checks, `recordLoginIfCurrent` writes the login timestamp in one
+  version-checked update. The update sets `UPDATED_AT` and increments `VERSION` explicitly
+  because bulk JPQL skips entity callbacks. A stale or ineligible row leaves the metadata
+  unchanged.
+- `TRUSTED_DEVICE_ENROLLMENT` owns the protected installation ID, candidate public key, and
+  platform for a pending approval. Reservation takes the customer row lock, reuses an open
+  request, and counts only waiting requests whose enrollment deadline is in the future.
+- Trust confirmation locks the customer and rereads the enrollment, primary pointer, and
+  bindings. A changed or removed target is a conflict. At `EXPIRES_AT` the binding stops
+  qualifying for login. Successful re-enrollment deletes the old binding before inserting a new
+  ID for that installation. Replacement, device cap, primary assignment, enrollment completion,
+  and device audit commit together.
+- `TrustedDeviceRevocationStore` writes a snapshot to `TRUSTED_DEVICE_REVOKE` under the
+  original binding ID, clears the primary pointer when necessary, deletes the binding, and
+  writes device audit in one SQL transaction. The result reports the SQL commit. Effective
+  revocation of existing sessions requires the binding-aware online guard in the
+  [revocation contract](../docs/DD/target/flows/12-logout-and-revocation.md). Login reads the
+  current binding and primary tables for device routing.
+- Migrations V8–V10 add candidate fields and revoke snapshots, move legacy rows, and replace
+  the installation index. Existing `EXPIRED` rows leave the binding table while their device
+  audit events retain the original IDs. Open QR approvals with a matching, protected candidate
+  are preserved. Rows past their deadline expire, and open rows missing a candidate close.
+  Upgrade with the older Auth writers stopped for the data migration and constraint change.
 - Multi-statement writes (`complete`: identity row + READY) are one `@Transactional` adapter
   method with `@Lock(PESSIMISTIC_WRITE)` on the registration row. Business conflicts are
   pre-checked with a query (`existsByUserNameIgnoreCase`) so the method returns a result, not

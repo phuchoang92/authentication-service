@@ -62,6 +62,7 @@ public final class DomainFixtures {
         ApprovalRequestStart start = ApprovalRequestStart.builder()
                 .enrollmentId(EnrollmentId.random())
                 .requester(requester)
+                .candidateKey(new DeviceKey("{candidate-key}", DevicePlatform.IOS))
                 .targetDeviceId(targetDeviceId)
                 .expiresAt(expiresAt)
                 .build();

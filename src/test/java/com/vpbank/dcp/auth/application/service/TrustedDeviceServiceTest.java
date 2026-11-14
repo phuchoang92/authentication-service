@@ -45,13 +45,13 @@ class TrustedDeviceServiceTest {
     /** A login never trusts: a new device, and a customer with no device at all, wait for the trust flow. */
     @Test
     void aNewDeviceNeedsTrustAndIsNeverRegisteredByALogin() {
-        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE, "corr-1"), ANY_KEY))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE), ANY_KEY))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(devices.rows).isEmpty();
         assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).isEmpty();
 
         seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
-        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, TABLET, "corr-2"), ANY_KEY))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, TABLET), ANY_KEY))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(devices.rows).hasSize(1);
     }
@@ -63,7 +63,7 @@ class TrustedDeviceServiceTest {
                 Clock.fixed(NOW.plusSeconds(600), ZoneOffset.UTC));
 
         DevicePossession phoneKeyProven = device -> device.id().equals(phone.id());
-        assertThat(later.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE, "corr-2"), phoneKeyProven))
+        assertThat(later.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE), phoneKeyProven))
                 .isInstanceOf(DeviceRouting.FullSession.class);
         assertThat(devices.only().lastLoginAt()).isEqualTo(NOW.plusSeconds(600));
         assertThat(devices.only().version()).isEqualTo(1);
@@ -74,7 +74,7 @@ class TrustedDeviceServiceTest {
     void thePrimaryDeviceThatCannotProveItsKeyNeedsTrustAndNothingIsRecorded() {
         seedTrustedPrimary(PHONE, DevicePlatform.ANDROID);
 
-        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE, "corr-2"), NO_KEY))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE), NO_KEY))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(devices.only().lastLoginAt()).isEqualTo(NOW);
         assertThat(devices.only().version()).isZero();
@@ -89,12 +89,12 @@ class TrustedDeviceServiceTest {
         List<TrustedDevice> asked = new java.util.ArrayList<>();
         DevicePossession recording = device -> asked.add(device);
 
-        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, TABLET, "corr-2"), recording))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.MOBILE, TABLET), recording))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
 
         TrustedDeviceService muchLater = new TrustedDeviceService(devices, DevicePolicy.standard(), TrustedDeviceId::random,
                 Clock.fixed(NOW.plus(Duration.ofDays(181)), ZoneOffset.UTC));
-        assertThat(muchLater.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE, "corr-3"), recording))
+        assertThat(muchLater.routeAfterPassword(passwordLogin(Channel.MOBILE, PHONE), recording))
                 .isInstanceOf(DeviceRouting.NeedTrust.class);
         assertThat(asked).isEmpty();
         assertThat(devices.rows.get(phone.id()).status()).isEqualTo(DeviceStatus.ACTIVE); // expiry is judged, not written here
@@ -102,25 +102,9 @@ class TrustedDeviceServiceTest {
 
     @Test
     void webHasNoDeviceTrust() {
-        assertThat(service.routeAfterPassword(passwordLogin(Channel.WEB, null, "corr-1"), NO_KEY))
+        assertThat(service.routeAfterPassword(passwordLogin(Channel.WEB, null), NO_KEY))
                 .isInstanceOf(DeviceRouting.FullSession.class);
         assertThat(devices.rows).isEmpty();
-    }
-
-    @Test
-    void theCapExpiresTheOldestDevicesByLastLogin() {
-        List<TrustedDevice> live = new java.util.ArrayList<>();
-        for (int i = 0; i < 5; i++) {
-            DeviceInstallation installation = new DeviceInstallation(ALICE, Channel.MOBILE, new DeviceId("d" + i));
-            TrustedDevice d = DomainFixtures.trustedDevice(installation, DevicePlatform.ANDROID, null,
-                    NOW.minus(Duration.ofDays(i)));
-            devices.rows.put(d.id(), d);
-            live.add(d);
-        }
-        List<TrustedDevice> expired = service.expireBeyondCap(live, "corr-cap");
-        assertThat(expired).extracting(d -> d.deviceId().value()).containsExactly("d4");
-        assertThat(devices.rows.get(expired.getFirst().id()).status()).isEqualTo(DeviceStatus.EXPIRED);
-        assertThat(service.expireBeyondCap(live.subList(0, 3), "corr-cap")).isEmpty();
     }
 
     @Test
@@ -161,10 +145,8 @@ class TrustedDeviceServiceTest {
         TrustedDevice trusted = service.confirmTrust(trust).orElseThrow();
 
         assertThat(trusted.publicKey()).isEqualTo("{new}");
-        assertThat(devices.rows.get(oldTablet.id()).status()).isEqualTo(DeviceStatus.EXPIRED); // replaced, not counted as a peer
-        assertThat(devices.rows.values().stream().filter(d -> d.status().live()).count()).isEqualTo(5); // 4 others + the tablet
-        assertThat(devices.rows.values().stream().filter(d -> d.deviceId().value().equals("d4")).findFirst().orElseThrow().status())
-                .isEqualTo(DeviceStatus.EXPIRED); // the oldest by last login left for the cap
+        assertThat(devices.rows).doesNotContainKey(oldTablet.id()).hasSize(5);
+        assertThat(devices.findLive(ALICE, Channel.MOBILE, new DeviceId("d4"))).isEmpty();
         assertThat(devices.findPrimary(ALICE, Channel.MOBILE)).contains(trusted.id());
         assertThat(devices.confirmations.getFirst().enrollment().state())
                 .isEqualTo(EnrollmentState.COMPLETED);
@@ -195,12 +177,11 @@ class TrustedDeviceServiceTest {
     }
 
     /** Alice's login on this channel and installation, as the login hands it to the device routing. */
-    private static RouteAfterPasswordCommand passwordLogin(Channel channel, DeviceId deviceId, String correlationId) {
+    private static RouteAfterPasswordCommand passwordLogin(Channel channel, DeviceId deviceId) {
         return RouteAfterPasswordCommand.builder()
                 .customerId(ALICE)
                 .channel(channel)
                 .deviceId(deviceId)
-                .correlationId(correlationId)
                 .build();
     }
 }

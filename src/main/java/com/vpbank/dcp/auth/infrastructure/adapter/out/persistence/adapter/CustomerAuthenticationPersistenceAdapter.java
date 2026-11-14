@@ -26,7 +26,7 @@ public class CustomerAuthenticationPersistenceAdapter implements CustomerAuthent
     @Override
     public Optional<CustomerAuthentication> findByUserName(UserName userName) {
         try {
-            return customerAuthenticationJpaRepository.findByUserNameIgnoreCase(userName.value())
+            return customerAuthenticationJpaRepository.findByUserName(userName.value())
                     .map(RegistrationPersistenceMapper::toIdentity);
         } catch (DataAccessException failure) {
             throw new RepositoryUnavailableException(failure);

@@ -4,8 +4,6 @@ import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.domain.enums.TrustLevel;
-import com.vpbank.dcp.auth.domain.exception.DeviceStateException;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import lombok.Builder;
@@ -31,8 +29,8 @@ public record TrustedDevice(@NonNull TrustedDeviceId id,
                             String publicKey,
                             long version) {
     public TrustedDevice {
-        if ((trustLevel == TrustLevel.TRUSTED) == (trustedAt == null)) {
-            throw new IllegalArgumentException("TRUSTED and the trust time are set together");
+        if (trustLevel != TrustLevel.TRUSTED || trustedAt == null) {
+            throw new IllegalArgumentException("A device binding requires completed trust");
         }
     }
 
@@ -52,21 +50,6 @@ public record TrustedDevice(@NonNull TrustedDeviceId id,
                 .build();
     }
 
-    /**
-     * A new installation waiting for the primary device's approval (slice 6): a live row that is not
-     * trusted. It holds the key the device sent so the approval can trust exactly that key; it expires
-     * with the approval window unless the claim succeeds.
-     */
-    public static TrustedDevice pending(@NonNull NewDevice newDevice, @NonNull Duration pendingWindow) {
-        return rowOf(newDevice)
-                .status(DeviceStatus.PENDING)
-                .trustLevel(TrustLevel.NONE)
-                .trustedAt(null)
-                .expiresAt(newDevice.createdAt().plus(pendingWindow))
-                .lastLoginAt(null)
-                .build();
-    }
-
     /** The fields every new row starts with: who and what it is, the presented key, version 0. */
     private static TrustedDeviceBuilder rowOf(NewDevice newDevice) {
         DeviceInstallation installation = newDevice.installation();
@@ -81,12 +64,11 @@ public record TrustedDevice(@NonNull TrustedDeviceId id,
     }
 
     /**
-     * The primary device approved this installation and the QR token was claimed: a live row (PENDING, or an
-     * already trusted but not primary row) becomes trusted from now with the key it holds.
+     * The approval renewed an existing binding before its trust deadline.
      */
     public TrustedDevice trustByApproval(Instant now, DevicePolicy policy) {
-        if (!status.live()) {
-            throw new DeviceStateException("Device is " + status);
+        if (hasExpired(now)) {
+            throw new IllegalArgumentException("An expired binding needs a new binding ID");
         }
         Objects.requireNonNull(publicKey, "publicKey");
         Instant trustExpiresAt = now.plus(policy.trustDuration());
@@ -99,27 +81,16 @@ public record TrustedDevice(@NonNull TrustedDeviceId id,
                 .build();
     }
 
-    public boolean isPending() {
-        return status == DeviceStatus.PENDING;
+    public boolean hasExpired(Instant now) {
+        return !now.isBefore(expiresAt);
     }
 
     public boolean isTrusted(Instant now) {
-        return status == DeviceStatus.ACTIVE && trustLevel == TrustLevel.TRUSTED && now.isBefore(expiresAt);
+        return status == DeviceStatus.ACTIVE && !hasExpired(now);
     }
 
     /** A successful login on this device; display data only, trust and expiry are untouched. */
     public TrustedDevice recordLogin(Instant now) {
-        if (!status.live()) {
-            throw new DeviceStateException("Device is " + status);
-        }
         return toBuilder().lastLoginAt(now).build();
-    }
-
-    /** Trust ran out or the device cap pushed it out; the row becomes history (LIVE_SLOT NULL). */
-    public TrustedDevice expire() {
-        if (!status.live()) {
-            throw new DeviceStateException("Device is already " + status);
-        }
-        return toBuilder().status(DeviceStatus.EXPIRED).build();
     }
 }

@@ -1,17 +1,17 @@
 package com.vpbank.dcp.auth.application.service;
 
-import com.vpbank.dcp.auth.application.command.RegisterPendingDeviceCommand;
 import com.vpbank.dcp.auth.application.command.RequestApprovalCommand;
 import com.vpbank.dcp.auth.application.port.in.RequestApprovalUseCase;
 import com.vpbank.dcp.auth.application.port.out.exception.RepositoryUnavailableException;
+import com.vpbank.dcp.auth.application.port.out.repository.EnrollmentRepository.ApprovalReservation;
 import com.vpbank.dcp.auth.application.result.KnownDeviceSummary;
 import com.vpbank.dcp.auth.application.result.RequestApprovalResult;
 import com.vpbank.dcp.auth.domain.model.AdmittedSession;
 import com.vpbank.dcp.auth.domain.model.ApprovalRequestStart;
 import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
+import com.vpbank.dcp.auth.domain.model.DeviceKey;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentPolicy;
-import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import java.time.Clock;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -56,7 +56,7 @@ public final class RequestApprovalService implements RequestApprovalUseCase {
             // One open request per device: asking again, from this login or a later one, gets the same request.
             Optional<DeviceEnrollment> openRequest = openRequestOf(newDeviceSession);
             if (openRequest.isPresent()) {
-                return waitingApproval(openRequest.get());
+                return answerForEarlier(openRequest.get(), command);
             }
             return startNewRequest(command);
         } catch (RepositoryUnavailableException failure) {
@@ -64,78 +64,65 @@ public final class RequestApprovalService implements RequestApprovalUseCase {
         }
     }
 
-    /** Registers the PENDING device row the request targets, then stores the request itself. */
     private RequestApprovalResult startNewRequest(RequestApprovalCommand command) {
-        if (isUnknownDeviceWithoutKey(command)) {
-            return new RequestApprovalResult.DeviceKeyRequired();
-        }
-        Optional<TrustedDevice> targetDevice = registerPendingDevice(command);
-        if (targetDevice.isEmpty()) {
-            return new RequestApprovalResult.TooManyPending();
-        }
-        return storeRequest(command.admitted(), targetDevice.get());
-    }
-
-    private Optional<DeviceEnrollment> openRequestOf(AdmittedSession newDeviceSession) {
-        Optional<DeviceEnrollment> latestRequest = approvalRequests.latestOf(newDeviceSession);
-        if (latestRequest.isEmpty()) {
-            return Optional.empty();
-        }
-        boolean stillOpen = latestRequest.get().isOpen(clock.instant());
-        if (!stillOpen) {
-            return Optional.empty();
-        }
-        return latestRequest;
-    }
-
-    /** An unknown installation must send its key and platform; a known live row keeps what Auth already stores. */
-    private boolean isUnknownDeviceWithoutKey(RequestApprovalCommand command) {
         AdmittedSession newDeviceSession = command.admitted();
-        Optional<KnownDeviceSummary> knownDevice = trustedDeviceService.knownDevice(
+        Optional<KnownDeviceSummary> existingBinding = trustedDeviceService.knownDevice(
                 newDeviceSession.customerId(),
                 newDeviceSession.channel(),
                 newDeviceSession.deviceId());
-        boolean sentNoKey = command.devicePublicJwk() == null || command.platform() == null;
-        return knownDevice.isEmpty() && sentNoKey;
-    }
-
-    /** The PENDING row the request targets (the live row of a known device); empty when too many devices wait. */
-    private Optional<TrustedDevice> registerPendingDevice(RequestApprovalCommand command) {
-        AdmittedSession newDeviceSession = command.admitted();
-        RegisterPendingDeviceCommand registration = RegisterPendingDeviceCommand.builder()
-                .newDeviceSession(newDeviceSession)
-                .devicePublicJwk(command.devicePublicJwk())
-                .platform(command.platform())
-                .enrollmentPolicy(enrollmentPolicy)
-                .correlationId(newDeviceSession.sessionId().toString())
-                .build();
-        return trustedDeviceService.registerPendingDevice(registration);
-    }
-
-    /** The request waits as long as its PENDING device row does; Auth does not read the session's deadline. */
-    private RequestApprovalResult storeRequest(AdmittedSession newDeviceSession, TrustedDevice targetDevice) {
+        Optional<DeviceKey> candidateKey = candidateKeyOf(command, existingBinding);
+        if (candidateKey.isEmpty()) {
+            return new RequestApprovalResult.DeviceKeyRequired();
+        }
+        if (!matchesCandidate(command, candidateKey.get())) {
+            return new RequestApprovalResult.Conflict();
+        }
         ApprovalRequestStart start = ApprovalRequestStart.builder()
                 .enrollmentId(enrollmentIdGenerator.get())
                 .requester(newDeviceSession.installation())
-                .targetDeviceId(targetDevice.id())
+                .candidateKey(candidateKey.get())
+                .targetDeviceId(existingBinding.map(KnownDeviceSummary::id).orElse(null))
                 .expiresAt(clock.instant().plus(enrollmentPolicy.pendingWindow()))
                 .build();
         DeviceEnrollment freshRequest = DeviceEnrollment.requestApproval(start);
-        DeviceEnrollment storedRequest = approvalRequests.create(freshRequest, newDeviceSession.sessionId());
-
-        // This session already made a request that is closed now (UQ_DE_CREATION): it cannot make another.
-        if (!storedRequest.id().equals(freshRequest.id())) {
-            return answerForEarlier(storedRequest);
-        }
-        return waitingApproval(storedRequest);
+        ApprovalReservation reservation = approvalRequests.reserve(
+                freshRequest, newDeviceSession.sessionId(), enrollmentPolicy.maxPendingDevices());
+        return switch (reservation) {
+            case ApprovalReservation.QuotaReached() -> new RequestApprovalResult.TooManyPending();
+            case ApprovalReservation.Reserved(DeviceEnrollment storedRequest) -> answerForEarlier(storedRequest, command);
+        };
     }
 
-    private RequestApprovalResult answerForEarlier(DeviceEnrollment earlierRequest) {
-        boolean stillWaiting = earlierRequest.isApproval() && earlierRequest.isOpen(clock.instant());
-        if (stillWaiting) {
+    private static Optional<DeviceKey> candidateKeyOf(RequestApprovalCommand command,
+                                                       Optional<KnownDeviceSummary> existingBinding) {
+        if (existingBinding.isPresent()) {
+            KnownDeviceSummary binding = existingBinding.get();
+            if (binding.publicKey() != null) {
+                return Optional.of(new DeviceKey(binding.publicKey(), binding.platform()));
+            }
+        }
+        if (command.devicePublicJwk() == null || command.platform() == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new DeviceKey(command.devicePublicJwk(), command.platform()));
+    }
+
+    private Optional<DeviceEnrollment> openRequestOf(AdmittedSession newDeviceSession) {
+        return approvalRequests.latestOf(newDeviceSession).filter(request -> request.isOpen(clock.instant()));
+    }
+
+    private RequestApprovalResult answerForEarlier(DeviceEnrollment earlierRequest, RequestApprovalCommand command) {
+        DeviceKey candidateKey = earlierRequest.candidateKey();
+        if (earlierRequest.isApproval() && earlierRequest.isOpen(clock.instant()) && matchesCandidate(command, candidateKey)) {
             return waitingApproval(earlierRequest);
         }
         return new RequestApprovalResult.Conflict();
+    }
+
+    private static boolean matchesCandidate(RequestApprovalCommand command, DeviceKey candidateKey) {
+        return candidateKey != null
+                && (command.devicePublicJwk() == null || command.devicePublicJwk().equals(candidateKey.publicJwk()))
+                && (command.platform() == null || command.platform() == candidateKey.platform());
     }
 
     private static RequestApprovalResult waitingApproval(DeviceEnrollment request) {

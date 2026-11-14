@@ -8,6 +8,7 @@ import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
 import com.vpbank.dcp.auth.domain.model.EnrollmentId;
 import com.vpbank.dcp.auth.domain.model.SessionId;
+import java.time.Clock;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,17 +23,32 @@ final class InMemoryEnrollmentRepository implements EnrollmentRepository {
     final Map<EnrollmentId, DeviceEnrollment> rows = new LinkedHashMap<>();
     final Map<SessionId, EnrollmentId> bySession = new HashMap<>();
     boolean unavailable;
+    private final Clock clock;
+
+    InMemoryEnrollmentRepository(Clock clock) {
+        this.clock = clock;
+    }
 
     @Override
-    public DeviceEnrollment create(DeviceEnrollment fresh, SessionId sessionId) {
+    public ApprovalReservation reserveApproval(DeviceEnrollment fresh, SessionId sessionId, int maxPending) {
         check();
+        Optional<DeviceEnrollment> open = findLatestApproval(fresh.customerId(), fresh.channel(), fresh.deviceId())
+                .filter(request -> request.isOpen(clock.instant()));
+        if (open.isPresent()) {
+            return new ApprovalReservation.Reserved(open.get());
+        }
         EnrollmentId existing = bySession.get(sessionId);
         if (existing != null) {
-            return rows.get(existing);
+            return new ApprovalReservation.Reserved(rows.get(existing));
+        }
+        long waiting = findOpenApprovals(fresh.customerId(), fresh.channel()).stream()
+                .filter(request -> request.isOpen(clock.instant())).count();
+        if (waiting >= maxPending) {
+            return new ApprovalReservation.QuotaReached();
         }
         rows.put(fresh.id(), fresh);
         bySession.put(sessionId, fresh.id());
-        return fresh;
+        return new ApprovalReservation.Reserved(fresh);
     }
 
     @Override

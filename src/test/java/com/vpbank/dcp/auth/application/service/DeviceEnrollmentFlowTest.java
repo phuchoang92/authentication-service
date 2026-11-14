@@ -37,7 +37,6 @@ import com.vpbank.dcp.auth.application.result.InitEnrollmentResult;
 import com.vpbank.dcp.auth.application.result.VerifyEnrollmentResult;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
-import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
@@ -335,7 +334,6 @@ class DeviceEnrollmentFlowTest {
         assertThat(confirmation.enrollment().verifyAttempts()).isEqualTo(1);
         assertThat(confirmation.creationSessionId()).isEqualTo(TABLET_SESSION.sessionId()); // the row is new at this commit
         assertThat(confirmation.receiptDigest()).isEqualTo("receipt-sha");
-        assertThat(confirmation.replaced()).isNull();
         TrustedDevice tablet = devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow();
         assertThat(tablet.publicKey()).isEqualTo(DEVICE_KEY);
         assertThat(tablet.platform()).isEqualTo(DevicePlatform.IOS);
@@ -445,9 +443,9 @@ class DeviceEnrollmentFlowTest {
 
         confirmEnrollment.confirm(new ConfirmEnrollmentCommand(TABLET_SESSION, "{app-kenc}"));
 
-        assertThat(devices.rows.get(oldTablet.id()).status()).isEqualTo(DeviceStatus.EXPIRED);
+        assertThat(devices.rows).doesNotContainKey(oldTablet.id());
         assertThat(devices.findLive(ALICE, Channel.MOBILE, TABLET).orElseThrow().publicKey()).isEqualTo(DEVICE_KEY);
-        assertThat(devices.confirmations.getFirst().replaced().id()).isEqualTo(oldTablet.id());
+        assertThat(devices.confirmations.getFirst().enrollment().targetDeviceId()).isEqualTo(oldTablet.id());
     }
 
     @Test

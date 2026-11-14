@@ -25,7 +25,7 @@ class DomainEnumCodesTest {
         assertThat(names(DevicePlatform.values()))
                 .containsExactly("ANDROID", "IOS");
         assertThat(names(DeviceStatus.values()))
-                .containsExactly("PENDING", "ACTIVE", "SUSPENDED", "EXPIRED", "REVOKED");
+                .containsExactly("ACTIVE", "SUSPENDED");
         assertThat(names(TrustLevel.values()))
                 .containsExactly("NONE", "TRUSTED");
         assertThat(names(EnrollmentPurpose.values()))
@@ -50,8 +50,6 @@ class DomainEnumCodesTest {
 
     @Test
     void liveAndOpenPredicatesMatchTheSchemaComments() {
-        assertThat(Arrays.stream(DeviceStatus.values()).filter(DeviceStatus::live))
-                .containsExactly(DeviceStatus.PENDING, DeviceStatus.ACTIVE, DeviceStatus.SUSPENDED);
         assertThat(Arrays.stream(EnrollmentState.values()).filter(EnrollmentState::open))
                 .containsExactly(EnrollmentState.KEY_EXCHANGE, EnrollmentState.MFA_REQUIRED,
                         EnrollmentState.WAITING_APPROVAL, EnrollmentState.WAITING_AUTHORIZATION);

@@ -81,38 +81,34 @@ public final class TrustedDevicePersistenceMapper {
                 .build();
     }
 
-    public static TrustedDeviceAuditEntity toAudit(TrustedDevice device, String correlationId, int sequence,
-                                                   String eventType, String cause, String reasonCode, Instant occurredAt) {
-        return toAudit(device, correlationId, sequence, eventType, cause, reasonCode, occurredAt, null, null);
-    }
-
-    public static TrustedDeviceAuditEntity toAudit(TrustedDevice device, String correlationId, int sequence,
-                                                   String eventType, String cause, String reasonCode, Instant occurredAt,
-                                                   UUID enrollmentId, String metadataJson) {
-        UUID deviceActsForItself = device.id().value();
-        return toAudit(device, deviceActsForItself, correlationId, sequence, eventType, cause, reasonCode, occurredAt,
-                enrollmentId, metadataJson);
-    }
-
     /** {@code actorDeviceId} is the device that caused the event: the device itself, or the primary that approved it. */
     public static TrustedDeviceAuditEntity toAudit(TrustedDevice device, UUID actorDeviceId, String correlationId,
                                                    int sequence, String eventType, String cause, String reasonCode,
                                                    Instant occurredAt, UUID enrollmentId, String metadataJson) {
+        return toAudit(device.id().value(), device.customerId().value(), device.channel().name(), actorDeviceId,
+                correlationId, sequence, eventType, cause, reasonCode, occurredAt, enrollmentId, metadataJson);
+    }
+
+    /** Audit needs the original binding identity even if its encrypted installation ID is unreadable. */
+    public static TrustedDeviceAuditEntity toAudit(UUID bindingId, String customerId, String channel,
+                                                   UUID actorDeviceId, String correlationId, int sequence,
+                                                   String eventType, String cause, String reasonCode, Instant occurredAt,
+                                                   UUID enrollmentId, String metadataJson) {
         return TrustedDeviceAuditEntity.builder()
                 .enrollmentId(enrollmentId)
                 .metadata(metadataJson)
                 .id(UUID.randomUUID())
-                .customerId(device.customerId().value())
+                .customerId(customerId)
                 .correlationId(correlationId)
                 .eventSequence(sequence)
                 .eventType(eventType)
                 .cause(cause)
                 .actorType("CUSTOMER")
-                .actorSubject(device.customerId().value())
+                .actorSubject(customerId)
                 .actorDeviceId(actorDeviceId)
-                .actorChannel(device.channel().name())
-                .targetDeviceId(device.id().value())
-                .targetChannel(device.channel().name())
+                .actorChannel(channel)
+                .targetDeviceId(bindingId)
+                .targetChannel(channel)
                 .targetAction(eventType)
                 .reasonCode(reasonCode)
                 .policyVersion(POLICY_VERSION)

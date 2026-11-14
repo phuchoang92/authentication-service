@@ -5,12 +5,10 @@ import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.application.port.out.repository.TrustedDeviceRepository;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
+import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.domain.enums.PrimaryMode;
-import com.vpbank.dcp.auth.domain.model.CustomerId;
-import com.vpbank.dcp.auth.domain.model.DeviceId;
-import com.vpbank.dcp.auth.domain.model.DeviceEnrollment;
-import com.vpbank.dcp.auth.domain.model.TrustedDevice;
-import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
+import com.vpbank.dcp.auth.domain.enums.TrustLevel;
+import com.vpbank.dcp.auth.domain.model.*;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.DeviceIdProtection;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.DeviceEnrollmentEntity;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.PrimaryTrustedDeviceEntity;
@@ -18,75 +16,67 @@ import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.Trusted
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity.TrustedDeviceEntity;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.DeviceEnrollmentPersistenceMapper;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.mapper.TrustedDevicePersistenceMapper;
+import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.CustomerAuthenticationJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.DeviceEnrollmentJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.PrimaryTrustedDeviceJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceAuditJpaRepository;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.repository.TrustedDeviceJpaRepository;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataAccessException;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
-/**
- * {@link TrustedDeviceRepository} over Spring Data JPA. The database only stops races (one live
- * row per installation, one primary per customer + channel); the aggregate decided every rule.
- * {@link #trustConfirmed} is the multi-table transaction: device
- * rows, primary row, enrollment and audit events together, or nothing. Spring exceptions never
- * leave this class.
- */
+/** MySQL bindings, primary pointer and the atomic trust commit. */
 @RequiredArgsConstructor
 public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository {
-    /** The LIVE_SLOT marker of a PENDING, ACTIVE or SUSPENDED row (NULL once expired or revoked). */
-    private static final Byte LIVE = 1;
-
     static final String EVENT_TRUSTED = "DEVICE_TRUSTED";
-    static final String EVENT_LOGIN = "DEVICE_LOGIN";
     static final String EVENT_EXPIRED = "DEVICE_EXPIRED";
     static final String EVENT_REPLACED = "DEVICE_REPLACED";
-    static final String EVENT_REGISTERED = "DEVICE_REGISTERED";
     static final String EVENT_PRIMARY_CHANGED = "PRIMARY_CHANGED";
 
     private static final String AUDIT_CAUSE_LOGIN = "LOGIN";
     private static final String AUDIT_CAUSE_POLICY = "POLICY";
     private static final String AUDIT_REASON_REINSTALL = "REINSTALL";
+    private static final String AUDIT_REASON_TRUST_EXPIRED = "TRUST_EXPIRED";
     private static final String AUDIT_REASON_DEVICE_CAP = "DEVICE_CAP";
     private static final String AUDIT_REASON_MFA_FACE = "MFA_FACE";
-    private static final String AUDIT_REASON_APPROVAL_REQUESTED = "APPROVAL_REQUESTED";
     private static final String AUDIT_REASON_OLD_DEVICE_APPROVAL = "OLD_DEVICE_APPROVAL";
 
     @NonNull private final TrustedDeviceJpaRepository trustedDeviceJpaRepository;
     @NonNull private final PrimaryTrustedDeviceJpaRepository primaryTrustedDeviceJpaRepository;
     @NonNull private final TrustedDeviceAuditJpaRepository trustedDeviceAuditJpaRepository;
     @NonNull private final DeviceEnrollmentJpaRepository deviceEnrollmentJpaRepository;
+    @NonNull private final CustomerAuthenticationJpaRepository customerAuthenticationJpaRepository;
     @NonNull private final DeviceIdProtection deviceIdProtection;
+    @NonNull private final DevicePolicy devicePolicy;
     @NonNull private final Clock clock;
 
     @Override
     public Optional<TrustedDevice> findLive(CustomerId customerId, Channel channel, DeviceId deviceId) {
         byte[] deviceIdLookup = deviceIdProtection.lookup(customerId, channel, deviceId);
         return translate(() -> trustedDeviceJpaRepository
-                .findByCustomerIdAndChannelAndClientDeviceIdLookupAndLiveSlot(
+                .findByCustomerIdAndChannelAndClientDeviceIdLookup(
                         customerId.value(),
                         channel.name(),
-                        deviceIdLookup,
-                        LIVE)
+                        deviceIdLookup)
                 .flatMap(entity -> TrustedDevicePersistenceMapper.toDomain(entity, deviceIdProtection)));
     }
 
     @Override
     public List<TrustedDevice> findLive(CustomerId customerId, Channel channel) {
         return translate(() -> trustedDeviceJpaRepository
-                .findByCustomerIdAndChannelAndLiveSlotOrderByCreatedAtAsc(customerId.value(), channel.name(), LIVE)
+                .findByCustomerIdAndChannelOrderByCreatedAtAsc(customerId.value(), channel.name())
                 .stream()
                 // a row whose device ID cannot be opened is "no device", not a guess
                 .flatMap(entity -> TrustedDevicePersistenceMapper.toDomain(entity, deviceIdProtection).stream())
@@ -101,208 +91,227 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
                 .map(TrustedDeviceId::new));
     }
 
+    @Override
+    public Optional<TrustedDevice> findLivePrimary(DeviceInstallation installation) {
+        byte[] deviceIdLookup = deviceIdProtection.lookup(
+                installation.customerId(), installation.channel(), installation.deviceId());
+        return translate(() -> trustedDeviceJpaRepository.findLivePrimary(
+                        installation.customerId().value(),
+                        installation.channel().name(),
+                        deviceIdLookup)
+                .flatMap(entity -> TrustedDevicePersistenceMapper.toDomain(entity, deviceIdProtection)));
+    }
+
+    @Override
+    @Transactional
+    public boolean recordLoginIfCurrent(TrustedDeviceId trustedDeviceId, long expectedVersion, Instant loggedInAt) {
+        Instant updatedAt = clock.instant();
+        int updatedRows = translate(() -> trustedDeviceJpaRepository.updateLastLoginIfCurrent(
+                trustedDeviceId.value(),
+                expectedVersion,
+                loggedInAt,
+                updatedAt,
+                DeviceStatus.ACTIVE,
+                TrustLevel.TRUSTED));
+        return updatedRows == 1;
+    }
+
     /**
-     * The enrollment flow's commit, all or nothing: replaced/capped rows → EXPIRED, the new trusted row,
-     * the primary row re-pointed (FACE_CONFIRMED, enrollment, face flag), the enrollment COMPLETED, and
-     * the audit trail 0..n under the correlation ID with the enrollment ID and the MFA receipt digest. A primary
-     * enrollment's row is inserted here, already COMPLETED (slice 11); an approval's existing row is updated.
-     *
-     * <p>Only one commit of an enrollment goes through. A primary enrollment whose row exists was committed
-     * before (the confirm is a repeat), and an approval whose row is no longer at the version the claim read was
-     * changed or committed by another claim: nothing is written. Two commits racing each other meet on the
-     * database's guards (the enrollment's primary key, one live row per installation, row versions): the loser's
-     * transaction is rolled back and it gets empty.
+     * Trust, binding retirement, the primary pointer, enrollment and audit share one transaction.
+     * The owner lock also serializes cap decisions and revoke, including when there is no primary row yet.
      */
     @Override
     @Transactional
     public Optional<TrustedDevice> trustConfirmed(TrustConfirmation confirmation, String correlationId) {
-        Instant now = clock.instant();
-        TrustedDevice newTrustedDevice = confirmation.device();
-        UUID enrollmentId = confirmation.enrollment().id().value();
-        boolean firstWriteOfTheEnrollment = confirmation.creationSessionId() != null;
-        // These audit events carry no extra metadata; only the trust event records what proved the trust.
-        String noMetadata = null;
         try {
-            if (anotherCommitGotThereFirst(confirmation)) {
-                return Optional.empty();
-            }
-
-            // The approval path already wrote DEVICE_REGISTERED under this correlation ID: continue its sequence.
-            int sequence = trustedDeviceAuditJpaRepository.countByCorrelationId(correlationId);
-
-            TrustedDevice replacedDevice = confirmation.replaced();
-            if (replacedDevice != null) {
-                expireRow(replacedDevice);
-
-                TrustedDeviceAuditEntity replacementAudit = TrustedDevicePersistenceMapper.toAudit(
-                        replacedDevice,
-                        correlationId,
-                        sequence,
-                        EVENT_REPLACED,
-                        AUDIT_CAUSE_LOGIN,
-                        AUDIT_REASON_REINSTALL,
-                        now,
-                        enrollmentId,
-                        noMetadata);
-                trustedDeviceAuditJpaRepository.save(replacementAudit);
-                sequence++;
-            }
-
-            for (TrustedDevice cappedDevice : confirmation.expiredByCap()) {
-                expireRow(cappedDevice);
-
-                TrustedDeviceAuditEntity capAudit = TrustedDevicePersistenceMapper.toAudit(
-                        cappedDevice,
-                        correlationId,
-                        sequence,
-                        EVENT_EXPIRED,
-                        AUDIT_CAUSE_POLICY,
-                        AUDIT_REASON_DEVICE_CAP,
-                        now,
-                        enrollmentId,
-                        noMetadata);
-                trustedDeviceAuditJpaRepository.save(capAudit);
-                sequence++;
-            }
-
-            TrustedDeviceEntity savedDeviceEntity = saveTrustedRow(newTrustedDevice);
-
-            PrimaryTrustedDeviceEntity.Key primaryKey = new PrimaryTrustedDeviceEntity.Key(
-                    newTrustedDevice.customerId().value(),
-                    newTrustedDevice.channel().name());
-            PrimaryTrustedDeviceEntity primaryEntity = primaryTrustedDeviceJpaRepository.findById(primaryKey)
-                    .orElseGet(() -> TrustedDevicePersistenceMapper.toPrimary(newTrustedDevice, now));
-            primaryEntity.assign(
-                    savedDeviceEntity.getId(),
-                    now,
-                    enrollmentId,
-                    confirmation.faceAuthenticated(),
-                    confirmation.primaryMode());
-            primaryTrustedDeviceJpaRepository.saveAndFlush(primaryEntity);
-
-            DeviceEnrollmentEntity enrollmentEntity;
-            if (firstWriteOfTheEnrollment) {
-                enrollmentEntity = DeviceEnrollmentPersistenceMapper.toEntity(
-                        confirmation.enrollment(),
-                        confirmation.creationSessionId(),
-                        deviceIdProtection);
-            } else {
-                enrollmentEntity = deviceEnrollmentJpaRepository.findById(enrollmentId).orElseThrow();
-            }
-            DeviceEnrollmentPersistenceMapper.apply(enrollmentEntity, confirmation.enrollment(), now);
-            deviceEnrollmentJpaRepository.saveAndFlush(enrollmentEntity);
-
-            String trustReason = trustReasonOf(confirmation);
-            String trustMetadataJson = trustMetadataOf(confirmation);
-            UUID actorDeviceId = actorDeviceIdOf(confirmation);
-            TrustedDeviceAuditEntity trustedAudit = TrustedDevicePersistenceMapper.toAudit(
-                    newTrustedDevice,
-                    actorDeviceId,
-                    correlationId,
-                    sequence,
-                    EVENT_TRUSTED,
-                    AUDIT_CAUSE_LOGIN,
-                    trustReason,
-                    now,
-                    enrollmentId,
-                    trustMetadataJson);
-            trustedDeviceAuditJpaRepository.save(trustedAudit);
-            sequence++;
-
-            TrustedDeviceAuditEntity primaryChangedAudit = TrustedDevicePersistenceMapper.toAudit(
-                    newTrustedDevice,
-                    actorDeviceId,
-                    correlationId,
-                    sequence,
-                    EVENT_PRIMARY_CHANGED,
-                    AUDIT_CAUSE_LOGIN,
-                    trustReason,
-                    now,
-                    enrollmentId,
-                    noMetadata);
-            trustedDeviceAuditJpaRepository.saveAndFlush(primaryChangedAudit);
-
-            TrustedDevice trustedDevice =
-                    TrustedDevicePersistenceMapper.toDomain(savedDeviceEntity, deviceIdProtection).orElseThrow();
-            return Optional.of(trustedDevice);
-        } catch (DataIntegrityViolationException | OptimisticLockingFailureException racingCommitWon) {
+            return commitTrust(confirmation, correlationId);
+        } catch (OptimisticLockingFailureException stale) {
             TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
             return Optional.empty();
-        } catch (DataAccessException failure) {
-            throw new RepositoryUnavailableException(failure); // a RuntimeException: the transaction rolls back
-        }
-    }
-
-    /**
-     * The enrollment was committed, or changed, before this commit started: a primary enrollment's row exists
-     * already (it is inserted only by its commit), or an approval's row is no longer at the version read.
-     */
-    private boolean anotherCommitGotThereFirst(TrustConfirmation confirmation) {
-        DeviceEnrollment enrollment = confirmation.enrollment();
-        UUID enrollmentId = enrollment.id().value();
-        boolean firstWriteOfTheEnrollment = confirmation.creationSessionId() != null;
-        if (firstWriteOfTheEnrollment) {
-            return deviceEnrollmentJpaRepository.existsById(enrollmentId);
-        }
-        Optional<DeviceEnrollmentEntity> storedRow = deviceEnrollmentJpaRepository.findById(enrollmentId);
-        return storedRow.isEmpty() || storedRow.get().getVersion() != enrollment.version();
-    }
-
-    /**
-     * The PENDING row of an installation waiting for approval, with its registration event (slice 6). A lost
-     * race on UQ_TD_LIVE_INSTALLATION marks the transaction rollback-only: nothing of this attempt stays and
-     * the caller re-reads the live row.
-     */
-    @Override
-    @Transactional
-    public RegisterPendingResult registerPending(TrustedDevice pendingDevice, String correlationId) {
-        Instant now = clock.instant();
-        try {
-            TrustedDeviceEntity pendingEntity = TrustedDevicePersistenceMapper.toEntity(pendingDevice, deviceIdProtection);
-            TrustedDeviceEntity savedEntity = trustedDeviceJpaRepository.saveAndFlush(pendingEntity);
-
-            int firstEventSequence = 0;
-            TrustedDeviceAuditEntity registeredAudit = TrustedDevicePersistenceMapper.toAudit(
-                    pendingDevice,
-                    correlationId,
-                    firstEventSequence,
-                    EVENT_REGISTERED,
-                    AUDIT_CAUSE_LOGIN,
-                    AUDIT_REASON_APPROVAL_REQUESTED,
-                    now);
-            trustedDeviceAuditJpaRepository.saveAndFlush(registeredAudit);
-
-            TrustedDevice registeredDevice = TrustedDevicePersistenceMapper.toDomain(savedEntity, deviceIdProtection)
-                    .orElseThrow();
-            return new RegisterPendingResult.Registered(registeredDevice);
-        } catch (DataIntegrityViolationException raced) {
-            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            return new RegisterPendingResult.InstallationAlreadyLive();
         } catch (DataAccessException failure) {
             throw new RepositoryUnavailableException(failure);
         }
     }
 
-    @Override
-    public int countPending(CustomerId customerId, Channel channel) {
-        return translate(() -> trustedDeviceJpaRepository.countByCustomerIdAndChannelAndStatus(
-                customerId.value(),
-                channel.name(),
-                DeviceStatus.PENDING));
-    }
-
-    /** A new installation is inserted; a PENDING or known live row that became trusted is updated in place. */
-    private TrustedDeviceEntity saveTrustedRow(TrustedDevice trustedDevice) {
-        Optional<TrustedDeviceEntity> existingEntity = trustedDeviceJpaRepository.findById(trustedDevice.id().value());
-        if (existingEntity.isPresent()) {
-            TrustedDevicePersistenceMapper.apply(existingEntity.get(), trustedDevice);
-            return trustedDeviceJpaRepository.saveAndFlush(existingEntity.get());
+    private Optional<TrustedDevice> commitTrust(TrustConfirmation confirmation, String correlationId) {
+        DeviceEnrollment enrollment = confirmation.enrollment();
+        TrustedDevice confirmedDevice = confirmation.device();
+        if (!enrollment.customerId().equals(confirmedDevice.customerId())
+                || enrollment.channel() != confirmedDevice.channel()
+                || !enrollment.deviceId().equals(confirmedDevice.deviceId())) {
+            return Optional.empty();
         }
-        TrustedDeviceEntity newDeviceEntity = TrustedDevicePersistenceMapper.toEntity(trustedDevice, deviceIdProtection);
-        return trustedDeviceJpaRepository.saveAndFlush(newDeviceEntity);
+        String customerId = enrollment.customerId().value();
+        String channel = enrollment.channel().name();
+        if (customerAuthenticationJpaRepository.findByCustomerId(customerId).isEmpty()) {
+            return Optional.empty();
+        }
+
+        boolean approval = enrollment.isApproval();
+        boolean directEnrollment = confirmation.creationSessionId() != null;
+        if (enrollment.state() != EnrollmentState.COMPLETED || approval == directEnrollment) {
+            return Optional.empty();
+        }
+        Optional<DeviceEnrollmentEntity> existingEnrollment = deviceEnrollmentJpaRepository.findByIdAndCustomerIdAndChannel(
+                enrollment.id().value(), customerId, channel);
+
+        PrimaryTrustedDeviceEntity.Key primaryKey = new PrimaryTrustedDeviceEntity.Key(customerId, channel);
+        Optional<PrimaryTrustedDeviceEntity> storedPrimary = primaryTrustedDeviceJpaRepository.findByKey(primaryKey);
+        List<TrustedDeviceEntity> bindingRows = trustedDeviceJpaRepository.findByCustomerIdAndChannelOrderById(customerId, channel);
+        Instant now = clock.instant();
+        if (!enrollment.expiresAt().isAfter(now)
+                || !canCompleteEnrollment(confirmation, existingEnrollment, storedPrimary, bindingRows, now)) {
+            return Optional.empty();
+        }
+
+        byte[] installationLookup = deviceIdProtection.lookup(
+                enrollment.customerId(), enrollment.channel(), enrollment.deviceId());
+        Optional<TrustedDeviceEntity> currentBindingRow = bindingRows.stream()
+                .filter(binding -> Arrays.equals(binding.getClientDeviceIdLookup(), installationLookup))
+                .findFirst();
+        UUID currentBindingId = currentBindingRow.map(TrustedDeviceEntity::getId).orElse(null);
+        UUID expectedBindingId = enrollment.targetDeviceId() == null ? null : enrollment.targetDeviceId().value();
+        if (!Objects.equals(currentBindingId, expectedBindingId)) {
+            return Optional.empty();
+        }
+
+        List<TrustedDevice> currentBindings = bindingRows.stream().map(this::readBindingForWrite).toList();
+        Optional<TrustedDevice> currentBinding = currentBindings.stream()
+                .filter(binding -> binding.id().value().equals(currentBindingId))
+                .findFirst();
+        List<TrustedDevice> otherBindings = currentBindings.stream()
+                .filter(binding -> !binding.id().value().equals(currentBindingId))
+                .toList();
+        List<TrustedDevice> retiredByCap = devicePolicy.bindingsBeyondCap(otherBindings);
+
+        boolean renewExisting = approval && currentBinding
+                .filter(binding -> !binding.hasExpired(now) && Objects.equals(binding.publicKey(), confirmedDevice.publicKey()))
+                .isPresent();
+        int sequence = trustedDeviceAuditJpaRepository.countByCorrelationId(correlationId);
+        if (currentBinding.isPresent() && !renewExisting) {
+            TrustedDevice replacedBinding = currentBinding.get();
+            deleteBinding(replacedBinding);
+            String reason = replacedBinding.hasExpired(now) ? AUDIT_REASON_TRUST_EXPIRED : AUDIT_REASON_REINSTALL;
+            TrustedDeviceAuditEntity replacementAudit = TrustedDevicePersistenceMapper.toAudit(
+                    replacedBinding, actorDeviceIdOf(confirmation), correlationId, sequence,
+                    EVENT_REPLACED, AUDIT_CAUSE_LOGIN, reason, now, enrollment.id().value(), null);
+            trustedDeviceAuditJpaRepository.save(replacementAudit);
+            sequence++;
+        }
+
+        for (TrustedDevice retiredBinding : retiredByCap) {
+            deleteBinding(retiredBinding);
+            TrustedDeviceAuditEntity expiryAudit = TrustedDevicePersistenceMapper.toAudit(
+                    retiredBinding, actorDeviceIdOf(confirmation), correlationId, sequence,
+                    EVENT_EXPIRED, AUDIT_CAUSE_POLICY, AUDIT_REASON_DEVICE_CAP, now, enrollment.id().value(), null);
+            trustedDeviceAuditJpaRepository.save(expiryAudit);
+            sequence++;
+        }
+
+        TrustedDevice savedBinding = saveTrustedBinding(confirmedDevice, currentBindingRow, renewExisting, now);
+        PrimaryTrustedDeviceEntity primary = storedPrimary
+                .orElseGet(() -> TrustedDevicePersistenceMapper.toPrimary(savedBinding, now));
+        primary.assign(savedBinding.id().value(), now, enrollment.id().value(),
+                confirmation.faceAuthenticated(), confirmation.primaryMode());
+        primaryTrustedDeviceJpaRepository.saveAndFlush(primary);
+
+        DeviceEnrollmentEntity completedEnrollment = existingEnrollment.orElseGet(() ->
+                DeviceEnrollmentPersistenceMapper.toEntity(enrollment, confirmation.creationSessionId(), deviceIdProtection));
+        DeviceEnrollmentPersistenceMapper.apply(completedEnrollment, enrollment, now);
+        deviceEnrollmentJpaRepository.saveAndFlush(completedEnrollment);
+
+        recordTrustAudit(confirmation, savedBinding, correlationId, sequence, now);
+        return Optional.of(savedBinding);
     }
 
-    /** The device itself passed FACE (slice 5), or the primary device approved it (slice 6). */
+    private boolean canCompleteEnrollment(TrustConfirmation confirmation,
+                                          Optional<DeviceEnrollmentEntity> existingEnrollment,
+                                          Optional<PrimaryTrustedDeviceEntity> primary,
+                                          List<TrustedDeviceEntity> bindings,
+                                          Instant now) {
+        if (confirmation.creationSessionId() != null) {
+            return existingEnrollment.isEmpty();
+        }
+
+        DeviceEnrollment completed = confirmation.enrollment();
+        if (existingEnrollment.isEmpty() || primary.isEmpty() || completed.actorDeviceId() == null) {
+            return false;
+        }
+
+        DeviceEnrollmentEntity stored = existingEnrollment.get();
+        DeviceEnrollment waiting = DeviceEnrollmentPersistenceMapper.toDomain(stored, completed.deviceId());
+        UUID actorId = completed.actorDeviceId().value();
+        byte[] requesterLookup = deviceIdProtection.lookup(completed.customerId(), completed.channel(), completed.deviceId());
+        return waiting.isApproval()
+                && waiting.isAuthorized()
+                && waiting.isOpen(now)
+                && !waiting.authorizationExpired(now)
+                && waiting.version() == completed.version()
+                && Objects.equals(waiting.targetDeviceId(), completed.targetDeviceId())
+                && Objects.equals(waiting.candidateKey(), completed.candidateKey())
+                && waiting.candidateKey() != null
+                && waiting.candidateKey().publicJwk().equals(confirmation.device().publicKey())
+                && waiting.candidateKey().platform() == confirmation.device().platform()
+                && Objects.equals(waiting.authorizationTokenDigest(), completed.authorizationTokenDigest())
+                && Objects.equals(waiting.actorDeviceId(), completed.actorDeviceId())
+                && Objects.equals(waiting.actorDeviceId(), confirmation.actorDeviceId())
+                && Arrays.equals(stored.getRequesterClientDeviceIdLookup(), requesterLookup)
+                && actorId.equals(primary.get().getPrimaryDeviceId())
+                && bindings.stream()
+                        .filter(binding -> actorId.equals(binding.getId()))
+                        .anyMatch(binding -> binding.getStatus() == DeviceStatus.ACTIVE
+                                && binding.getTrustLevel() == TrustLevel.TRUSTED
+                                && now.isBefore(binding.getExpiresAt()));
+    }
+
+    private void deleteBinding(TrustedDevice binding) {
+        int deleted = trustedDeviceJpaRepository.deleteIfCurrent(binding.id().value(), binding.version());
+        if (deleted != 1) {
+            throw new OptimisticLockingFailureException("The device binding changed during trust confirmation");
+        }
+    }
+
+    private TrustedDevice saveTrustedBinding(TrustedDevice candidate,
+                                             Optional<TrustedDeviceEntity> currentBinding,
+                                             boolean renewExisting,
+                                             Instant now) {
+        if (renewExisting) {
+            TrustedDeviceEntity currentRow = currentBinding.orElseThrow();
+            TrustedDevice renewed = readBindingForWrite(currentRow).trustByApproval(now, devicePolicy);
+            TrustedDevicePersistenceMapper.apply(currentRow, renewed);
+            return readBindingForWrite(trustedDeviceJpaRepository.saveAndFlush(currentRow));
+        }
+        TrustedDeviceEntity newBindingRow = TrustedDevicePersistenceMapper.toEntity(candidate, deviceIdProtection);
+        return readBindingForWrite(trustedDeviceJpaRepository.saveAndFlush(newBindingRow));
+    }
+
+    private TrustedDevice readBindingForWrite(TrustedDeviceEntity row) {
+        return TrustedDevicePersistenceMapper.toDomain(row, deviceIdProtection)
+                .orElseThrow(() -> new RepositoryUnavailableException(new IllegalStateException("Unreadable device binding")));
+    }
+
+    private void recordTrustAudit(TrustConfirmation confirmation,
+                                  TrustedDevice savedBinding,
+                                  String correlationId,
+                                  int sequence,
+                                  Instant now) {
+        UUID enrollmentId = confirmation.enrollment().id().value();
+        UUID actorId = confirmation.actorDeviceId() == null ? savedBinding.id().value() : confirmation.actorDeviceId().value();
+        String trustReason = trustReasonOf(confirmation);
+        TrustedDeviceAuditEntity trustAudit = TrustedDevicePersistenceMapper.toAudit(
+                savedBinding, actorId, correlationId, sequence, EVENT_TRUSTED, AUDIT_CAUSE_LOGIN,
+                trustReason, now, enrollmentId, trustMetadataOf(confirmation));
+        trustedDeviceAuditJpaRepository.save(trustAudit);
+
+        TrustedDeviceAuditEntity primaryAudit = TrustedDevicePersistenceMapper.toAudit(
+                savedBinding, actorId, correlationId, sequence + 1, EVENT_PRIMARY_CHANGED, AUDIT_CAUSE_LOGIN,
+                trustReason, now, enrollmentId, null);
+        trustedDeviceAuditJpaRepository.saveAndFlush(primaryAudit);
+    }
+
+    /**
+     * The device itself passed FACE (slice 5), or the primary device approved it (slice 6).
+     */
     private static String trustReasonOf(TrustConfirmation confirmation) {
         if (confirmation.primaryMode() == PrimaryMode.OLD_DEVICE_APPROVAL) {
             return AUDIT_REASON_OLD_DEVICE_APPROVAL;
@@ -310,7 +319,9 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
         return AUDIT_REASON_MFA_FACE;
     }
 
-    /** The trust event records what proved it: the receipt digest, or the approving device. */
+    /**
+     * The trust event records what proved it: the receipt digest, or the approving device.
+     */
     private static String trustMetadataOf(TrustConfirmation confirmation) {
         if (confirmation.receiptDigest() != null) {
             return "{\"receiptDigest\":\"" + confirmation.receiptDigest() + "\"}";
@@ -321,60 +332,14 @@ public class TrustedDevicePersistenceAdapter implements TrustedDeviceRepository 
         return null;
     }
 
-    /** The approving primary device when there is one; otherwise the trusted device acted for itself. */
+    /**
+     * The approving primary device when there is one; otherwise the trusted device acted for itself.
+     */
     private static UUID actorDeviceIdOf(TrustConfirmation confirmation) {
         if (confirmation.actorDeviceId() != null) {
             return confirmation.actorDeviceId().value();
         }
         return confirmation.device().id().value();
-    }
-
-    private void expireRow(TrustedDevice expiredDevice) {
-        TrustedDeviceEntity deviceEntity = trustedDeviceJpaRepository.findById(expiredDevice.id().value()).orElseThrow();
-        TrustedDevicePersistenceMapper.apply(deviceEntity, expiredDevice);
-        trustedDeviceJpaRepository.saveAndFlush(deviceEntity);
-    }
-
-    @Override
-    public Optional<TrustedDevice> saveIfCurrent(TrustedDevice changedDevice, String correlationId) {
-        try {
-            Optional<TrustedDeviceEntity> currentDeviceEntity =
-                    trustedDeviceJpaRepository.findById(changedDevice.id().value());
-            if (currentDeviceEntity.isEmpty()) {
-                return Optional.empty();
-            }
-            TrustedDeviceEntity deviceEntity = currentDeviceEntity.get();
-
-            boolean isCurrentVersion = deviceEntity.getVersion() == changedDevice.version();
-            if (!isCurrentVersion) {
-                return Optional.empty();
-            }
-
-            // Decided before the row changes: only a live row that becomes EXPIRED gets an audit event.
-            boolean expiringNow = changedDevice.status() == DeviceStatus.EXPIRED && deviceEntity.getStatus().live();
-
-            TrustedDevicePersistenceMapper.apply(deviceEntity, changedDevice);
-            TrustedDeviceEntity savedDeviceEntity = trustedDeviceJpaRepository.saveAndFlush(deviceEntity);
-
-            if (expiringNow) {
-                int firstEventSequence = 0;
-                TrustedDeviceAuditEntity expiredAudit = TrustedDevicePersistenceMapper.toAudit(
-                        changedDevice,
-                        correlationId,
-                        firstEventSequence,
-                        EVENT_EXPIRED,
-                        AUDIT_CAUSE_POLICY,
-                        AUDIT_REASON_DEVICE_CAP,
-                        clock.instant());
-                trustedDeviceAuditJpaRepository.saveAndFlush(expiredAudit);
-            }
-
-            return TrustedDevicePersistenceMapper.toDomain(savedDeviceEntity, deviceIdProtection);
-        } catch (ObjectOptimisticLockingFailureException stale) {
-            return Optional.empty();
-        } catch (DataAccessException failure) {
-            throw new RepositoryUnavailableException(failure);
-        }
     }
 
     private static <T> T translate(Supplier<T> repositoryCall) {

@@ -9,13 +9,12 @@ import lombok.NonNull;
 /**
  * What the device routing needs after a correct password: whose login, on which channel and installation.
  * {@code deviceId} is null on WEB, which has no device trust; a MOBILE login always names its installation
- * ({@link LoginCommand}). {@code correlationId} ties the audit trail to the session about to be issued.
+ * ({@link LoginCommand}).
  */
 @Builder
 public record RouteAfterPasswordCommand(@NonNull CustomerId customerId,
                                         @NonNull Channel channel,
-                                        DeviceId deviceId,
-                                        @NonNull String correlationId) {
+                                        DeviceId deviceId) {
     public RouteAfterPasswordCommand {
         if (channel == Channel.MOBILE && deviceId == null) {
             throw new IllegalArgumentException("A mobile login names its installation");

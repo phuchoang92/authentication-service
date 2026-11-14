@@ -90,7 +90,7 @@ public final class ConfirmEnrollmentService implements ConfirmEnrollmentUseCase 
                                                 String receiptDigest) {
         AdmittedSession newDeviceSession = command.admitted();
         SessionLookup restrictedSession = restrictedSessionOf(newDeviceSession);
-        if (!sessionService.isLive(restrictedSession)) {
+        if (sessionService.isLive(restrictedSession)) {
             enrollmentTransactions.remove(transaction);
             return new ConfirmEnrollmentResult.Conflict();
         }

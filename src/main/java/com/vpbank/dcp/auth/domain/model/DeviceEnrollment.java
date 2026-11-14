@@ -17,9 +17,9 @@ import lombok.NonNull;
  * current primary device passes FACE + OTP and hands the new device a one-time authorization token).
  * FAILED and EXPIRED are terminal for the approval.
  *
- * <p>{@code deviceId} is the requesting installation; the row stores only its HMAC lookup, so the
- * caller supplies it when the aggregate is rebuilt. {@code targetDeviceId} is the device row that will
- * be trusted; {@code actorDeviceId} is the primary device that approved (approval path only). The
+ * <p>{@code deviceId} is the requesting installation. Approval keeps its protected identifier and
+ * candidate key on the enrollment. {@code targetDeviceId} pins the existing binding, if any.
+ * {@code actorDeviceId} is the primary device that approved. The
  * authorization token itself is never kept: only its SHA-256 digest, its expiry and the claim count.
  */
 @Builder(toBuilder = true)
@@ -29,6 +29,7 @@ public record DeviceEnrollment(@NonNull EnrollmentId id,
                                @NonNull DeviceId deviceId,
                                @NonNull EnrollmentPurpose purpose,
                                @NonNull EnrollmentState state,
+                               DeviceKey candidateKey,
                                TrustedDeviceId targetDeviceId,
                                TrustedDeviceId actorDeviceId,
                                String mfaTransactionId,
@@ -58,7 +59,7 @@ public record DeviceEnrollment(@NonNull EnrollmentId id,
         return new DeviceInstallation(customerId, channel, deviceId);
     }
 
-    /** Slice 6: the request waits for the primary device to approve its target row. */
+    /** Waits for approval with the key fixed for this enrollment. */
     public static DeviceEnrollment requestApproval(@NonNull ApprovalRequestStart start) {
         DeviceInstallation requester = start.requester();
         return DeviceEnrollment.builder()
@@ -68,6 +69,7 @@ public record DeviceEnrollment(@NonNull EnrollmentId id,
                 .deviceId(requester.deviceId())
                 .purpose(EnrollmentPurpose.TRUST_DEVICE_APPROVAL)
                 .state(EnrollmentState.WAITING_APPROVAL)
+                .candidateKey(start.candidateKey())
                 .targetDeviceId(start.targetDeviceId())
                 .verifyAttempts(0)
                 .authorizationAttempts(0)

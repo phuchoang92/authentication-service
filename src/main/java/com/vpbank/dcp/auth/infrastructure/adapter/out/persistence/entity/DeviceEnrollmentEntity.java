@@ -1,5 +1,6 @@
 package com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.entity;
 
+import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentPurpose;
 import com.vpbank.dcp.auth.domain.enums.EnrollmentState;
 import com.vpbank.dcp.auth.infrastructure.adapter.out.persistence.common.AuditedEntity;
@@ -63,6 +64,19 @@ public class DeviceEnrollmentEntity extends AuditedEntity {
     /** The requesting installation's lookup (slice 6); the same installation as the target. */
     @Column(name = "REQUESTER_CLIENT_DEVICE_ID_LOOKUP", columnDefinition = "BINARY(32)")
     private byte[] requesterClientDeviceIdLookup;
+
+    @Column(name = "REQUESTER_CLIENT_DEVICE_ID_CIPHERTEXT", length = 512)
+    private byte[] requesterClientDeviceIdCiphertext;
+
+    @Column(name = "REQUESTER_CLIENT_DEVICE_ID_KEY_ID", length = 64)
+    private String requesterClientDeviceIdKeyId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "CANDIDATE_PLATFORM", length = 16)
+    private DevicePlatform candidatePlatform;
+
+    @Column(name = "CANDIDATE_PUBLIC_KEY", length = 4096)
+    private String candidatePublicKey;
 
     @Column(name = "TARGET_CLIENT_DEVICE_ID_LOOKUP", columnDefinition = "BINARY(32)")
     private byte[] targetClientDeviceIdLookup;

@@ -5,6 +5,12 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.vpbank.dcp.auth.application.port.out.gateway.DeviceProofVerifier;
 import com.vpbank.dcp.auth.application.port.out.model.DeviceProofBindings;
 import com.vpbank.dcp.auth.domain.model.DeviceProof;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -16,17 +22,8 @@ import java.text.ParseException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Pattern;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The login device proof (slice 13) as a raw ML-DSA-65 signature (FIPS 204, empty context), verified with
@@ -48,13 +45,16 @@ public final class MlDsaDeviceProofVerifier implements DeviceProofVerifier {
     private static final Duration MAX_AGE = Duration.ofSeconds(MAX_AGE_SECONDS);
     private static final int PUBLIC_KEY_LENGTH = 1952;
     private static final int SIGNATURE_LENGTH = 3309;
-    /** DER SubjectPublicKeyInfo prefix the JDK reads an ML-DSA-65 public key under (OID 2.16.840.1.101.3.4.3.18). */
+    /**
+     * DER SubjectPublicKeyInfo prefix the JDK reads an ML-DSA-65 public key under (OID 2.16.840.1.101.3.4.3.18).
+     */
     private static final byte[] SPKI_PREFIX = HexFormat.of().parseHex("308207b2300b0609608648016503040312038207a100");
     private static final Set<String> JWK_MEMBERS = Set.of("alg", "kty", "pub");
     private static final Pattern BASE64URL = Pattern.compile("[A-Za-z0-9_-]+");
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
-    @NonNull private final Clock clock;
+    @NonNull
+    private final Clock clock;
 
     @Override
     public Outcome verify(String devicePublicJwk, @NonNull DeviceProof proof, @NonNull DeviceProofBindings bindings) {
@@ -89,7 +89,9 @@ public final class MlDsaDeviceProofVerifier implements DeviceProofVerifier {
         }
     }
 
-    /** The stored JWK as a JDK public key; null when it is not an ML-DSA-65 public JWK. */
+    /**
+     * The stored JWK as a JDK public key; null when it is not an ML-DSA-65 public JWK.
+     */
     private static PublicKey storedKey(String devicePublicJwk) throws GeneralSecurityException {
         Map<String, String> jwk = flatObject(devicePublicJwk);
         boolean expectedKey = jwk != null
@@ -110,7 +112,9 @@ public final class MlDsaDeviceProofVerifier implements DeviceProofVerifier {
         return KeyFactory.getInstance("ML-DSA").generatePublic(new X509EncodedKeySpec(encodedPublicKey));
     }
 
-    /** Signed already (not in the future beyond the skew) and not older than the maximum age. */
+    /**
+     * Signed already (not in the future beyond the skew) and not older than the maximum age.
+     */
     private boolean withinWindow(Instant issuedAt) {
         Instant now = clock.instant();
         boolean alreadySigned = issuedAt.minus(MAX_SKEW).isBefore(now);
@@ -118,7 +122,9 @@ public final class MlDsaDeviceProofVerifier implements DeviceProofVerifier {
         return alreadySigned && stillFresh;
     }
 
-    /** The bytes both sides sign: the fields of this login, each length-prefixed, in the contract's order. */
+    /**
+     * The bytes both sides sign: the fields of this login, each length-prefixed, in the contract's order.
+     */
     static byte[] signedBytes(DeviceProof proof, DeviceProofBindings bindings) {
         List<String> fields = List.of(
                 LABEL,
@@ -141,7 +147,9 @@ public final class MlDsaDeviceProofVerifier implements DeviceProofVerifier {
         return out.toByteArray();
     }
 
-    /** RFC 7638 thumbprint of the login's P-256 token key, as the app computes it. */
+    /**
+     * RFC 7638 thumbprint of the login's P-256 token key, as the app computes it.
+     */
     private static String tokenKeyThumbprint(String tokenEncryptionKey) {
         try {
             return ECKey.parse(tokenEncryptionKey).computeThumbprint().toString();
@@ -150,7 +158,9 @@ public final class MlDsaDeviceProofVerifier implements DeviceProofVerifier {
         }
     }
 
-    /** A JSON object whose members are all strings; null for anything else. */
+    /**
+     * A JSON object whose members are all strings; null for anything else.
+     */
     private static Map<String, String> flatObject(String json) {
         JsonNode node;
         try {

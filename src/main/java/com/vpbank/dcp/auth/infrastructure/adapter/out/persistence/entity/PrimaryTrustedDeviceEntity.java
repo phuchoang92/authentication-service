@@ -60,6 +60,10 @@ public class PrimaryTrustedDeviceEntity extends AuditedEntity {
         this.primaryMode = mode;
     }
 
+    public void clear() {
+        assign(null, null, null, false, null);
+    }
+
     /** Composite key. JPA needs value equality on an embedded ID, written out so no proxy surprises hide in it. */
     @Embeddable
     @Getter

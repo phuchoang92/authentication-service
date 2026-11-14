@@ -4,8 +4,10 @@ import com.vpbank.dcp.auth.application.port.out.model.TrustConfirmation;
 import com.vpbank.dcp.auth.domain.enums.Channel;
 import com.vpbank.dcp.auth.domain.model.CustomerId;
 import com.vpbank.dcp.auth.domain.model.DeviceId;
+import com.vpbank.dcp.auth.domain.model.DeviceInstallation;
 import com.vpbank.dcp.auth.domain.model.TrustedDevice;
 import com.vpbank.dcp.auth.domain.model.TrustedDeviceId;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,18 +18,23 @@ import java.util.Optional;
  */
 public interface TrustedDeviceRepository {
 
-    /** The live row of this installation, whatever its status. */
+    /** The current binding of this installation. The trust deadline is checked by the caller. */
     Optional<TrustedDevice> findLive(CustomerId customerId, Channel channel, DeviceId deviceId);
 
-    /** Every live row of the customer on the channel (the device list). */
+    /** Every current binding of the customer on the channel. */
     List<TrustedDevice> findLive(CustomerId customerId, Channel channel);
 
     Optional<TrustedDeviceId> findPrimary(CustomerId customerId, Channel channel);
 
+    /** The live row of this installation if it is primary. The caller still checks trust and expiry. */
+    Optional<TrustedDevice> findLivePrimary(DeviceInstallation installation);
+
+    /** Updates only login metadata; false when the version or eligible state has changed, or the time is not newer. */
+    boolean recordLoginIfCurrent(TrustedDeviceId trustedDeviceId, long expectedVersion, Instant loggedInAt);
+
     /**
-     * The enrollment flow's commit (DD 20 §4, one transaction): replaced and capped rows become EXPIRED,
-     * the new row is inserted, the primary row points at it (FACE_CONFIRMED, enrollment ID, face flag),
-     * the enrollment is COMPLETED and the audit events are written with the enrollment ID.
+     * Validates the enrollment against its pinned binding and retires any replaced or capped bindings.
+     * Saves trust, the primary pointer, the completed enrollment and its audit events in one transaction.
      *
      * <p>Empty, with nothing written, when another commit got there first: the primary enrollment's row
      * already exists (it is inserted only here), the approval's row is no longer at the version the claim
@@ -35,24 +42,5 @@ public interface TrustedDeviceRepository {
      * trusted device.
      */
     Optional<TrustedDevice> trustConfirmed(TrustConfirmation confirmation, String correlationId);
-
-    /**
-     * Slice 6: a new installation waits for approval as a PENDING live row, written with one audit event.
-     * A lost race on the one-live-row rule rolls everything back and answers {@code InstallationAlreadyLive};
-     * the caller re-reads the live row.
-     */
-    RegisterPendingResult registerPending(TrustedDevice pendingDevice, String correlationId);
-
-    /** How many installations of this customer on this channel are waiting for approval. */
-    int countPending(CustomerId customerId, Channel channel);
-
-    /** Saves a change only if the stored version is still {@code changed.version()}; returns the stored row. */
-    Optional<TrustedDevice> saveIfCurrent(TrustedDevice changed, String correlationId);
-
-    sealed interface RegisterPendingResult {
-        record Registered(TrustedDevice device) implements RegisterPendingResult { }
-
-        record InstallationAlreadyLive() implements RegisterPendingResult { }
-    }
 
 }

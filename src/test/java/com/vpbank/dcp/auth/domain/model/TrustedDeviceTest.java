@@ -8,7 +8,6 @@ import com.vpbank.dcp.auth.domain.enums.DevicePlatform;
 import com.vpbank.dcp.auth.domain.enums.DeviceStatus;
 import com.vpbank.dcp.auth.domain.enums.SessionStatus;
 import com.vpbank.dcp.auth.domain.enums.TrustLevel;
-import com.vpbank.dcp.auth.domain.exception.DeviceStateException;
 import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -17,8 +16,6 @@ class TrustedDeviceTest {
     private static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
     private static final DeviceInstallation PHONE =
             new DeviceInstallation(new CustomerId("90359"), Channel.MOBILE, new DeviceId("dev-1"));
-    private static final DeviceInstallation WATCH =
-            new DeviceInstallation(new CustomerId("90359"), Channel.MOBILE, new DeviceId("watch-3"));
     private final TrustedDevice device = DomainFixtures.trustedDevice(PHONE, DevicePlatform.ANDROID, null, T0);
 
     @Test
@@ -32,40 +29,26 @@ class TrustedDeviceTest {
     }
 
     @Test
-    void aPendingRowIsLiveButNotTrustedUntilTheApprovalIsClaimed() {
-        Instant now = Instant.parse("2026-10-25T10:00:00Z");
-        NewDevice watchRow = DomainFixtures.newDevice(WATCH, DevicePlatform.IOS, "{watch-key}", now);
-        TrustedDevice pending = TrustedDevice.pending(watchRow, Duration.ofMinutes(10));
-        assertThat(pending.isPending()).isTrue();
-        assertThat(pending.status().live()).isTrue();
-        assertThat(pending.isTrusted(now)).isFalse();
-        assertThat(pending.trustLevel()).isEqualTo(TrustLevel.NONE);
-        assertThat(pending.trustedAt()).isNull();
-        assertThat(pending.expiresAt()).isEqualTo(now.plus(Duration.ofMinutes(10)));
-
-        TrustedDevice approved = pending.trustByApproval(now.plusSeconds(90), DevicePolicy.standard());
-        assertThat(approved.id()).isEqualTo(pending.id());
-        assertThat(approved.isTrusted(now.plusSeconds(90))).isTrue();
-        assertThat(approved.trustedAt()).isEqualTo(now.plusSeconds(90));
-        assertThat(approved.expiresAt()).isEqualTo(now.plusSeconds(90).plus(Duration.ofDays(180)));
-        assertThat(approved.publicKey()).isEqualTo("{watch-key}");
-        assertThatThrownBy(() -> approved.expire().trustByApproval(now, DevicePolicy.standard()))
-                .isInstanceOf(DeviceStateException.class);
+    void approvalCanRenewAnExistingBindingOnlyBeforeItExpires() {
+        TrustedDevice keyed = device.toBuilder().publicKey("{phone-key}").build();
+        Instant approvedAt = T0.plusSeconds(90);
+        TrustedDevice renewed = keyed.trustByApproval(approvedAt, DevicePolicy.standard());
+        assertThat(renewed.id()).isEqualTo(keyed.id());
+        assertThat(renewed.isTrusted(approvedAt)).isTrue();
+        assertThat(renewed.expiresAt()).isEqualTo(approvedAt.plus(Duration.ofDays(180)));
+        assertThat(renewed.publicKey()).isEqualTo("{phone-key}");
+        assertThatThrownBy(() -> keyed.trustByApproval(keyed.expiresAt(), DevicePolicy.standard()))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void loginUpdatesDisplayDataOnlyAndExpiryMakesTheRowHistory() {
+    void loginUpdatesDisplayDataOnlyAndExpiryUsesTheDeadline() {
         TrustedDevice later = device.recordLogin(T0.plusSeconds(60));
         assertThat(later.lastLoginAt()).isEqualTo(T0.plusSeconds(60));
         assertThat(later.expiresAt()).isEqualTo(device.expiresAt());
         assertThat(later.version()).isEqualTo(device.version());
-
-        TrustedDevice expired = device.expire();
-        assertThat(expired.status()).isEqualTo(DeviceStatus.EXPIRED);
-        assertThat(expired.status().live()).isFalse();
-        assertThat(expired.isTrusted(T0)).isFalse();
-        assertThatThrownBy(expired::expire).isInstanceOf(DeviceStateException.class);
-        assertThatThrownBy(() -> expired.recordLogin(T0)).isInstanceOf(DeviceStateException.class);
+        assertThat(later.hasExpired(later.expiresAt())).isTrue();
+        assertThat(later.isTrusted(later.expiresAt())).isFalse();
     }
 
     @Test

@@ -11,11 +11,18 @@ import lombok.NonNull;
  * claims and the verifier refuses a proof made for any other login. {@code tokenEncryptionKey} is the
  * app's public JWK text; the proof carries its thumbprint.
  */
-public record DeviceProofBindings(@NonNull UserName userName,
-                                  @NonNull Channel channel,
-                                  @NonNull DeviceId deviceId,
-                                  @NonNull DevicePlatform platform,
-                                  @NonNull String tokenEncryptionKey) {
+public record DeviceProofBindings(
+        @NonNull
+        UserName userName,
+        @NonNull
+        Channel channel,
+        @NonNull
+        DeviceId deviceId,
+        @NonNull
+        DevicePlatform platform,
+        @NonNull
+        String tokenEncryptionKey) {
+
     @Override
     public String toString() {
         return "DeviceProofBindings[userName=" + userName + ", channel=" + channel + ", deviceId=" + deviceId + "]";

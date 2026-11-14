@@ -103,8 +103,8 @@ server key Ksrv and a 32-byte challenge sealed to the device key. The app opens 
 `{enrollmentId, challenge}` to Ksrv for `verify` (3 attempts, counted before the check; the last
 wrong answer fails the enrollment and ends the session), which opens a FACE transaction at the MFA
 service. `confirm` reads the signed receipt (ES256 from a pinned key, exact claim set) and on PASSED
-writes, in one SQL transaction, the new trusted row (replacing a previous row of the same
-installation, expiring the oldest beyond the cap), the primary row (`FACE_CONFIRMED`), the
+writes, in one SQL transaction, the new trusted row after deleting the previous binding for
+that installation and retiring bindings beyond the cap, the primary row (`FACE_CONFIRMED`), the
 enrollment row (inserted `COMPLETED`) and the audit trail; only then are the Valkey record removed and the
 restricted session consumed, and a new ACTIVE session is sealed to the key sent at confirm. A database failure at
 the commit changes nothing, so the app calls confirm again; a second commit of the same enrollment writes nothing
@@ -117,16 +117,23 @@ the device key, the FACE deadline), so an app that lost a response calls the ste
 no new Ksrv or challenge, no attempt counted, no second MFA transaction. The MFA contract is an assumption until the MFA team confirms it.
 
 **Approval by the primary device (phase 4, second path, slice 6):** a new installation on a restricted
-session calls `request` with its public key; Auth keeps a `PENDING` device row (not trusted, at most 3
-waiting per customer and channel) and an approval request that belongs to the device and waits 24 hours (slice 11:
+session calls `request` with its public key. Auth keeps the candidate key, platform, and protected installation
+ID on the approval enrollment. At most 3 open requests wait per customer and channel by default, each for up to
+24 hours (slice 11:
 a later login of the same device sees the same request, polls it and may claim it). The customer opens the
 current primary device, lists the pending requests, approves one (FACE + OTP at the MFA service) and
 receives a one-time 32-byte token, valid 180 s, which the app shows as a QR. The new device scans it and
 calls `claim` from a restricted session of that device: attempts are counted before the digest check (5, then the
-request fails and the session ends), and on success one SQL transaction makes the pending row trusted and the
-customer's primary (`PRIMARY_MODE = OLD_DEVICE_APPROVAL`), expires the oldest device beyond the cap,
+request fails and the session ends), and on success one SQL transaction saves the trusted binding and makes it
+the customer's primary (`PRIMARY_MODE = OLD_DEVICE_APPROVAL`), retires bindings beyond the cap,
 completes the request and writes the audit trail with the approving device as actor. The old primary
 stays trusted. Auth stores only the token's SHA-256. Push notification to the primary is a follow-up.
+
+`TRUSTED_DEVICE` has one binding per customer, channel and installation lookup. Login reads the
+binding and primary pointer in one query and checks `EXPIRES_AT`. The revoke persistence operation
+stores a snapshot in `TRUSTED_DEVICE_REVOKE` and records the action in `TRUSTED_DEVICE_AUDIT`.
+Revoking already-issued device sessions requires the online guard described in the
+[revocation contract](../docs/DD/target/flows/12-logout-and-revocation.md).
 
 **Lockout (phase 2):** consecutive password failures on one identity escalate. From the first failure on
 (since 2026-11-09; was 2) a CAPTCHA is required: the `401 INVALID_CREDENTIALS` of that failure, and of every

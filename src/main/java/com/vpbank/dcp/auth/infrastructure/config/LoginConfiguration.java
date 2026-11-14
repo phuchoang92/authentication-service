@@ -285,9 +285,8 @@ public class LoginConfiguration {
     /** The primary device's side: list the waiting devices. */
     @Bean
     ListPendingDevicesService listPendingDevicesService(TrustedDeviceService trustedDeviceService,
-                                                        ApprovalRequests approvalRequests,
-                                                        TrustedDeviceRepository trustedDeviceRepository) {
-        return new ListPendingDevicesService(trustedDeviceService, approvalRequests, trustedDeviceRepository);
+                                                        ApprovalRequests approvalRequests) {
+        return new ListPendingDevicesService(trustedDeviceService, approvalRequests);
     }
 
     /** The primary device's side: approve one request (FACE + OTP). */
